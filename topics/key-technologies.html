@@ -1,0 +1,226 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Key Technologies — SD Prep</title>
+  <link rel="stylesheet" href="../assets/style.css">
+</head>
+<body>
+  <aside id="sidebar"></aside>
+  <main>
+
+    <header class="page-head">
+      <div class="pill">Foundations</div>
+      <h1>Key Technologies</h1>
+      <p class="sub">When to reach for SQL, NoSQL, Redis, Kafka, S3, CDN, and a load balancer — with the justifications interviewers expect.</p>
+      <div class="meta-row">
+        <span class="badge green">15 min read</span>
+        <span class="badge blue">Reference</span>
+      </div>
+    </header>
+
+    <div class="flash-card">
+      <div class="flash-label">Decision rules (memorize these)</div>
+      <ul>
+        <li>SQL if: relations matter, ACID required, schema is stable, &lt;10k writes/sec</li>
+        <li>NoSQL if: high write throughput, flexible schema, key-value or document access pattern</li>
+        <li>Redis if: sub-millisecond reads, leaderboard, rate limiting, session, pub/sub</li>
+        <li>Kafka if: async fan-out, event log, decoupling producer/consumer, &gt;100k events/sec</li>
+        <li>S3 if: storing binary blobs &gt;100KB — never store images/video in a relational DB</li>
+      </ul>
+    </div>
+
+    <section id="mental-model">
+      <h2>Mental model</h2>
+      <div class="analogy-block">
+        Technologies are tools. The mistake is reaching for a tool because you know it — not because the problem needs it. Every choice must be followed by "because the access pattern is X and the tradeoff I'm accepting is Y."
+      </div>
+    </section>
+
+    <section id="sql-vs-nosql">
+      <h2>SQL vs NoSQL</h2>
+      <div class="compare-grid">
+        <div class="compare-card good">
+          <div class="compare-label">SQL (PostgreSQL, MySQL)</div>
+          <ul>
+            <li>Structured, relational data with joins</li>
+            <li>ACID transactions — critical for financial or inventory data</li>
+            <li>Schema is known upfront and stable</li>
+            <li>Complex queries (aggregations, filtering)</li>
+            <li>Scales well to ~10k writes/sec with read replicas</li>
+          </ul>
+        </div>
+        <div class="compare-card bad">
+          <div class="compare-label">NoSQL (DynamoDB, Cassandra, MongoDB)</div>
+          <ul>
+            <li>High write throughput (&gt;10k writes/sec)</li>
+            <li>Flexible or evolving schema</li>
+            <li>Simple key-value or document access pattern</li>
+            <li>Horizontal sharding required from day one</li>
+            <li>Eventual consistency is acceptable</li>
+          </ul>
+        </div>
+      </div>
+      <div class="callout warn">Common trap: using NoSQL because it sounds "more scalable." SQL scales further than most systems need. Justify the choice with a specific scale number or access pattern requirement.</div>
+    </section>
+
+    <section id="core-concepts">
+      <h2>Technology decision matrix</h2>
+      <table class="def-table">
+        <thead><tr><th>Technology</th><th>Use when</th><th>Don't use when</th></tr></thead>
+        <tbody>
+          <tr><td>Redis</td><td>Sub-ms reads, session storage, rate limiting, leaderboards, pub/sub</td><td>Data must survive restarts without persistence config; data &gt; RAM</td></tr>
+          <tr><td>Kafka</td><td>Async fan-out, event streaming, decoupling services, audit log, &gt;100k events/sec</td><td>Simple task queues (use SQS/RabbitMQ); request-response patterns</td></tr>
+          <tr><td>Cassandra</td><td>Write-heavy, time-series, high availability across regions, no complex queries</td><td>Complex joins; strong consistency required; ad-hoc analytics</td></tr>
+          <tr><td>Elasticsearch</td><td>Full-text search, fuzzy matching, autocomplete, log analytics</td><td>Primary data store — always sync from a source of truth DB</td></tr>
+          <tr><td>S3 / Object storage</td><td>Binary blobs (images, video, files), backups, data lake</td><td>Data you need to query — use Athena or load to a warehouse</td></tr>
+          <tr><td>CDN</td><td>Static assets, globally distributed reads, video streaming, API responses with low TTL</td><td>Personalized or dynamic content that can't be cached</td></tr>
+          <tr><td>Load balancer</td><td>Distributing traffic across multiple service instances — always needed past 1 instance</td><td>Single-instance internal services</td></tr>
+        </tbody>
+      </table>
+    </section>
+
+    <section id="how-it-works">
+      <h2>Redis — what it actually does</h2>
+      <div class="flow">
+        <div class="flow-step">Client request</div>
+        <div class="flow-arrow">→</div>
+        <div class="flow-step highlight">Redis check (1ms)</div>
+        <div class="flow-arrow">→</div>
+        <div class="flow-step">Hit: return data</div>
+      </div>
+      <div class="flow" style="margin-top:6px">
+        <div class="flow-step">Cache miss</div>
+        <div class="flow-arrow">→</div>
+        <div class="flow-step">DB read (10ms)</div>
+        <div class="flow-arrow">→</div>
+        <div class="flow-step highlight">Write to Redis</div>
+        <div class="flow-arrow">→</div>
+        <div class="flow-step">Return data</div>
+      </div>
+      <table class="def-table" style="margin-top:1rem">
+        <thead><tr><th>Redis data structure</th><th>Interview use case</th></tr></thead>
+        <tbody>
+          <tr><td>String / KV</td><td>Session token → user_id, short_code → long_url</td></tr>
+          <tr><td>Sorted Set (ZSET)</td><td>Leaderboard, rate limiter (score = timestamp)</td></tr>
+          <tr><td>Hash</td><td>User profile object with multiple fields</td></tr>
+          <tr><td>Set</td><td>Unique visitors, blocked user IDs</td></tr>
+          <tr><td>List</td><td>Notification queue, recent activity feed</td></tr>
+          <tr><td>HyperLogLog</td><td>Approximate unique count (UV, DAU) at low memory cost</td></tr>
+        </tbody>
+      </table>
+    </section>
+
+    <section id="kafka-pattern">
+      <h2>Kafka — when and why</h2>
+      <div class="flow">
+        <div class="flow-step highlight">Producer service</div>
+        <div class="flow-arrow">→</div>
+        <div class="flow-step">Kafka topic</div>
+        <div class="flow-arrow">→</div>
+        <div class="flow-step">Consumer group A (email)</div>
+      </div>
+      <div class="flow" style="margin-top:4px; padding-left:196px">
+        <div class="flow-arrow" style="opacity:0">→</div>
+        <div class="flow-arrow" style="opacity:0">→</div>
+        <div class="flow-step">Consumer group B (push notif)</div>
+      </div>
+      <ol class="flow-steps-list">
+        <li><span>Fan-out:</span> One event (user sign-up) triggers multiple consumers — email, analytics, fraud check — without the producer knowing about them</li>
+        <li><span>Durability:</span> Messages persisted to disk — consumers can replay from any offset</li>
+        <li><span>Decoupling:</span> Producer and consumer scale independently; consumer can be slow without blocking producer</li>
+        <li><span>Ordering:</span> Guaranteed within a partition — partition by user_id for per-user ordering</li>
+      </ol>
+      <div class="callout info">Use Kafka when you need fan-out, replay, or &gt;100k events/sec. For simple point-to-point task queues (&lt;10k/sec), SQS or RabbitMQ is simpler and sufficient.</div>
+    </section>
+
+    <section id="tradeoffs">
+      <h2>CDN — when it changes your design</h2>
+      <div class="compare-grid">
+        <div class="compare-card good">
+          <div class="compare-label">What CDN solves</div>
+          <ul>
+            <li>Serves static assets from edge nodes (~5ms vs ~100ms)</li>
+            <li>Absorbs read traffic — origin sees only cache misses</li>
+            <li>Global availability without multi-region origin infra</li>
+            <li>DDoS absorption at the edge</li>
+            <li>HTTP redirect caching (URL shortener use case)</li>
+          </ul>
+        </div>
+        <div class="compare-card bad">
+          <div class="compare-label">CDN limitations</div>
+          <ul>
+            <li>Cache invalidation on update is slow or requires purge API</li>
+            <li>Personalized content can't be cached</li>
+            <li>Short TTL reduces cache hit rate</li>
+            <li>Cost scales with egress bandwidth</li>
+            <li>Not a substitute for proper DB or service design</li>
+          </ul>
+        </div>
+      </div>
+    </section>
+
+    <section id="when-to-use">
+      <h2>Choosing the right DB engine</h2>
+      <div class="scenario-row use">
+        <span class="scenario-icon">✓</span>
+        <div class="scenario-text"><strong>PostgreSQL:</strong> Default choice. Handles 99% of problems. JSONB for flexible fields. Read replicas for scale. Vertical scaling goes far.</div>
+      </div>
+      <div class="scenario-row use">
+        <span class="scenario-icon">✓</span>
+        <div class="scenario-text"><strong>DynamoDB / Cassandra:</strong> When you need single-digit ms latency at millions of writes/sec. Access pattern must be key-value or range scan — no joins.</div>
+      </div>
+      <div class="scenario-row watch">
+        <span class="scenario-icon">⚠</span>
+        <div class="scenario-text"><strong>MongoDB:</strong> Good for document workloads with nested structure. Watch out: default eventual consistency and non-atomic multi-document operations.</div>
+      </div>
+      <div class="scenario-row avoid">
+        <span class="scenario-icon">✗</span>
+        <div class="scenario-text"><strong>Never store images or video in a relational DB.</strong> Use S3 + CDN. Store only the S3 key/URL in the DB.</div>
+      </div>
+    </section>
+
+    <section id="interview-moves">
+      <h2>Interview moves</h2>
+      <ul class="moves-list">
+        <li><span class="move-num">01</span><div><strong>"I'd use PostgreSQL here — the data is relational, schema is stable, and we're at ~1k writes/sec which it handles easily"</strong> — default to SQL and justify if you deviate</div></li>
+        <li><span class="move-num">02</span><div><strong>"For the hot read path I'd put Redis in front — this cuts latency from ~10ms to ~1ms for the top 20% of keys that get 80% of traffic"</strong> — always quantify the cache benefit</div></li>
+        <li><span class="move-num">03</span><div><strong>"The user upload goes to S3 — I'd never store binary blobs in Postgres. The DB stores only the S3 key."</strong> — say this proactively; missing it is a common junior signal</div></li>
+        <li><span class="move-num">04</span><div><strong>"I'd use Kafka here for fan-out — when a user posts, we need to notify their followers, update search index, and fire analytics without coupling the write path to all that work"</strong> — name the specific reason</div></li>
+        <li><span class="move-num">05</span><div><strong>"For global latency I'd put a CDN in front of the redirect service — edge nodes serve most requests in &lt;10ms regardless of user location"</strong> — CDN is often overlooked; mention it proactively for read-heavy systems</div></li>
+      </ul>
+    </section>
+
+    <section id="follow-ups">
+      <h2>Common follow-up questions</h2>
+      <div class="qa-block">
+        <div class="qa-q">When would you use Cassandra over DynamoDB?</div>
+        <div class="qa-a">Cassandra when you need multi-region active-active writes (LWT for lightweight transactions) or when you want to avoid vendor lock-in. DynamoDB when you're on AWS and want zero ops overhead. Performance is comparable.</div>
+      </div>
+      <div class="qa-block">
+        <div class="qa-q">What's a write-through vs write-behind cache?</div>
+        <div class="qa-a">Write-through: write to cache and DB together — consistent but higher write latency. Write-behind (write-back): write to cache, DB updated asynchronously — lower latency but risk of data loss on crash.</div>
+      </div>
+      <div class="qa-block">
+        <div class="qa-q">What happens if Redis goes down?</div>
+        <div class="qa-a">Read traffic falls back to DB — latency increases but system stays up. Implement a circuit breaker on the cache layer. Redis Cluster with replication gives HA. Redis Sentinel for automatic failover.</div>
+      </div>
+      <div class="qa-block">
+        <div class="qa-q">How does Kafka guarantee exactly-once delivery?</div>
+        <div class="qa-a">Idempotent producers (dedup by sequence number) + transactional API for atomic produce + consumer offset commits. At-least-once is the practical default — make your consumers idempotent instead.</div>
+      </div>
+      <div class="qa-block">
+        <div class="qa-q">When would you use a search index like Elasticsearch vs a DB full-text search?</div>
+        <div class="qa-a">DB full-text (Postgres tsvector) works fine up to ~10M rows with infrequent queries. Elasticsearch for: fuzzy matching, autocomplete, faceted search, &gt;10M docs, or &gt;100 search QPS. Never use ES as your primary store.</div>
+      </div>
+      <div class="qa-block">
+        <div class="qa-q">What's the difference between a message queue and an event log?</div>
+        <div class="qa-a">Queue (SQS, RabbitMQ): messages consumed and deleted — each message processed once. Event log (Kafka): messages persisted, consumers maintain their own offset — any consumer can replay from any point in history.</div>
+      </div>
+    </section>
+
+  </main>
+  <script src="../assets/nav.js"></script>
+</body>
+</html>

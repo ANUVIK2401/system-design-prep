@@ -1,0 +1,165 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Introduction — SD Prep</title>
+  <link rel="stylesheet" href="../assets/style.css">
+</head>
+<body>
+  <aside id="sidebar"></aside>
+  <main>
+
+    <header class="page-head">
+      <div class="pill">Foundations</div>
+      <h1>What is a System Design Interview</h1>
+      <p class="sub">What interviewers are actually evaluating — and what separates a pass from a hire.</p>
+      <div class="meta-row">
+        <span class="badge green">10 min read</span>
+        <span class="badge blue">Start here</span>
+      </div>
+    </header>
+
+    <div class="flash-card">
+      <div class="flash-label">The interviewer's mental checklist</div>
+      <ul>
+        <li>Can you drive the conversation without being prompted at every step?</li>
+        <li>Do you clarify before designing — or do you jump straight to solutions?</li>
+        <li>Can you make decisions under ambiguity and defend them with tradeoffs?</li>
+        <li>Do you know what breaks at scale, and how to fix it?</li>
+        <li>Are you someone this team would trust to own a complex system?</li>
+      </ul>
+    </div>
+
+    <section id="mental-model">
+      <h2>Mental model</h2>
+      <div class="analogy-block">
+        A system design interview is not a quiz — it's a 45-minute simulation of your first week on the job, where your manager says "we need to build X" and watches how you think.
+      </div>
+      <p style="font-size:13px; color:#bbb; line-height:1.7">
+        There is no single correct answer. What's being evaluated is your <strong style="color:#f0f0f0">engineering judgment</strong>: how you break down a vague problem, what questions you ask, which tradeoffs you reason about, and whether you can communicate a coherent design under time pressure.
+      </p>
+    </section>
+
+    <section id="core-concepts">
+      <h2>What you're actually scored on</h2>
+      <table class="def-table">
+        <thead><tr><th>Signal</th><th>What it looks like</th></tr></thead>
+        <tbody>
+          <tr><td>Problem clarity</td><td>You ask the right scoping questions before touching the whiteboard</td></tr>
+          <tr><td>Structured thinking</td><td>You follow a consistent framework — not a stream of consciousness</td></tr>
+          <tr><td>Scale awareness</td><td>You reason about QPS, storage, and latency before choosing components</td></tr>
+          <tr><td>Tradeoff fluency</td><td>You don't just name a technology — you say why and what it costs</td></tr>
+          <tr><td>Depth on demand</td><td>When the interviewer probes a component, you can go 2 levels deeper</td></tr>
+          <tr><td>Communication</td><td>You narrate your thinking out loud so the interviewer follows along</td></tr>
+        </tbody>
+      </table>
+    </section>
+
+    <section id="how-it-works">
+      <h2>Interview structure</h2>
+      <div class="flow">
+        <div class="flow-step highlight">Clarify (5 min)</div>
+        <div class="flow-arrow">→</div>
+        <div class="flow-step">Estimate (3 min)</div>
+        <div class="flow-arrow">→</div>
+        <div class="flow-step">High-level design (15 min)</div>
+        <div class="flow-arrow">→</div>
+        <div class="flow-step highlight">Deep dive (15 min)</div>
+        <div class="flow-arrow">→</div>
+        <div class="flow-step">Wrap-up (5 min)</div>
+      </div>
+      <ol class="flow-steps-list">
+        <li><span>Clarify:</span> Nail down functional requirements, users, scale, and what you're NOT building</li>
+        <li><span>Estimate:</span> Back-of-envelope QPS, storage, and bandwidth — drives your component choices</li>
+        <li><span>High-level design:</span> Core components, APIs, data model, data flow</li>
+        <li><span>Deep dive:</span> Interviewer picks the hardest part; you go deep on bottlenecks and failure modes</li>
+        <li><span>Wrap-up:</span> Summarize tradeoffs, mention what you'd improve with more time</li>
+      </ol>
+    </section>
+
+    <section id="tradeoffs">
+      <h2>What trips candidates up</h2>
+      <div class="compare-grid">
+        <div class="compare-card good">
+          <div class="compare-label">Strong candidates</div>
+          <ul>
+            <li>Ask about scale before drawing anything</li>
+            <li>Explicitly state why they chose a technology</li>
+            <li>Surface tradeoffs without being asked</li>
+            <li>Drive the interview — don't wait for prompts</li>
+            <li>Say "I'd handle X like this, but there's a cost..."</li>
+          </ul>
+        </div>
+        <div class="compare-card bad">
+          <div class="compare-label">Common failure modes</div>
+          <ul>
+            <li>Jump to drawing components before clarifying scope</li>
+            <li>Name-drop tech without justifying the choice</li>
+            <li>Only talk about happy-path flows</li>
+            <li>Wait to be asked before mentioning a problem</li>
+            <li>Treat it like a coding problem with one right answer</li>
+          </ul>
+        </div>
+      </div>
+    </section>
+
+    <section id="when-to-use">
+      <h2>Interview formats by company</h2>
+      <div class="scenario-row use">
+        <span class="scenario-icon">✓</span>
+        <div class="scenario-text"><strong>FAANG / MANGA (Google, Meta, Apple, Amazon, Netflix):</strong> 45-60 min, one problem, emphasis on scale and deep dives. Expect follow-ups on every decision.</div>
+      </div>
+      <div class="scenario-row watch">
+        <span class="scenario-icon">⚠</span>
+        <div class="scenario-text"><strong>Mid-size (Stripe, Airbnb, Uber, Databricks):</strong> Often more focused — may be a specific sub-problem. More emphasis on API design and data modeling.</div>
+      </div>
+      <div class="scenario-row watch">
+        <span class="scenario-icon">⚠</span>
+        <div class="scenario-text"><strong>Nvidia / Apple ML roles:</strong> May include ML system design (model serving, inference pipeline, feature store). Same framework, different components.</div>
+      </div>
+    </section>
+
+    <section id="interview-moves">
+      <h2>Interview moves</h2>
+      <ul class="moves-list">
+        <li><span class="move-num">01</span><div><strong>"Before I start, let me clarify a few things"</strong> — opens every interview; signals structured thinking immediately</div></li>
+        <li><span class="move-num">02</span><div><strong>"I'll assume 10M DAU unless you'd like a different scale"</strong> — shows you think in numbers, gives the interviewer a chance to redirect</div></li>
+        <li><span class="move-num">03</span><div><strong>"I'm going to start with the high-level and then we can double-click on any component"</strong> — frames the interview, shows you can manage time</div></li>
+        <li><span class="move-num">04</span><div><strong>"I chose X here. The tradeoff is Y — I'm comfortable with that given our scale"</strong> — every technology choice should sound like this</div></li>
+        <li><span class="move-num">05</span><div><strong>"The bottleneck here is [X]. Here's how I'd address it..."</strong> — say this before the interviewer has to ask; shows you see failure modes proactively</div></li>
+      </ul>
+    </section>
+
+    <section id="follow-ups">
+      <h2>Common follow-up questions</h2>
+      <div class="qa-block">
+        <div class="qa-q">How is a system design interview different from a coding interview?</div>
+        <div class="qa-a">No single correct answer. It tests ambiguity handling, breadth of knowledge, and communication — not algorithmic precision. You're evaluated on process and judgment, not output.</div>
+      </div>
+      <div class="qa-block">
+        <div class="qa-q">What if I don't know a specific technology?</div>
+        <div class="qa-a">Say so, and reason from first principles: "I haven't used Kafka directly, but I'd think about this as a durable message queue — here's what I'd need from it..." Interviewers care more about your thinking than your memorized tool list.</div>
+      </div>
+      <div class="qa-block">
+        <div class="qa-q">How much should I draw vs talk?</div>
+        <div class="qa-a">Draw the high-level architecture diagram early — it anchors the conversation. Narrate while drawing. Use the diagram to point to components when you deep-dive. Don't draw every detail upfront.</div>
+      </div>
+      <div class="qa-block">
+        <div class="qa-q">What if the interviewer keeps redirecting me?</div>
+        <div class="qa-a">They're telling you what they care about. Pivot immediately, go deep, then say "should I continue here or move on to X?" They're testing whether you can follow their lead.</div>
+      </div>
+      <div class="qa-block">
+        <div class="qa-q">How long should I spend on requirements?</div>
+        <div class="qa-a">5 minutes max. Cover: core features (2-3), excluded features (1-2), users, scale, and SLA. Then start designing. Over-spending on requirements is a red flag for time management.</div>
+      </div>
+      <div class="qa-block">
+        <div class="qa-q">Is there a minimum bar for knowing distributed systems theory?</div>
+        <div class="qa-a">Yes: CAP theorem, eventual vs strong consistency, and common failure modes. You don't need to cite papers — you need to reason correctly about tradeoffs when they come up.</div>
+      </div>
+    </section>
+
+  </main>
+  <script src="../assets/nav.js"></script>
+</body>
+</html>

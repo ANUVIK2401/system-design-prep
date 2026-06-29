@@ -1,0 +1,135 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Question Breakdowns — SD Prep</title>
+  <link rel="stylesheet" href="../assets/style.css">
+</head>
+<body>
+  <aside id="sidebar"></aside>
+  <main>
+
+    <header class="page-head">
+      <div class="pill">Questions</div>
+      <h1>Question Breakdowns</h1>
+      <p class="sub">Master 10-15 canonical questions deeply. Each page covers the full 5-phase framework with interview-ready answers.</p>
+      <div class="meta-row">
+        <span class="badge green">Add via Claude Code</span>
+        <span class="badge blue">Paste screenshot to add</span>
+      </div>
+    </header>
+
+    <div class="flash-card">
+      <div class="flash-label">Study order</div>
+      <ul>
+        <li>Start with Tier 1 — URL Shortener, Rate Limiter, Notification System</li>
+        <li>One question per 2 days — depth beats breadth</li>
+        <li>Practice delivery out loud with a timer after reading each page</li>
+        <li>Add new pages by saying "Add [topic]" in Claude Code + paste a screenshot</li>
+      </ul>
+    </div>
+
+    <section id="tier1">
+      <h2>Tier 1 — Always asked</h2>
+      <div class="topic-grid">
+        <a class="topic-card" href="url-shortener.html">
+          <div class="card-cat">Classic</div>
+          <h3>URL Shortener</h3>
+          <p>Hash generation, redirect service, cache layer, analytics decoupling</p>
+          <div class="card-meta">
+            <span class="badge green">30-40 min</span>
+            <span class="badge blue">Easy</span>
+          </div>
+        </a>
+        <div class="topic-card" style="border-style:dashed; cursor:default; opacity:0.5">
+          <div class="card-cat">Coming soon</div>
+          <h3>Rate Limiter</h3>
+          <p>Token bucket, sliding window, distributed rate limiting with Redis</p>
+          <div class="card-meta">
+            <span class="badge green">35-45 min</span>
+            <span class="badge blue">Medium</span>
+          </div>
+        </div>
+        <div class="topic-card" style="border-style:dashed; cursor:default; opacity:0.5">
+          <div class="card-cat">Coming soon</div>
+          <h3>Notification System</h3>
+          <p>Multi-channel delivery, fan-out, retries, user preference service</p>
+          <div class="card-meta">
+            <span class="badge green">35-45 min</span>
+            <span class="badge blue">Medium</span>
+          </div>
+        </div>
+        <div class="topic-card" style="border-style:dashed; cursor:default; opacity:0.5">
+          <div class="card-cat">Coming soon</div>
+          <h3>Distributed Cache</h3>
+          <p>Cache topology, eviction, consistency, consistent hashing</p>
+          <div class="card-meta">
+            <span class="badge green">40-50 min</span>
+            <span class="badge amber">Medium</span>
+          </div>
+        </div>
+        <div class="topic-card" style="border-style:dashed; cursor:default; opacity:0.5">
+          <div class="card-cat">Coming soon</div>
+          <h3>Chat System</h3>
+          <p>WebSockets, message ordering, online presence, group messaging</p>
+          <div class="card-meta">
+            <span class="badge green">40-50 min</span>
+            <span class="badge amber">Hard</span>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <section id="tier2">
+      <h2>Tier 2 — Frequently asked</h2>
+      <div class="topic-grid">
+        <div class="topic-card" style="border-style:dashed; cursor:default; opacity:0.5">
+          <div class="card-cat">Coming soon</div>
+          <h3>News Feed</h3>
+          <p>Fan-out on write vs read, hybrid approach, feed ranking</p>
+          <div class="card-meta">
+            <span class="badge green">40-50 min</span>
+            <span class="badge amber">Hard</span>
+          </div>
+        </div>
+        <div class="topic-card" style="border-style:dashed; cursor:default; opacity:0.5">
+          <div class="card-cat">Coming soon</div>
+          <h3>Search Autocomplete</h3>
+          <p>Trie, prefix tree, top-K suggestions, real-time updates</p>
+          <div class="card-meta">
+            <span class="badge green">35-45 min</span>
+            <span class="badge blue">Medium</span>
+          </div>
+        </div>
+        <div class="topic-card" style="border-style:dashed; cursor:default; opacity:0.5">
+          <div class="card-cat">Coming soon</div>
+          <h3>Payment System</h3>
+          <p>Idempotency, distributed transactions, ledger, fraud detection</p>
+          <div class="card-meta">
+            <span class="badge green">45-55 min</span>
+            <span class="badge amber">Hard</span>
+          </div>
+        </div>
+        <div class="topic-card" style="border-style:dashed; cursor:default; opacity:0.5">
+          <div class="card-cat">Coming soon</div>
+          <h3>Ride-sharing (Uber)</h3>
+          <p>Geospatial indexing, real-time matching, surge pricing</p>
+          <div class="card-meta">
+            <span class="badge green">45-55 min</span>
+            <span class="badge amber">Hard</span>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <section id="add-topic">
+      <h2>How to add a topic</h2>
+      <div class="callout info">Open Claude Code in this repo, say <strong>"Add [topic name]"</strong> and paste a Hello Interview screenshot. Claude Code reads CLAUDE.md and generates the full page automatically.</div>
+      <div class="callout good">Each generated page includes: "say this in 2 min" flash card, mental model analogy, definition table, flow diagram, compare grid, interview moves, and 6 follow-up Q&amp;As.</div>
+    </section>
+
+  </main>
+  <script src="../assets/nav.js"></script>
+</body>
+</html>

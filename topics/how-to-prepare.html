@@ -1,0 +1,160 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>How to Prepare — SD Prep</title>
+  <link rel="stylesheet" href="../assets/style.css">
+</head>
+<body>
+  <aside id="sidebar"></aside>
+  <main>
+
+    <header class="page-head">
+      <div class="pill">Foundations</div>
+      <h1>How to Prepare</h1>
+      <p class="sub">The highest-ROI study strategy — what to learn, in what order, and how to practice.</p>
+      <div class="meta-row">
+        <span class="badge green">8 min read</span>
+        <span class="badge blue">Foundations</span>
+      </div>
+    </header>
+
+    <div class="flash-card">
+      <div class="flash-label">The 3 things that move the needle</div>
+      <ul>
+        <li>Practice delivering out loud — reading is not the same as doing</li>
+        <li>Learn a delivery framework first; memorizing components without structure is useless</li>
+        <li>Study 10-15 canonical questions deeply, not 50 questions shallowly</li>
+        <li>Understand the WHY behind every technology choice, not just the WHAT</li>
+        <li>Time yourself — 45 min is shorter than you think</li>
+      </ul>
+    </div>
+
+    <section id="mental-model">
+      <h2>Mental model</h2>
+      <div class="analogy-block">
+        Preparing for system design is like learning to drive: reading the manual helps, but the only thing that actually works is getting behind the wheel and narrating your decisions out loud.
+      </div>
+    </section>
+
+    <section id="core-concepts">
+      <h2>Study phases</h2>
+      <table class="def-table">
+        <thead><tr><th>Phase</th><th>Focus</th><th>Duration</th></tr></thead>
+        <tbody>
+          <tr><td>Phase 1</td><td>Learn the delivery framework cold — practice with a timer on 2-3 topics</td><td>Week 1</td></tr>
+          <tr><td>Phase 2</td><td>Core concepts: CAP, consistency, latency numbers, back-of-envelope</td><td>Week 1-2</td></tr>
+          <tr><td>Phase 3</td><td>Key technologies: when to use SQL vs NoSQL, Redis, Kafka, CDN, S3</td><td>Week 2</td></tr>
+          <tr><td>Phase 4</td><td>10 canonical question deep-dives (URL Shortener → Chat → Feed → etc.)</td><td>Week 3-4</td></tr>
+          <tr><td>Phase 5</td><td>Mock interviews out loud — with a peer or recorded solo</td><td>Week 4+</td></tr>
+        </tbody>
+      </table>
+    </section>
+
+    <section id="how-it-works">
+      <h2>The right practice loop</h2>
+      <div class="flow">
+        <div class="flow-step highlight">Pick a question</div>
+        <div class="flow-arrow">→</div>
+        <div class="flow-step">Set a 45 min timer</div>
+        <div class="flow-arrow">→</div>
+        <div class="flow-step">Deliver out loud</div>
+        <div class="flow-arrow">→</div>
+        <div class="flow-step highlight">Review gaps</div>
+        <div class="flow-arrow">→</div>
+        <div class="flow-step">Repeat until smooth</div>
+      </div>
+      <ol class="flow-steps-list">
+        <li><span>Pick a question:</span> Start with URL Shortener (scope is well-defined, great for framework practice)</li>
+        <li><span>Timer:</span> Hard constraint — teaches you to manage the 5-phase structure under pressure</li>
+        <li><span>Deliver out loud:</span> Narrate as if there's an interviewer in the room; silence is a red flag in real interviews</li>
+        <li><span>Review gaps:</span> After the session, identify what you couldn't justify or didn't know</li>
+        <li><span>Repeat:</span> Same question until you can deliver it cleanly, then move to the next</li>
+      </ol>
+    </section>
+
+    <section id="tradeoffs">
+      <h2>High-ROI vs low-ROI prep</h2>
+      <div class="compare-grid">
+        <div class="compare-card good">
+          <div class="compare-label">High ROI</div>
+          <ul>
+            <li>Practicing delivery with a timer</li>
+            <li>Understanding tradeoffs for 5-6 key tech choices</li>
+            <li>Learning latency numbers by heart</li>
+            <li>Doing 1 mock interview per week with feedback</li>
+            <li>Studying Hello Interview question breakdowns deeply</li>
+          </ul>
+        </div>
+        <div class="compare-card bad">
+          <div class="compare-label">Low ROI (avoid)</div>
+          <ul>
+            <li>Reading without practicing delivery</li>
+            <li>Covering 50+ questions at surface level</li>
+            <li>Memorizing architecture diagrams without understanding why</li>
+            <li>Watching YouTube without pausing to answer yourself first</li>
+            <li>Skipping back-of-envelope estimation</li>
+          </ul>
+        </div>
+      </div>
+    </section>
+
+    <section id="when-to-use">
+      <h2>Canonical questions to master (in order)</h2>
+      <div class="scenario-row use">
+        <span class="scenario-icon">✓</span>
+        <div class="scenario-text"><strong>Tier 1 (always asked):</strong> URL Shortener, Rate Limiter, Distributed Cache, Notification System, Chat System</div>
+      </div>
+      <div class="scenario-row use">
+        <span class="scenario-icon">✓</span>
+        <div class="scenario-text"><strong>Tier 2 (frequently asked):</strong> News Feed, Search Autocomplete, Web Crawler, Payment System, Uber/Lyft</div>
+      </div>
+      <div class="scenario-row watch">
+        <span class="scenario-icon">⚠</span>
+        <div class="scenario-text"><strong>Tier 3 (role-specific):</strong> Ads bidding, Video streaming, Recommendation engine — study these if the role is ML or media</div>
+      </div>
+    </section>
+
+    <section id="interview-moves">
+      <h2>Interview moves</h2>
+      <ul class="moves-list">
+        <li><span class="move-num">01</span><div><strong>Practice the framework before the question bank</strong> — one week on delivery structure pays off more than five weeks on memorized answers</div></li>
+        <li><span class="move-num">02</span><div><strong>Learn the "why" for 6 core tech choices</strong> — SQL vs NoSQL, Redis, Kafka, CDN, consistent hashing, and sharding cover 90% of what comes up</div></li>
+        <li><span class="move-num">03</span><div><strong>Study one question per 2 days, not one per hour</strong> — depth over breadth; interviewers probe, not quiz</div></li>
+        <li><span class="move-num">04</span><div><strong>Record yourself once</strong> — watching a 10-min clip of yourself is more valuable than 3 hours of reading</div></li>
+      </ul>
+    </section>
+
+    <section id="follow-ups">
+      <h2>Common follow-up questions</h2>
+      <div class="qa-block">
+        <div class="qa-q">How long does it realistically take to get interview-ready?</div>
+        <div class="qa-a">4 weeks for most engineers with some distributed systems exposure. 6-8 weeks if you're starting from scratch. The bottleneck is always practice reps, not content consumption.</div>
+      </div>
+      <div class="qa-block">
+        <div class="qa-q">Is Hello Interview enough, or do I need other resources?</div>
+        <div class="qa-a">Hello Interview covers everything you need. The only supplement worth adding is 1-2 mock interviews with a human (peer or paid service) for feedback on communication.</div>
+      </div>
+      <div class="qa-block">
+        <div class="qa-q">Should I study ML system design separately?</div>
+        <div class="qa-a">Yes, if targeting Nvidia or Apple ML roles. Same framework, different component vocabulary: feature store, model serving, training pipeline, embedding index. Study 3-4 ML-specific questions.</div>
+      </div>
+      <div class="qa-block">
+        <div class="qa-q">How do I know if I'm ready?</div>
+        <div class="qa-a">You can deliver any Tier 1 question cold in 40 minutes — with justifications for every choice, a bottleneck analysis, and 3 failure modes — without consulting notes.</div>
+      </div>
+      <div class="qa-block">
+        <div class="qa-q">What's the single highest-ROI thing to do in the last 48 hours before an interview?</div>
+        <div class="qa-a">Do one timed mock on a question you haven't practiced in a week. Refresh latency numbers. Don't cram new topics — solidify what you already know.</div>
+      </div>
+      <div class="qa-block">
+        <div class="qa-q">Does my production experience help?</div>
+        <div class="qa-a">Yes — significantly. Frame your Oracle observability experience (Prometheus/Grafana at 37k tenants) as scale evidence. Interviewers weight real production judgment over textbook answers.</div>
+      </div>
+    </section>
+
+  </main>
+  <script src="../assets/nav.js"></script>
+</body>
+</html>

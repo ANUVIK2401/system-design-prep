@@ -1,0 +1,193 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Core Concepts — SD Prep</title>
+  <link rel="stylesheet" href="../assets/style.css">
+</head>
+<body>
+  <aside id="sidebar"></aside>
+  <main>
+
+    <header class="page-head">
+      <div class="pill">Foundations</div>
+      <h1>Core Concepts</h1>
+      <p class="sub">CAP theorem, consistency models, latency numbers, and back-of-envelope math — the vocabulary of every system design interview.</p>
+      <div class="meta-row">
+        <span class="badge green">15 min read</span>
+        <span class="badge amber">High-density</span>
+      </div>
+    </header>
+
+    <div class="flash-card">
+      <div class="flash-label">Say these with confidence</div>
+      <ul>
+        <li>CAP: you can only guarantee 2 of 3 — and during a partition, you choose CP or AP</li>
+        <li>Eventual consistency: reads may return stale data; all replicas converge given time</li>
+        <li>1ms L1 cache → 100ms cross-datacenter — a 5-order-of-magnitude difference</li>
+        <li>10M DAU × 1 write/day ÷ 86,400 = ~115 writes/sec — memorize this formula</li>
+        <li>A single machine handles ~10k concurrent connections; a single DB ~10k QPS</li>
+      </ul>
+    </div>
+
+    <section id="mental-model">
+      <h2>Mental model</h2>
+      <div class="analogy-block">
+        Core concepts are the grammar of distributed systems. You don't need to quote papers — you need to use the words correctly when tradeoffs come up in your design.
+      </div>
+    </section>
+
+    <section id="core-concepts">
+      <h2>CAP theorem</h2>
+      <table class="def-table">
+        <thead><tr><th>Property</th><th>Meaning</th></tr></thead>
+        <tbody>
+          <tr><td>Consistency (C)</td><td>Every read returns the most recent write or an error — no stale reads</td></tr>
+          <tr><td>Availability (A)</td><td>Every request gets a non-error response — even if the data might be stale</td></tr>
+          <tr><td>Partition tolerance (P)</td><td>The system works even when network splits some nodes from others</td></tr>
+        </tbody>
+      </table>
+      <div class="callout warn">In production, P is non-negotiable (networks always partition). So the real choice is: during a partition, do you return stale data (AP) or return an error (CP)?</div>
+      <table class="def-table">
+        <thead><tr><th>Choice</th><th>Behavior during partition</th><th>Use when</th></tr></thead>
+        <tbody>
+          <tr><td>CP (consistent)</td><td>Returns error rather than stale data — blocks until consistent</td><td>Financial systems, inventory, anything where stale = wrong decision</td></tr>
+          <tr><td>AP (available)</td><td>Returns stale data rather than error — always responds</td><td>Social feeds, caches, DNS, search indexes</td></tr>
+        </tbody>
+      </table>
+    </section>
+
+    <section id="consistency-models">
+      <h2>Consistency models (spectrum)</h2>
+      <table class="def-table">
+        <thead><tr><th>Model</th><th>Guarantee</th><th>Cost</th></tr></thead>
+        <tbody>
+          <tr><td>Strong consistency</td><td>Every read sees the latest write — always</td><td>High latency, low availability during failures</td></tr>
+          <tr><td>Read-your-writes</td><td>You always see your own writes immediately</td><td>Route your reads to primary DB or use sticky sessions</td></tr>
+          <tr><td>Monotonic reads</td><td>Once you see a value, you never see older values</td><td>User never sees a post "disappear"</td></tr>
+          <tr><td>Eventual consistency</td><td>All replicas converge to same value — given enough time</td><td>Low latency, high availability; stale reads possible</td></tr>
+          <tr><td>Causal consistency</td><td>Causally related operations appear in order</td><td>Harder to implement; middle ground between strong and eventual</td></tr>
+        </tbody>
+      </table>
+    </section>
+
+    <section id="latency-numbers">
+      <h2>Latency numbers every engineer must know</h2>
+      <table class="def-table">
+        <thead><tr><th>Operation</th><th>Latency</th><th>Note</th></tr></thead>
+        <tbody>
+          <tr><td>L1 cache read</td><td>~1 ns</td><td>Baseline — "instantaneous"</td></tr>
+          <tr><td>L2 cache read</td><td>~4 ns</td><td></td></tr>
+          <tr><td>RAM read</td><td>~100 ns</td><td>100× slower than L1</td></tr>
+          <tr><td>SSD random read</td><td>~100 µs</td><td>1,000× slower than RAM</td></tr>
+          <tr><td>HDD seek</td><td>~10 ms</td><td>100× slower than SSD</td></tr>
+          <tr><td>Intra-datacenter round trip</td><td>~500 µs</td><td>LAN — very fast</td></tr>
+          <tr><td>Same-region across AZs</td><td>~1-2 ms</td><td></td></tr>
+          <tr><td>Cross-region (US to EU)</td><td>~100 ms</td><td>Speed of light limit</td></tr>
+          <tr><td>Cross-continent (US to Asia)</td><td>~200 ms</td><td>CDN exists because of this</td></tr>
+        </tbody>
+      </table>
+      <div class="callout info">Practical implication: Redis (in-memory) serves requests in ~1ms. A cold DB read from SSD takes ~10ms. Cross-region replication lag is ~100ms. These numbers justify every caching decision.</div>
+    </section>
+
+    <section id="how-it-works">
+      <h2>Back-of-envelope estimation</h2>
+      <div class="stat-grid">
+        <div class="stat-card"><div class="stat-val">86,400</div><div class="stat-label">seconds per day</div></div>
+        <div class="stat-card"><div class="stat-val">~100k</div><div class="stat-label">seconds per day (rounded)</div></div>
+        <div class="stat-card"><div class="stat-val">10K</div><div class="stat-label">max QPS per single DB</div></div>
+        <div class="stat-card"><div class="stat-val">100K</div><div class="stat-label">QPS per Redis instance</div></div>
+      </div>
+      <table class="def-table">
+        <thead><tr><th>Calculation</th><th>Formula</th><th>Example (10M DAU)</th></tr></thead>
+        <tbody>
+          <tr><td>Write QPS</td><td>DAU × writes/user/day ÷ 86,400</td><td>10M × 1 ÷ 86,400 ≈ 115/s</td></tr>
+          <tr><td>Read QPS</td><td>Write QPS × R:W ratio</td><td>115 × 10 = 1,150/s</td></tr>
+          <tr><td>Daily storage</td><td>Write QPS × avg size × 86,400</td><td>115 × 1KB × 86,400 ≈ 10GB/day</td></tr>
+          <tr><td>Yearly storage</td><td>Daily storage × 365</td><td>10GB × 365 ≈ 3.5TB/yr</td></tr>
+          <tr><td>Bandwidth</td><td>QPS × avg request size</td><td>1,150 × 1KB = 1.15MB/s (trivial)</td></tr>
+        </tbody>
+      </table>
+    </section>
+
+    <section id="tradeoffs">
+      <h2>Scaling concepts</h2>
+      <div class="compare-grid">
+        <div class="compare-card good">
+          <div class="compare-label">Vertical scaling (scale up)</div>
+          <ul>
+            <li>Bigger machine — more CPU, RAM, disk</li>
+            <li>Simple: no code changes needed</li>
+            <li>Hard limit: largest machine available</li>
+            <li>Single point of failure</li>
+            <li>Good up to ~100k QPS; use it first</li>
+          </ul>
+        </div>
+        <div class="compare-card bad">
+          <div class="compare-label">Horizontal scaling (scale out)</div>
+          <ul>
+            <li>More machines behind a load balancer</li>
+            <li>Complex: stateless services required</li>
+            <li>No hard limit — add nodes as needed</li>
+            <li>Higher operational overhead</li>
+            <li>Required beyond ~100k QPS or HA</li>
+          </ul>
+        </div>
+      </div>
+      <table class="def-table">
+        <thead><tr><th>Concept</th><th>What it means</th></tr></thead>
+        <tbody>
+          <tr><td>Sharding</td><td>Split DB rows across nodes by a key (user_id, region). Avoids hot spots. Complicates joins.</td></tr>
+          <tr><td>Replication</td><td>Copy data to multiple nodes. Primary handles writes; replicas handle reads.</td></tr>
+          <tr><td>Consistent hashing</td><td>Distribute keys across nodes such that adding/removing a node minimizes remapping</td></tr>
+          <tr><td>Load balancing</td><td>Distribute traffic across servers — L4 (TCP) or L7 (HTTP, content-aware)</td></tr>
+          <tr><td>Rate limiting</td><td>Cap requests per client per time window — token bucket or sliding window</td></tr>
+          <tr><td>Circuit breaker</td><td>Fail fast if a dependency is degraded — prevents cascading failures</td></tr>
+          <tr><td>Idempotency</td><td>Same request, same result if repeated — critical for retries in distributed systems</td></tr>
+        </tbody>
+      </table>
+    </section>
+
+    <section id="interview-moves">
+      <h2>Interview moves</h2>
+      <ul class="moves-list">
+        <li><span class="move-num">01</span><div><strong>"Given eventual consistency here, the read might be ~100ms stale — that's acceptable for a social feed but not for a payment"</strong> — shows you connect consistency models to real scenarios</div></li>
+        <li><span class="move-num">02</span><div><strong>"Back of envelope: 10M DAU, 1 write/day, gives ~115 writes/sec — single DB handles this easily"</strong> — always say the implication, not just the number</div></li>
+        <li><span class="move-num">03</span><div><strong>"Redis serves this in ~1ms vs a DB read at ~10ms — 10x faster, worth the operational cost for this hot path"</strong> — justify cache decisions with latency numbers</div></li>
+        <li><span class="move-num">04</span><div><strong>"This is an AP system — during a partition we serve stale data rather than error out"</strong> — stating CAP preference explicitly shows distributed systems fluency</div></li>
+      </ul>
+    </section>
+
+    <section id="follow-ups">
+      <h2>Common follow-up questions</h2>
+      <div class="qa-block">
+        <div class="qa-q">When would you choose strong consistency over availability?</div>
+        <div class="qa-a">Any time a stale read causes a wrong business decision: inventory (overselling), payments (double charge), seat reservations. For everything else — social, search, analytics — eventual is fine.</div>
+      </div>
+      <div class="qa-block">
+        <div class="qa-q">What is PACELC and how does it extend CAP?</div>
+        <div class="qa-a">PACELC says: even when there's no partition (E), you still trade off latency (L) vs consistency (C). It captures the everyday tradeoff that CAP only covers during failure. Mention it if the interviewer is probing deep.</div>
+      </div>
+      <div class="qa-block">
+        <div class="qa-q">How do you handle hotspot keys in a sharded system?</div>
+        <div class="qa-a">Add a random suffix to the key to distribute across shards (shard spreading), then aggregate reads. Or use consistent hashing with virtual nodes to rebalance load automatically.</div>
+      </div>
+      <div class="qa-block">
+        <div class="qa-q">What's the difference between a cache and a replica?</div>
+        <div class="qa-a">A replica is a consistent copy of the DB — writes go there, lag is bounded. A cache is a best-effort snapshot — eviction can make it stale, and writes don't necessarily go through it.</div>
+      </div>
+      <div class="qa-block">
+        <div class="qa-q">Why does consistent hashing matter for distributed caches?</div>
+        <div class="qa-a">With naive modulo hashing, adding 1 node remaps ~N/nodes keys — causing a cache stampede. Consistent hashing remaps only ~K/n keys (K = total keys, n = nodes added), minimizing disruption.</div>
+      </div>
+      <div class="qa-block">
+        <div class="qa-q">What's the difference between rate limiting algorithms?</div>
+        <div class="qa-a">Token bucket: smooth traffic, allows bursts up to bucket size. Sliding window: strict — counts requests in the last N seconds. Fixed window: simple but allows 2x burst at window boundaries. Token bucket is the most common production choice.</div>
+      </div>
+    </section>
+
+  </main>
+  <script src="../assets/nav.js"></script>
+</body>
+</html>

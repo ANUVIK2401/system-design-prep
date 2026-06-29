@@ -1,0 +1,218 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>URL Shortener — SD Prep</title>
+  <link rel="stylesheet" href="../assets/style.css">
+</head>
+<body>
+  <nav id="sidebar"></nav>
+  <main class="content">
+
+    <div class="topic-header">
+      <h1>URL Shortener</h1>
+      <p class="tagline">Convert long URLs to short aliases and redirect users at scale</p>
+      <span class="time-badge">30-40 min interview</span>
+    </div>
+
+    <div class="recall-box">
+      <h3>Say in the first 5 min</h3>
+      <ul>
+        <li>Clarify read vs write ratio — shorteners are read-heavy (100:1), cache aggressively</li>
+        <li>Pick hash length early: 7 chars base62 = 62^7 = 3.5 trillion URLs</li>
+        <li>ID generation is the hard problem — not the redirect logic</li>
+        <li>Expiration + analytics are the two features that complicate the data model</li>
+        <li>A CDN in front of the redirect service cuts latency to under 10ms globally</li>
+      </ul>
+    </div>
+
+    <section class="sd-section" id="scale">
+      <h2>Scale assumptions</h2>
+      <p style="font-size:14px; color:var(--text-muted); margin-bottom:1rem">Baseline: 10M DAU, 100M URLs shortened total</p>
+      <table>
+        <thead><tr><th>Requirement</th><th>Target</th></tr></thead>
+        <tbody>
+          <tr><td>Write QPS (shorten)</td><td>~1,000/s</td></tr>
+          <tr><td>Read QPS (redirect)</td><td>~100,000/s (100:1 ratio)</td></tr>
+          <tr><td>URL storage (5 years)</td><td>~100M × 500B = 50GB</td></tr>
+          <tr><td>Redirect latency</td><td>&lt;10ms p99 (cached), &lt;100ms cache miss</td></tr>
+          <tr><td>Availability</td><td>99.99% (4 nines) for redirects</td></tr>
+          <tr><td>Short code length</td><td>7 chars, base62</td></tr>
+        </tbody>
+      </table>
+    </section>
+
+    <section class="sd-section" id="architecture">
+      <h2>High-level architecture</h2>
+      <div class="arch-diagram">Client → CDN → [Redirect Service] → Redis Cache → PostgreSQL
+                                   ↑
+                         [Shorten Service] → Snowflake ID Gen → PostgreSQL
+                                   ↑
+                              [API Gateway]
+                                   ↑
+                                Client
+
+Write path:  Client → API GW → Shorten Service → ID Gen → encode base62 → store in DB → return short URL
+Read path:   Client → CDN → Redirect Svc → Redis (hit: 301/302) → DB (miss: store in Redis) → 301/302</div>
+    </section>
+
+    <section class="sd-section" id="components">
+      <h2>Core components</h2>
+      <table>
+        <thead><tr><th>Component</th><th>Role</th><th>Technology</th><th>Why</th></tr></thead>
+        <tbody>
+          <tr><td>Shorten Service</td><td>Accepts long URL, returns short code</td><td>Node.js / Go stateless pods</td><td>Stateless = horizontally scalable</td></tr>
+          <tr><td>ID Generator</td><td>Produces unique numeric IDs</td><td>Snowflake (Twitter) or DB auto-increment</td><td>Snowflake avoids DB bottleneck at high QPS</td></tr>
+          <tr><td>Redirect Service</td><td>Looks up short code, issues HTTP redirect</td><td>Go (low-latency) behind CDN</td><td>Must handle 100k+ RPS, keep it thin</td></tr>
+          <tr><td>Cache</td><td>Stores hot short_code → long_url mappings</td><td>Redis Cluster</td><td>~20% of URLs = 80% of traffic; cache eviction: LRU</td></tr>
+          <tr><td>Database</td><td>Source of truth for URL mappings</td><td>PostgreSQL (primary + read replicas)</td><td>Simple schema, ACID for write path</td></tr>
+          <tr><td>CDN</td><td>Caches redirects at edge</td><td>Cloudflare / AWS CloudFront</td><td>Cuts redirect latency globally to ~5ms</td></tr>
+          <tr><td>Analytics (optional)</td><td>Click counts, geo, referrer</td><td>Kafka → ClickHouse</td><td>Async; don't block the redirect path</td></tr>
+        </tbody>
+      </table>
+    </section>
+
+    <section class="sd-section" id="datamodel">
+      <h2>Data model</h2>
+      <pre><code>-- urls table (PostgreSQL)
+CREATE TABLE urls (
+  id          BIGINT PRIMARY KEY,        -- Snowflake ID
+  short_code  VARCHAR(10) UNIQUE NOT NULL, -- base62(id), e.g. "gH3xK2p"
+  long_url    TEXT NOT NULL,
+  user_id     BIGINT,                    -- nullable (anonymous)
+  created_at  TIMESTAMP DEFAULT NOW(),
+  expires_at  TIMESTAMP,                 -- null = never
+  click_count BIGINT DEFAULT 0           -- denormalized for quick reads
+);
+
+CREATE INDEX idx_short_code ON urls(short_code);  -- lookup hot path</code></pre>
+      <div class="callout info">Storage estimate: 100M rows × ~500B avg = 50GB. Fits on a single Postgres instance with read replicas for scale. Partition by <code>created_at</code> monthly if you hit 1B+ rows.</div>
+    </section>
+
+    <section class="sd-section" id="decisions">
+      <h2>Key design decisions</h2>
+
+      <div class="decision">
+        <div class="decision-title">ID generation: Snowflake over hash</div>
+        <div class="decision-why">Hashing (MD5, SHA) risks collisions and requires a uniqueness check on every write. Snowflake IDs are globally unique by construction — no DB round-trip needed to verify.</div>
+        <div class="decision-tradeoff">Tradeoff: Snowflake requires a coordination service (or node ID config). If you use DB auto-increment instead, it's simpler but becomes a write bottleneck above ~10k writes/s.</div>
+      </div>
+
+      <div class="decision">
+        <div class="decision-title">301 (permanent) vs 302 (temporary) redirect</div>
+        <div class="decision-why">302 means every click hits your servers (analytics works). 301 means browsers cache it and you lose click visibility. Default to 302 unless the client explicitly opts into 301.</div>
+        <div class="decision-tradeoff">Tradeoff: 302 = more server load. 301 = no analytics after first visit per user. For business-critical analytics, always 302.</div>
+      </div>
+
+      <div class="decision">
+        <div class="decision-title">Cache at redirect service + CDN layer</div>
+        <div class="decision-why">Two-layer caching: Redis holds the hot 20% of URLs in memory. CDN caches the HTTP 302 responses at edge nodes for globally fast reads.</div>
+        <div class="decision-tradeoff">Tradeoff: 302 responses can be cached by CDN but stale cache is a problem on URL deletion. Solve with a low TTL (60s) or purge API call on delete.</div>
+      </div>
+
+      <div class="decision">
+        <div class="decision-title">Custom aliases: separate namespace</div>
+        <div class="decision-why">User-defined aliases (e.g. /my-brand) go into a separate <code>custom_aliases</code> table to avoid colliding with Snowflake-generated codes.</div>
+        <div class="decision-tradeoff">Tradeoff: Two lookup paths in redirect service. Keep it simple with a single DB query that checks both tables via UNION or a <code>type</code> column.</div>
+      </div>
+    </section>
+
+    <section class="sd-section" id="bottlenecks">
+      <h2>Bottlenecks and scale tactics</h2>
+      <table>
+        <thead><tr><th>Bottleneck</th><th>Trigger</th><th>Fix</th></tr></thead>
+        <tbody>
+          <tr><td>DB read overload</td><td>&gt;50k RPS hitting Postgres</td><td>Add Redis cluster; most reads serve from cache. Add read replicas for cache misses.</td></tr>
+          <tr><td>Hot short code</td><td>Viral URL getting millions of RPS</td><td>CDN caches the redirect response; Redis local replica per region. One URL can't exhaust a single Redis node.</td></tr>
+          <tr><td>Write throughput</td><td>&gt;10k shortens/s</td><td>Switch from DB auto-increment to distributed Snowflake ID generator. Shard Postgres by user_id range.</td></tr>
+          <tr><td>URL expiration cleanup</td><td>100M expired rows accumulate</td><td>Background job (cron) deletes expired rows in batches. Soft-delete with <code>deleted_at</code> to avoid blocking live reads.</td></tr>
+          <tr><td>Analytics write amplification</td><td>Every click writes to DB</td><td>Decouple: publish click event to Kafka, consume async into ClickHouse. Redirect path never touches analytics DB.</td></tr>
+        </tbody>
+      </table>
+    </section>
+
+    <section class="sd-section" id="consistency">
+      <h2>Consistency model</h2>
+      <div class="callout success">Writes: strong consistency — new short URL is immediately readable (write to primary Postgres, return to client).</div>
+      <div class="callout warning">Reads after cache miss: eventual — read replicas may lag primary by ~100ms. Acceptable because a brand-new URL's traffic ramps up slowly.</div>
+      <div class="callout info">Deletes: cache TTL + CDN purge means a deleted URL can still resolve for up to 60s. Document this in your SLA.</div>
+    </section>
+
+    <section class="sd-section" id="api">
+      <h2>API design</h2>
+
+      <div class="endpoint">
+        <div class="endpoint-header"><span class="method post">POST</span><span class="endpoint-path">/api/v1/shorten</span></div>
+        <div class="endpoint-body">
+          Request: <code>{ "long_url": "https://...", "custom_alias": "my-link", "expires_at": "2026-12-31" }</code><br>
+          Response: <code>{ "short_url": "https://sho.rt/gH3xK2p", "short_code": "gH3xK2p", "expires_at": "..." }</code>
+        </div>
+      </div>
+
+      <div class="endpoint">
+        <div class="endpoint-header"><span class="method get">GET</span><span class="endpoint-path">/{short_code}</span></div>
+        <div class="endpoint-body">
+          Response: <code>HTTP 302</code> with <code>Location: https://original-long-url.com/...</code><br>
+          Error: <code>HTTP 404</code> if not found or expired
+        </div>
+      </div>
+
+      <div class="endpoint">
+        <div class="endpoint-header"><span class="method delete">DELETE</span><span class="endpoint-path">/api/v1/urls/{short_code}</span></div>
+        <div class="endpoint-body">Auth required. Soft-deletes the record, triggers CDN purge. Response: <code>HTTP 204</code></div>
+      </div>
+
+      <div class="endpoint">
+        <div class="endpoint-header"><span class="method get">GET</span><span class="endpoint-path">/api/v1/urls/{short_code}/stats</span></div>
+        <div class="endpoint-body">Response: <code>{ "clicks": 42810, "top_countries": [...], "referrers": [...] }</code> (served from ClickHouse, async)</div>
+      </div>
+    </section>
+
+    <section class="sd-section" id="failures">
+      <h2>Failure modes</h2>
+      <table>
+        <thead><tr><th>Failure</th><th>User impact</th><th>Detection</th><th>Mitigation</th></tr></thead>
+        <tbody>
+          <tr><td>Redis cluster down</td><td>Latency spikes; redirects fall to DB</td><td>Cache miss rate &gt; 80% alert</td><td>Redirect service falls back to DB reads; add circuit breaker to prevent DB overload</td></tr>
+          <tr><td>Primary DB down</td><td>Writes fail; reads degrade to replicas</td><td>Replication lag alert, write error rate spike</td><td>Failover to read replica (promote); queue writes temporarily if strong consistency required</td></tr>
+          <tr><td>CDN misconfiguration</td><td>All redirects hit origin servers</td><td>Origin RPS 10x spike</td><td>Rate limit at API gateway; auto-scale redirect pods; CDN health check alerts</td></tr>
+          <tr><td>Snowflake generator down</td><td>New shortens fail; redirects unaffected</td><td>Shorten error rate alert</td><td>Fallback to DB sequence ID (slower but functional); multi-region Snowflake nodes</td></tr>
+          <tr><td>Malicious URL abuse</td><td>Platform reputation damage</td><td>URL reputation score check at write time</td><td>Integrate Google Safe Browsing API; allow reporting; auto-disable flagged URLs</td></tr>
+        </tbody>
+      </table>
+    </section>
+
+    <section class="sd-section" id="followups">
+      <h2>Interview follow-ups</h2>
+
+      <div class="followup">
+        <div class="q">How would you prevent someone from generating billions of short codes to exhaust your namespace?</div>
+        <div class="a">Rate limit creates per user/IP. Require auth for custom aliases. At 1k writes/s, exhausting 62^7 codes takes ~111,000 years.</div>
+      </div>
+      <div class="followup">
+        <div class="q">What if the same long URL is submitted twice — do you return the same short code?</div>
+        <div class="a">Design decision. Simple: always generate a new code. Deduplicated: hash long_url, check DB before creating. Dedup saves storage but adds a DB read on every write. Pick based on whether analytics per-link matters.</div>
+      </div>
+      <div class="followup">
+        <div class="q">How do you handle geographic latency?</div>
+        <div class="a">CDN handles redirects at edge globally. For writes, route to nearest regional write cluster. Use Postgres logical replication to sync regions with ~100ms lag.</div>
+      </div>
+      <div class="followup">
+        <div class="q">What changes if you need to support 1 billion URLs?</div>
+        <div class="a">Shard Postgres by short_code prefix (16 shards). Upgrade to Redis Cluster with 32+ nodes. Extend short code to 8 chars (62^8 = 218T capacity). CDN becomes mandatory, not optional.</div>
+      </div>
+      <div class="followup">
+        <div class="q">How would you implement URL expiration efficiently?</div>
+        <div class="a">Store expires_at in DB and Redis TTL. At redirect time, check expiry inline (no extra query if Redis TTL handles it). Background job scans expired rows daily for hard deletes in batches of 10k.</div>
+      </div>
+      <div class="followup">
+        <div class="q">How do you instrument this system?</div>
+        <div class="a">Metrics: redirect p99 latency, cache hit rate, write QPS, error rate by type. Alerts: cache hit rate &lt;70%, p99 &gt;200ms, 5xx error rate &gt;0.1%. Trace: every redirect tagged with short_code, cache hit/miss, region.</div>
+      </div>
+    </section>
+
+  </main>
+  <script src="../assets/nav.js"></script>
+</body>
+</html>

@@ -1,0 +1,235 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Common Patterns — SD Prep</title>
+  <link rel="stylesheet" href="../assets/style.css">
+</head>
+<body>
+  <aside id="sidebar"></aside>
+  <main>
+
+    <header class="page-head">
+      <div class="pill">Foundations</div>
+      <h1>Common Patterns</h1>
+      <p class="sub">The 8 recurring architectural patterns that appear across almost every system design question.</p>
+      <div class="meta-row">
+        <span class="badge green">15 min read</span>
+        <span class="badge blue">Patterns</span>
+      </div>
+    </header>
+
+    <div class="flash-card">
+      <div class="flash-label">Pattern recognition cues</div>
+      <ul>
+        <li>Read-heavy (&gt;10:1 R:W) → cache aggressively, read replicas, CDN</li>
+        <li>Write-heavy (&gt;10k/sec) → async writes, Kafka buffer, NoSQL</li>
+        <li>"Notify all followers" → fan-out (push vs pull — decide at interview time)</li>
+        <li>"Never lose a transaction" → saga pattern, idempotent retries, outbox</li>
+        <li>"Different read/write shapes" → CQRS — separate read and write models</li>
+      </ul>
+    </div>
+
+    <section id="mental-model">
+      <h2>Mental model</h2>
+      <div class="analogy-block">
+        Patterns are the recurring moves in chess — you don't invent them mid-game, you recognize the position and apply the right pattern. Name the pattern out loud in the interview; it signals experience.
+      </div>
+    </section>
+
+    <section id="read-heavy">
+      <h2>Pattern 1 — Read-heavy system</h2>
+      <p style="font-size:13px;color:#bbb;margin-bottom:1rem">Triggered by: news feed, product catalog, URL redirect, DNS, CDN</p>
+      <div class="flow">
+        <div class="flow-step">Client</div>
+        <div class="flow-arrow">→</div>
+        <div class="flow-step highlight">CDN / Redis</div>
+        <div class="flow-arrow">→ miss →</div>
+        <div class="flow-step">Read replica DB</div>
+        <div class="flow-arrow">← sync ←</div>
+        <div class="flow-step">Primary DB</div>
+      </div>
+      <table class="def-table">
+        <thead><tr><th>Lever</th><th>Effect</th></tr></thead>
+        <tbody>
+          <tr><td>Redis cache</td><td>Serves hot keys in ~1ms; reduce DB load by 80-90%</td></tr>
+          <tr><td>Read replicas</td><td>Distributes read QPS across N nodes; adds ~100ms replication lag</td></tr>
+          <tr><td>CDN</td><td>Caches responses at edge; cross-region reads drop from ~100ms to ~5ms</td></tr>
+          <tr><td>Denormalization</td><td>Pre-compute joins into a single document; eliminates join overhead at read time</td></tr>
+        </tbody>
+      </table>
+    </section>
+
+    <section id="write-heavy">
+      <h2>Pattern 2 — Write-heavy system</h2>
+      <p style="font-size:13px;color:#bbb;margin-bottom:1rem">Triggered by: metrics ingestion, log collection, IoT telemetry, click tracking</p>
+      <div class="flow">
+        <div class="flow-step">Clients (high volume)</div>
+        <div class="flow-arrow">→</div>
+        <div class="flow-step highlight">Kafka / write buffer</div>
+        <div class="flow-arrow">→</div>
+        <div class="flow-step">Consumers (batch write)</div>
+        <div class="flow-arrow">→</div>
+        <div class="flow-step">ClickHouse / Cassandra</div>
+      </div>
+      <div class="callout warn">Never write directly to a relational DB at &gt;10k writes/sec. Buffer in Kafka, batch into a columnar store, or use Cassandra with a write-optimized LSM tree.</div>
+    </section>
+
+    <section id="fan-out">
+      <h2>Pattern 3 — Fan-out (notification / feed)</h2>
+      <p style="font-size:13px;color:#bbb;margin-bottom:1rem">Triggered by: Twitter-style feed, notification system, group chat</p>
+      <div class="compare-grid">
+        <div class="compare-card good">
+          <div class="compare-label">Fan-out on write (push)</div>
+          <ul>
+            <li>When user posts, write to each follower's feed immediately</li>
+            <li>Read is O(1) — precomputed feed</li>
+            <li>Cost: write amplification — 1 post × 10M followers = 10M writes</li>
+            <li>Use for: accounts with &lt;~10k followers</li>
+          </ul>
+        </div>
+        <div class="compare-card bad">
+          <div class="compare-label">Fan-out on read (pull)</div>
+          <ul>
+            <li>When user opens feed, pull latest posts from all followed accounts</li>
+            <li>Write is cheap — only 1 write per post</li>
+            <li>Cost: read is expensive — merge N timelines on each load</li>
+            <li>Use for: celebrity accounts with millions of followers</li>
+          </ul>
+        </div>
+      </div>
+      <div class="callout info">Production answer: hybrid. Push for normal users, pull for mega-accounts (&gt;1M followers). Twitter uses this exact approach.</div>
+    </section>
+
+    <section id="saga">
+      <h2>Pattern 4 — Saga (distributed transactions)</h2>
+      <p style="font-size:13px;color:#bbb;margin-bottom:1rem">Triggered by: payment + inventory + order all needing to succeed or all roll back</p>
+      <div class="flow">
+        <div class="flow-step highlight">Order Service</div>
+        <div class="flow-arrow">→</div>
+        <div class="flow-step">Payment Service</div>
+        <div class="flow-arrow">→</div>
+        <div class="flow-step">Inventory Service</div>
+        <div class="flow-arrow">→</div>
+        <div class="flow-step highlight">Confirm</div>
+      </div>
+      <ol class="flow-steps-list">
+        <li><span>Step:</span> Each service completes its local transaction and publishes a success event</li>
+        <li><span>Compensating transaction:</span> If any step fails, each previous service executes a rollback operation (e.g., refund payment)</li>
+        <li><span>Choreography vs orchestration:</span> Choreography = services react to events (decoupled). Orchestration = a saga coordinator calls each service in order.</li>
+      </ol>
+      <div class="callout warn">Saga only gives eventual consistency — not ACID. Compensating transactions are complex to write correctly. If you need true atomicity, put everything in one DB.</div>
+    </section>
+
+    <section id="cqrs">
+      <h2>Pattern 5 — CQRS (Command Query Responsibility Segregation)</h2>
+      <p style="font-size:13px;color:#bbb;margin-bottom:1rem">Triggered by: write and read shapes are very different; scale needs differ between reads and writes</p>
+      <div class="flow">
+        <div class="flow-step">Write (Command)</div>
+        <div class="flow-arrow">→</div>
+        <div class="flow-step highlight">Write DB (normalized)</div>
+        <div class="flow-arrow">→ async →</div>
+        <div class="flow-step highlight">Read DB (denormalized)</div>
+        <div class="flow-arrow">←</div>
+        <div class="flow-step">Read (Query)</div>
+      </div>
+      <div class="callout info">Example: e-commerce writes normalized order data to Postgres; an async job denormalizes it into Elasticsearch for flexible search queries. Read and write models evolve independently.</div>
+    </section>
+
+    <section id="event-sourcing">
+      <h2>Pattern 6 — Event sourcing</h2>
+      <p style="font-size:13px;color:#bbb;margin-bottom:1rem">Triggered by: audit log required, need to replay state, financial ledger</p>
+      <table class="def-table">
+        <thead><tr><th>Concept</th><th>Description</th></tr></thead>
+        <tbody>
+          <tr><td>Event log</td><td>Store every state change as an immutable event — never update/delete</td></tr>
+          <tr><td>Current state</td><td>Computed by replaying events from the beginning (or from a snapshot)</td></tr>
+          <tr><td>Snapshot</td><td>Periodic materialized state to avoid replaying 10M events every read</td></tr>
+          <tr><td>Projection</td><td>A read model built by consuming the event log — one per query shape</td></tr>
+        </tbody>
+      </table>
+      <div class="callout warn">Event sourcing is powerful but complex. Only introduce it when audit trail or replay is a hard requirement. The default is CRUD — don't over-engineer.</div>
+    </section>
+
+    <section id="outbox">
+      <h2>Pattern 7 — Transactional outbox</h2>
+      <p style="font-size:13px;color:#bbb;margin-bottom:1rem">Triggered by: must publish a message to Kafka reliably after a DB write — without dual-write risk</p>
+      <div class="flow">
+        <div class="flow-step">Write to DB</div>
+        <div class="flow-arrow">+</div>
+        <div class="flow-step highlight">Write to outbox table (same TX)</div>
+        <div class="flow-arrow">→</div>
+        <div class="flow-step">Polling relay reads outbox</div>
+        <div class="flow-arrow">→</div>
+        <div class="flow-step">Publish to Kafka</div>
+      </div>
+      <div class="callout good">Solves the dual-write problem: if you write to DB then publish to Kafka, you can't guarantee both succeed. Outbox makes the message part of the DB transaction — guaranteed to be published eventually.</div>
+    </section>
+
+    <section id="tradeoffs">
+      <h2>Pattern 8 — Consistent hashing</h2>
+      <p style="font-size:13px;color:#bbb;margin-bottom:1rem">Triggered by: distributing keys across a cache cluster or sharded DB</p>
+      <div class="compare-grid">
+        <div class="compare-card good">
+          <div class="compare-label">Consistent hashing wins</div>
+          <ul>
+            <li>Adding/removing a node only remaps K/n keys (K=total, n=nodes)</li>
+            <li>No global rehash — cache stampedes avoided</li>
+            <li>Virtual nodes distribute load more evenly across heterogeneous machines</li>
+          </ul>
+        </div>
+        <div class="compare-card bad">
+          <div class="compare-label">Naive modulo hashing</div>
+          <ul>
+            <li>Adding 1 node remaps ~50% of all keys</li>
+            <li>Cache stampede: all remapped keys are cache misses simultaneously</li>
+            <li>Simple to implement — fine for static cluster size</li>
+          </ul>
+        </div>
+      </div>
+    </section>
+
+    <section id="interview-moves">
+      <h2>Interview moves</h2>
+      <ul class="moves-list">
+        <li><span class="move-num">01</span><div><strong>"This is a read-heavy system — I'd cache aggressively in Redis and add read replicas before considering any partitioning"</strong> — name the pattern, state the implication</div></li>
+        <li><span class="move-num">02</span><div><strong>"For the feed, I'd use fan-out on write for most users and fan-out on read for celebrity accounts above 1M followers — same hybrid Twitter uses"</strong> — shows awareness of the tradeoff and real-world precedent</div></li>
+        <li><span class="move-num">03</span><div><strong>"Across these three services I can't use a single DB transaction — I'd use the Saga pattern with compensating transactions for rollback"</strong> — naming Saga explicitly signals distributed systems maturity</div></li>
+        <li><span class="move-num">04</span><div><strong>"To guarantee the Kafka publish happens, I'd use the transactional outbox pattern — the event is written to a DB table in the same transaction as the state change"</strong> — this is a differentiating answer most candidates don't know</div></li>
+        <li><span class="move-num">05</span><div><strong>"For the cache cluster I'd use consistent hashing — adding nodes only remaps a small fraction of keys, avoiding stampedes"</strong> — shows you know why, not just what</div></li>
+      </ul>
+    </section>
+
+    <section id="follow-ups">
+      <h2>Common follow-up questions</h2>
+      <div class="qa-block">
+        <div class="qa-q">When does fan-out on write break down?</div>
+        <div class="qa-a">When a user has millions of followers — writing to 10M feeds per post creates unacceptable write amplification and latency. Switch to pull (fan-out on read) for accounts above a threshold (~500k followers).</div>
+      </div>
+      <div class="qa-block">
+        <div class="qa-q">What's the difference between Saga choreography and orchestration?</div>
+        <div class="qa-a">Choreography: services emit events and react to each other's events — no central controller, harder to trace. Orchestration: a saga coordinator calls each service in sequence — easier to observe but adds a single coordinator dependency.</div>
+      </div>
+      <div class="qa-block">
+        <div class="qa-q">Is CQRS always worth the complexity?</div>
+        <div class="qa-a">No. CQRS adds a second data model, async sync lag, and operational overhead. Use it when: read/write load is asymmetric by 100x, or when the read and write schemas genuinely diverge. For most CRUD apps, it's overkill.</div>
+      </div>
+      <div class="qa-block">
+        <div class="qa-q">What's the difference between event sourcing and an audit log?</div>
+        <div class="qa-a">An audit log is append-only but doesn't necessarily derive current state from events. Event sourcing makes the event log the source of truth — current state is always derived from replaying events. Much higher complexity.</div>
+      </div>
+      <div class="qa-block">
+        <div class="qa-q">How do you handle the outbox polling delay?</div>
+        <div class="qa-a">Polling interval is typically 100ms-1s — acceptable for most async workflows. For lower latency, use Debezium (CDC) which streams the DB transaction log directly to Kafka without polling.</div>
+      </div>
+      <div class="qa-block">
+        <div class="qa-q">What are virtual nodes in consistent hashing?</div>
+        <div class="qa-a">Each physical node maps to multiple points on the hash ring. This distributes load more evenly and allows heterogeneous nodes (stronger machines get more virtual nodes). Standard in Cassandra and Redis Cluster.</div>
+      </div>
+    </section>
+
+  </main>
+  <script src="../assets/nav.js"></script>
+</body>
+</html>

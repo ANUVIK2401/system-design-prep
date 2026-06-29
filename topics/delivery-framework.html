@@ -1,0 +1,182 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Delivery Framework — SD Prep</title>
+  <link rel="stylesheet" href="../assets/style.css">
+</head>
+<body>
+  <aside id="sidebar"></aside>
+  <main>
+
+    <header class="page-head">
+      <div class="pill">Foundations</div>
+      <h1>Delivery Framework</h1>
+      <p class="sub">The exact step-by-step structure to use in every system design interview — learn it once, use it every time.</p>
+      <div class="meta-row">
+        <span class="badge green">12 min read</span>
+        <span class="badge amber">Most important page</span>
+      </div>
+    </header>
+
+    <div class="flash-card">
+      <div class="flash-label">The 5-phase framework (memorize this)</div>
+      <ul>
+        <li><strong style="color:#f0f0f0">1. Clarify</strong> — requirements, users, scale, exclusions (5 min)</li>
+        <li><strong style="color:#f0f0f0">2. Estimate</strong> — QPS, storage, bandwidth back-of-envelope (3 min)</li>
+        <li><strong style="color:#f0f0f0">3. API design</strong> — 3-4 core endpoints, request/response shape (5 min)</li>
+        <li><strong style="color:#f0f0f0">4. High-level design</strong> — components, data flow, data model (15 min)</li>
+        <li><strong style="color:#f0f0f0">5. Deep dive</strong> — bottlenecks, failure modes, scale tactics (15 min)</li>
+      </ul>
+    </div>
+
+    <section id="mental-model">
+      <h2>Mental model</h2>
+      <div class="analogy-block">
+        The framework is your GPS. You might deviate based on traffic (interviewer cues), but you always know where you are in the journey — and so does your interviewer.
+      </div>
+    </section>
+
+    <section id="core-concepts">
+      <h2>Phase 1 — Clarify (5 min)</h2>
+      <table class="def-table">
+        <thead><tr><th>Ask about</th><th>Example question</th></tr></thead>
+        <tbody>
+          <tr><td>Core feature</td><td>"Is this read-heavy or write-heavy? What's the primary user action?"</td></tr>
+          <tr><td>Users</td><td>"Are we building for consumers, businesses, or internal teams?"</td></tr>
+          <tr><td>Scale</td><td>"How many DAU should I assume? 1M, 10M, 100M?"</td></tr>
+          <tr><td>Exclusions</td><td>"Should I design auth, payments, and notifications — or focus on the core flow?"</td></tr>
+          <tr><td>SLA</td><td>"Is strong consistency required, or is eventual consistency acceptable?"</td></tr>
+          <tr><td>Geography</td><td>"Single-region or globally distributed?"</td></tr>
+        </tbody>
+      </table>
+      <div class="callout warn">Stop after 5 minutes even if you haven't asked everything. State your assumptions and move forward. Over-clarifying is a time management red flag.</div>
+    </section>
+
+    <section id="how-it-works">
+      <h2>Phase 2 — Estimate (3 min)</h2>
+      <div class="stat-grid">
+        <div class="stat-card"><div class="stat-val">10M</div><div class="stat-label">DAU baseline</div></div>
+        <div class="stat-card"><div class="stat-val">~115</div><div class="stat-label">writes/sec (10M × 1 write/day)</div></div>
+        <div class="stat-card"><div class="stat-val">~1150</div><div class="stat-label">reads/sec (10:1 read:write)</div></div>
+        <div class="stat-card"><div class="stat-val">~365GB</div><div class="stat-label">storage/yr (1KB × 10M × 365)</div></div>
+      </div>
+      <table class="def-table">
+        <thead><tr><th>Formula</th><th>Example</th></tr></thead>
+        <tbody>
+          <tr><td>Write QPS</td><td>DAU × writes/user/day ÷ 86,400</td></tr>
+          <tr><td>Read QPS</td><td>Write QPS × read:write ratio</td></tr>
+          <tr><td>Storage/yr</td><td>Write QPS × avg object size × 86,400 × 365</td></tr>
+          <tr><td>Bandwidth</td><td>QPS × avg request size</td></tr>
+        </tbody>
+      </table>
+      <div class="callout info">These numbers drive your decisions. A system at 100 writes/sec needs no sharding. At 100k writes/sec, you need sharding, Kafka, and a dedicated write path. Say this out loud.</div>
+    </section>
+
+    <section id="api-design">
+      <h2>Phase 3 — API design (5 min)</h2>
+      <p style="font-size:13px; color:#bbb; margin-bottom:1rem">Define 3-4 core endpoints. RESTful by default unless the problem demands otherwise (streaming, bidirectional = WebSockets).</p>
+      <table class="def-table">
+        <thead><tr><th>What to define</th><th>Example (URL Shortener)</th></tr></thead>
+        <tbody>
+          <tr><td>Method + path</td><td><code>POST /urls</code></td></tr>
+          <tr><td>Request body</td><td><code>{ long_url, custom_alias?, expires_at? }</code></td></tr>
+          <tr><td>Response</td><td><code>{ short_url, short_code, expires_at }</code></td></tr>
+          <tr><td>Auth</td><td>Bearer token in header; anonymous for redirect endpoint</td></tr>
+        </tbody>
+      </table>
+      <div class="callout good">API design shows you think from the client's perspective first. It also constraints your data model — define it early.</div>
+    </section>
+
+    <section id="tradeoffs">
+      <h2>Phase 4 — High-level design</h2>
+      <p style="font-size:13px; color:#bbb; margin-bottom:1rem">Draw on the whiteboard while narrating. Cover these in order:</p>
+      <div class="compare-grid">
+        <div class="compare-card good">
+          <div class="compare-label">Components to cover</div>
+          <ul>
+            <li>Client + load balancer + API layer</li>
+            <li>Core service(s) and their responsibilities</li>
+            <li>Database(s) — type, schema, why</li>
+            <li>Cache layer — what's cached, eviction policy</li>
+            <li>Async components (queues, workers) if needed</li>
+          </ul>
+        </div>
+        <div class="compare-card bad">
+          <div class="compare-label">Common omissions</div>
+          <ul>
+            <li>Forgetting to specify the data model</li>
+            <li>Not saying why you chose SQL vs NoSQL</li>
+            <li>Skipping the cache entirely</li>
+            <li>Not labeling the read path vs write path</li>
+            <li>Drawing components without explaining data flow</li>
+          </ul>
+        </div>
+      </div>
+    </section>
+
+    <section id="when-to-use">
+      <h2>Phase 5 — Deep dive</h2>
+      <div class="scenario-row use">
+        <span class="scenario-icon">✓</span>
+        <div class="scenario-text"><strong>Proactively identify bottlenecks:</strong> "The hot path here is X — if this gets 100x traffic, here's what breaks and how I'd fix it."</div>
+      </div>
+      <div class="scenario-row use">
+        <span class="scenario-icon">✓</span>
+        <div class="scenario-text"><strong>Cover failure modes:</strong> "What happens if the DB goes down? If the cache is cold? If a downstream service is slow?" Mention detection + recovery for each.</div>
+      </div>
+      <div class="scenario-row watch">
+        <span class="scenario-icon">⚠</span>
+        <div class="scenario-text"><strong>Follow the interviewer's lead:</strong> If they say "tell me more about the DB design", drop everything else and go deep. They're telling you where they want to probe.</div>
+      </div>
+      <div class="scenario-row avoid">
+        <span class="scenario-icon">✗</span>
+        <div class="scenario-text"><strong>Don't go wide here:</strong> The deep dive is for depth on one component, not adding more components to your diagram. One thing, done well.</div>
+      </div>
+    </section>
+
+    <section id="interview-moves">
+      <h2>Interview moves</h2>
+      <ul class="moves-list">
+        <li><span class="move-num">01</span><div><strong>"Let me start by clarifying a few things before I design anything"</strong> — say this verbatim as your first sentence, every single interview</div></li>
+        <li><span class="move-num">02</span><div><strong>"I'll assume 10M DAU — quick math gives me ~115 writes/sec, so no sharding needed initially"</strong> — shows you connect estimates to design decisions</div></li>
+        <li><span class="move-num">03</span><div><strong>"Let me define the API first — it'll constrain my data model"</strong> — interviewers love this sequencing; it shows design discipline</div></li>
+        <li><span class="move-num">04</span><div><strong>"I'm going to draw the write path first, then the read path separately"</strong> — separating paths shows clarity; most systems have different optimization needs per path</div></li>
+        <li><span class="move-num">05</span><div><strong>"Before I go further — is there a component you'd like me to go deeper on?"</strong> — check in at the 25-min mark; lets the interviewer steer the deep dive</div></li>
+        <li><span class="move-num">06</span><div><strong>"The main bottleneck I see is [X]. Here's how I'd handle it at 10x scale..."</strong> — proactive bottleneck identification is a strong senior signal</div></li>
+      </ul>
+    </section>
+
+    <section id="follow-ups">
+      <h2>Common follow-up questions</h2>
+      <div class="qa-block">
+        <div class="qa-q">What if the interviewer interrupts my framework flow?</div>
+        <div class="qa-a">Follow them. The framework is your default path, not a script. If they say "skip ahead to the DB design", do it. You can always say "I'll circle back to X if we have time."</div>
+      </div>
+      <div class="qa-block">
+        <div class="qa-q">Do I need to cover all 5 phases in every interview?</div>
+        <div class="qa-a">Clarify and estimate are always required. The interviewer may shortcut others. Watch for "that's fine, let's move on" — it means they're satisfied and want to go deeper elsewhere.</div>
+      </div>
+      <div class="qa-block">
+        <div class="qa-q">How detailed should the data model be?</div>
+        <div class="qa-a">Primary entities, key fields, and the main foreign key / partition key. Don't model every column. State your storage choice and justify it. That's enough at the high-level phase.</div>
+      </div>
+      <div class="qa-block">
+        <div class="qa-q">What's the difference between a system design interview and a design review?</div>
+        <div class="qa-a">Speed and ambiguity. A design review has a week of context and a 1-pager. An interview has 2 minutes of context and a blank whiteboard. The framework keeps you from spending time you don't have.</div>
+      </div>
+      <div class="qa-block">
+        <div class="qa-q">When should I bring up monitoring and observability?</div>
+        <div class="qa-a">In the deep dive, after bottlenecks and failure modes. Say: "I'd instrument this with latency histograms and error rate alerts on the hot path." Proactively mentioning observability is a strong production engineering signal.</div>
+      </div>
+      <div class="qa-block">
+        <div class="qa-q">How do I avoid running out of time?</div>
+        <div class="qa-a">Set mental checkpoints: 5 min (requirements done), 8 min (estimates done), 13 min (API done), 28 min (high-level done), last 15 min for deep dive. Glance at the clock after each phase.</div>
+      </div>
+    </section>
+
+  </main>
+  <script src="../assets/nav.js"></script>
+</body>
+</html>
