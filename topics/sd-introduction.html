@@ -43,13 +43,29 @@
 
     <section id="core-concepts">
       <h2>What you're actually scored on</h2>
+      <div class="dial-wrap">
+        <div class="dial-title">Problem clarity — scoping questions before the whiteboard</div>
+        <div class="dial-track"><div class="dial-marker" style="left:85%"></div></div>
+        <div class="dial-labels"><span class="end-left">Jumps to solution</span><span class="end-right">Scopes first</span></div>
+      </div>
+      <div class="dial-wrap">
+        <div class="dial-title">Structured thinking — framework vs stream of consciousness</div>
+        <div class="dial-track"><div class="dial-marker" style="left:80%"></div></div>
+        <div class="dial-labels"><span class="end-left">Rambles</span><span class="end-right">Follows a framework</span></div>
+      </div>
+      <div class="dial-wrap">
+        <div class="dial-title">Scale awareness — reasons about QPS/storage/latency before choosing</div>
+        <div class="dial-track"><div class="dial-marker" style="left:75%"></div></div>
+        <div class="dial-labels"><span class="end-left">Guesses</span><span class="end-right">Does the math</span></div>
+      </div>
+      <div class="dial-wrap">
+        <div class="dial-title">Tradeoff fluency — names cost, not just the tool</div>
+        <div class="dial-track"><div class="dial-marker" style="left:90%"></div></div>
+        <div class="dial-labels"><span class="end-left">Name-drops tech</span><span class="end-right">Justifies + costs it</span></div>
+      </div>
       <table class="def-table">
         <thead><tr><th>Signal</th><th>What it looks like</th></tr></thead>
         <tbody>
-          <tr><td>Problem clarity</td><td>You ask the right scoping questions before touching the whiteboard</td></tr>
-          <tr><td>Structured thinking</td><td>You follow a consistent framework — not a stream of consciousness</td></tr>
-          <tr><td>Scale awareness</td><td>You reason about QPS, storage, and latency before choosing components</td></tr>
-          <tr><td>Tradeoff fluency</td><td>You don't just name a technology — you say why and what it costs</td></tr>
           <tr><td>Depth on demand</td><td>When the interviewer probes a component, you can go 2 levels deeper</td></tr>
           <tr><td>Communication</td><td>You narrate your thinking out loud so the interviewer follows along</td></tr>
         </tbody>
@@ -58,16 +74,43 @@
 
     <section id="how-it-works">
       <h2>Interview structure</h2>
-      <div class="flow">
-        <div class="flow-step highlight">Clarify (5 min)</div>
-        <div class="flow-arrow">→</div>
-        <div class="flow-step">Estimate (3 min)</div>
-        <div class="flow-arrow">→</div>
-        <div class="flow-step">High-level design (15 min)</div>
-        <div class="flow-arrow">→</div>
-        <div class="flow-step highlight">Deep dive (15 min)</div>
-        <div class="flow-arrow">→</div>
-        <div class="flow-step">Wrap-up (5 min)</div>
+      <div class="diagram-wrap">
+        <svg viewBox="0 0 760 130" xmlns="http://www.w3.org/2000/svg">
+          <defs>
+            <marker id="introArrow" markerWidth="8" markerHeight="8" refX="6" refY="3" orient="auto"><path d="M0,0 L6,3 L0,6 Z" fill="var(--border2)"/></marker>
+          </defs>
+          <g>
+            <rect class="diag-box role-client" x="10" y="35" width="130" height="60"/>
+            <text class="diag-label" x="75" y="60">Clarify</text>
+            <text class="diag-sublabel" x="75" y="76">5 min</text>
+          </g>
+          <path class="diag-arrow-path" d="M140,65 L160,65" marker-end="url(#introArrow)"/>
+          <g>
+            <rect class="diag-box" x="160" y="35" width="130" height="60"/>
+            <text class="diag-label" x="225" y="60">Estimate</text>
+            <text class="diag-sublabel" x="225" y="76">3 min</text>
+          </g>
+          <path class="diag-arrow-path" d="M290,65 L310,65" marker-end="url(#introArrow)"/>
+          <g>
+            <rect class="diag-box" x="310" y="20" width="150" height="90"/>
+            <text class="diag-label" x="385" y="58">High-level</text>
+            <text class="diag-label" x="385" y="74">design</text>
+            <text class="diag-sublabel" x="385" y="92">15 min</text>
+          </g>
+          <path class="diag-arrow-path" d="M460,65 L480,65" marker-end="url(#introArrow)"/>
+          <g>
+            <rect class="diag-box role-cache" x="480" y="20" width="150" height="90"/>
+            <text class="diag-label" x="555" y="58">Deep dive</text>
+            <text class="diag-sublabel" x="555" y="76">bottlenecks</text>
+            <text class="diag-sublabel" x="555" y="92">15 min</text>
+          </g>
+          <path class="diag-arrow-path" d="M630,65 L650,65" marker-end="url(#introArrow)"/>
+          <g>
+            <rect class="diag-box" x="650" y="35" width="100" height="60"/>
+            <text class="diag-label" x="700" y="60">Wrap-up</text>
+            <text class="diag-sublabel" x="700" y="76">5 min</text>
+          </g>
+        </svg>
       </div>
       <ol class="flow-steps-list">
         <li><span>Clarify:</span> Nail down functional requirements, users, scale, and what you're NOT building</li>

@@ -40,54 +40,89 @@
 
     <section id="core-concepts">
       <h2>CAP theorem</h2>
-      <table class="def-table">
-        <thead><tr><th>Property</th><th>Meaning</th></tr></thead>
-        <tbody>
-          <tr><td>Consistency (C)</td><td>Every read returns the most recent write or an error — no stale reads</td></tr>
-          <tr><td>Availability (A)</td><td>Every request gets a non-error response — even if the data might be stale</td></tr>
-          <tr><td>Partition tolerance (P)</td><td>The system works even when network splits some nodes from others</td></tr>
-        </tbody>
-      </table>
+      <div class="diagram-wrap">
+        <svg viewBox="0 0 400 230" xmlns="http://www.w3.org/2000/svg">
+          <polygon points="200,20 30,200 370,200" fill="none" stroke="var(--border2)" stroke-width="1.5"/>
+          <line x1="200" y1="20" x2="200" y2="200" stroke="var(--border)" stroke-width="1" stroke-dasharray="3,3"/>
+          <g>
+            <circle class="diag-box role-client" cx="200" cy="20" r="34"/>
+            <text class="diag-label" x="200" y="16">C</text>
+            <text class="diag-sublabel" x="200" y="32">Consistency</text>
+          </g>
+          <g>
+            <circle class="diag-box role-cache" cx="30" cy="200" r="34"/>
+            <text class="diag-label" x="30" y="196">A</text>
+            <text class="diag-sublabel" x="30" y="212">Availability</text>
+          </g>
+          <g>
+            <circle class="diag-box role-async" cx="370" cy="200" r="34"/>
+            <text class="diag-label" x="370" y="196">P</text>
+            <text class="diag-sublabel" x="370" y="212">Partition tol.</text>
+          </g>
+          <text class="diag-sublabel" x="200" y="120" style="font-size:10px">pick 2 — P is</text>
+          <text class="diag-sublabel" x="200" y="134" style="font-size:10px">non-negotiable</text>
+        </svg>
+        <div class="diag-legend">
+          <div class="diag-legend-item"><span class="diag-legend-dot role-client"></span>Every read returns latest write, or errors</div>
+          <div class="diag-legend-item"><span class="diag-legend-dot role-cache"></span>Every request gets a non-error response</div>
+          <div class="diag-legend-item"><span class="diag-legend-dot role-async"></span>Survives a network split between nodes</div>
+        </div>
+      </div>
       <div class="callout warn">In production, P is non-negotiable (networks always partition). So the real choice is: during a partition, do you return stale data (AP) or return an error (CP)?</div>
-      <table class="def-table">
-        <thead><tr><th>Choice</th><th>Behavior during partition</th><th>Use when</th></tr></thead>
-        <tbody>
-          <tr><td>CP (consistent)</td><td>Returns error rather than stale data — blocks until consistent</td><td>Financial systems, inventory, anything where stale = wrong decision</td></tr>
-          <tr><td>AP (available)</td><td>Returns stale data rather than error — always responds</td><td>Social feeds, caches, DNS, search indexes</td></tr>
-        </tbody>
-      </table>
+      <div class="dial-wrap">
+        <div class="dial-title">CP — financial systems, inventory, seat reservations</div>
+        <div class="dial-track"><div class="dial-marker" style="left:15%"></div></div>
+        <div class="dial-labels"><span class="end-left">CP: error over stale</span><span class="end-right">AP: stale over error</span></div>
+      </div>
+      <div class="dial-wrap">
+        <div class="dial-title">AP — social feeds, caches, DNS, search indexes</div>
+        <div class="dial-track"><div class="dial-marker" style="left:85%"></div></div>
+        <div class="dial-labels"><span class="end-left">CP: error over stale</span><span class="end-right">AP: stale over error</span></div>
+      </div>
     </section>
 
     <section id="consistency-models">
       <h2>Consistency models (spectrum)</h2>
-      <table class="def-table">
-        <thead><tr><th>Model</th><th>Guarantee</th><th>Cost</th></tr></thead>
-        <tbody>
-          <tr><td>Strong consistency</td><td>Every read sees the latest write — always</td><td>High latency, low availability during failures</td></tr>
-          <tr><td>Read-your-writes</td><td>You always see your own writes immediately</td><td>Route your reads to primary DB or use sticky sessions</td></tr>
-          <tr><td>Monotonic reads</td><td>Once you see a value, you never see older values</td><td>User never sees a post "disappear"</td></tr>
-          <tr><td>Eventual consistency</td><td>All replicas converge to same value — given enough time</td><td>Low latency, high availability; stale reads possible</td></tr>
-          <tr><td>Causal consistency</td><td>Causally related operations appear in order</td><td>Harder to implement; middle ground between strong and eventual</td></tr>
-        </tbody>
-      </table>
+      <div class="dial-wrap">
+        <div class="dial-title">Strong consistency — every read sees latest write, always</div>
+        <div class="dial-track"><div class="dial-marker" style="left:5%"></div></div>
+        <div class="dial-labels"><span class="end-left">Strong (slow, safe)</span><span class="end-right">Eventual (fast, stale)</span></div>
+      </div>
+      <div class="dial-wrap">
+        <div class="dial-title">Read-your-writes — you always see your own writes</div>
+        <div class="dial-track"><div class="dial-marker" style="left:30%"></div></div>
+        <div class="dial-labels"><span class="end-left">Strong (slow, safe)</span><span class="end-right">Eventual (fast, stale)</span></div>
+      </div>
+      <div class="dial-wrap">
+        <div class="dial-title">Causal consistency — causally related ops appear in order</div>
+        <div class="dial-track"><div class="dial-marker" style="left:50%"></div></div>
+        <div class="dial-labels"><span class="end-left">Strong (slow, safe)</span><span class="end-right">Eventual (fast, stale)</span></div>
+      </div>
+      <div class="dial-wrap">
+        <div class="dial-title">Monotonic reads — once seen, never see an older value</div>
+        <div class="dial-track"><div class="dial-marker" style="left:65%"></div></div>
+        <div class="dial-labels"><span class="end-left">Strong (slow, safe)</span><span class="end-right">Eventual (fast, stale)</span></div>
+      </div>
+      <div class="dial-wrap">
+        <div class="dial-title">Eventual consistency — replicas converge given enough time</div>
+        <div class="dial-track"><div class="dial-marker" style="left:95%"></div></div>
+        <div class="dial-labels"><span class="end-left">Strong (slow, safe)</span><span class="end-right">Eventual (fast, stale)</span></div>
+      </div>
     </section>
 
     <section id="latency-numbers">
       <h2>Latency numbers every engineer must know</h2>
-      <table class="def-table">
-        <thead><tr><th>Operation</th><th>Latency</th><th>Note</th></tr></thead>
-        <tbody>
-          <tr><td>L1 cache read</td><td>~1 ns</td><td>Baseline — "instantaneous"</td></tr>
-          <tr><td>L2 cache read</td><td>~4 ns</td><td></td></tr>
-          <tr><td>RAM read</td><td>~100 ns</td><td>100× slower than L1</td></tr>
-          <tr><td>SSD random read</td><td>~100 µs</td><td>1,000× slower than RAM</td></tr>
-          <tr><td>HDD seek</td><td>~10 ms</td><td>100× slower than SSD</td></tr>
-          <tr><td>Intra-datacenter round trip</td><td>~500 µs</td><td>LAN — very fast</td></tr>
-          <tr><td>Same-region across AZs</td><td>~1-2 ms</td><td></td></tr>
-          <tr><td>Cross-region (US to EU)</td><td>~100 ms</td><td>Speed of light limit</td></tr>
-          <tr><td>Cross-continent (US to Asia)</td><td>~200 ms</td><td>CDN exists because of this</td></tr>
-        </tbody>
-      </table>
+      <div class="latency-chart">
+        <div class="latency-row"><div class="latency-name">L1 cache read</div><div class="latency-track"><div class="latency-bar tier-fast" style="width:2%"></div></div><div class="latency-val">~1 ns</div></div>
+        <div class="latency-row"><div class="latency-name">L2 cache read</div><div class="latency-track"><div class="latency-bar tier-fast" style="width:3%"></div></div><div class="latency-val">~4 ns</div></div>
+        <div class="latency-row"><div class="latency-name">RAM read</div><div class="latency-track"><div class="latency-bar tier-fast" style="width:6%"></div></div><div class="latency-val">~100 ns</div></div>
+        <div class="latency-row"><div class="latency-name">Intra-DC round trip</div><div class="latency-track"><div class="latency-bar tier-mid" style="width:18%"></div></div><div class="latency-val">~500 µs</div></div>
+        <div class="latency-row"><div class="latency-name">SSD random read</div><div class="latency-track"><div class="latency-bar tier-mid" style="width:22%"></div></div><div class="latency-val">~100 µs</div></div>
+        <div class="latency-row"><div class="latency-name">Same-region, diff AZ</div><div class="latency-track"><div class="latency-bar tier-mid" style="width:32%"></div></div><div class="latency-val">~1-2 ms</div></div>
+        <div class="latency-row"><div class="latency-name">HDD seek</div><div class="latency-track"><div class="latency-bar tier-slow" style="width:45%"></div></div><div class="latency-val">~10 ms</div></div>
+        <div class="latency-row"><div class="latency-name">Cross-region (US-EU)</div><div class="latency-track"><div class="latency-bar tier-slow" style="width:80%"></div></div><div class="latency-val">~100 ms</div></div>
+        <div class="latency-row"><div class="latency-name">Cross-continent</div><div class="latency-track"><div class="latency-bar tier-slow" style="width:100%"></div></div><div class="latency-val">~200 ms</div></div>
+      </div>
       <div class="callout info">Practical implication: Redis (in-memory) serves requests in ~1ms. A cold DB read from SSD takes ~10ms. Cross-region replication lag is ~100ms. These numbers justify every caching decision.</div>
     </section>
 
@@ -113,6 +148,11 @@
 
     <section id="tradeoffs">
       <h2>Scaling concepts</h2>
+      <div class="dial-wrap">
+        <div class="dial-title">Vertical (≤100k QPS, use first) vs horizontal scaling (beyond that, or for HA)</div>
+        <div class="dial-track"><div class="dial-marker" style="left:35%"></div></div>
+        <div class="dial-labels"><span class="end-left">Vertical: bigger box</span><span class="end-right">Horizontal: more boxes</span></div>
+      </div>
       <div class="compare-grid">
         <div class="compare-card good">
           <div class="compare-label">Vertical scaling (scale up)</div>

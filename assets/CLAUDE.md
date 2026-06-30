@@ -77,13 +77,27 @@ Open with a single crisp analogy that makes the concept stick.
 Format: `<div class="analogy-block">`. One sentence.
 
 ### Core concepts section
-Tight definition table: term | one-line definition.
-Max 8 rows. No sentences that exceed 15 words.
+Default to a tight definition table (term | one-line definition, max 8 rows, no sentence over 15 words) —
+but if the concept is a spectrum, a magnitude comparison, or a scored signal, visualize it instead:
+- A position-on-a-spectrum claim (e.g. "mostly consistent, leans available") → `.dial-wrap` decision dial.
+- An order-of-magnitude comparison (e.g. latency numbers, throughput tiers) → `.latency-chart` bar chart.
+- A 2-3 way relationship/triangle (e.g. CAP theorem) → small SVG diagram inside `.diagram-wrap`.
+Definition tables and visuals are not mutually exclusive — use a table for the remaining flat facts
+after the visual covers the headline relationship.
 
 ### How it works section
-Use a visual flow: HTML/CSS arrow chain showing data path.
-Class: `<div class="flow">` with `<div class="flow-step">` nodes.
-Below the flow: numbered list of what happens at each step (max 1 line each).
+Default to an inline SVG diagram, not a table or a wall of text — this site is for visual learners.
+Wrapper: `<div class="diagram-wrap"><svg viewBox="0 0 W H">...</svg></div>`.
+Inside the SVG: `<rect class="diag-box [role-client|role-cache|role-db|role-async]">` boxes,
+`<text class="diag-label">`/`<text class="diag-sublabel">` for names, `<path class="diag-arrow-path" marker-end="url(#someId)">`
+for connectors. Each diagram defines its OWN locally-scoped `<marker id="...">` inside a `<defs>` block —
+never reuse a marker id across diagrams/pages, since multiple SVGs can be in the DOM or cached at once.
+Optional: `<div class="diag-legend">` with `<div class="diag-legend-item"><span class="diag-legend-dot [role]"></span>label</div>`
+when box-role colors need explaining.
+For sequential/cyclical processes (not architecture), an `<ol class="flow-steps-list">` numbered breakdown
+belongs directly below the diagram — one line per step.
+The older HTML-only `.flow`/`.flow-step` chip-chain still exists in CSS for backward compatibility but is
+DEPRECATED for new content — always reach for an SVG `.diagram-wrap` diagram instead.
 
 ### Tradeoffs section
 Always a 2-column compare grid: `<div class="compare-grid">`.
@@ -122,7 +136,38 @@ Q in accent color. A in muted. Answers max 2 lines.
 - Flash card: left border 3px solid accent, bg `#0d1f17`
 - Analogy block: italic, muted text, left border 3px solid `#333`
 - Tables: no outer border, row separator `1px solid #1a1a1a`
-- Strictly no decorative elements, no icons libraries, no gradients
+- No decorative elements, no third-party icon libraries (Font Awesome etc.), no CSS gradients
+- Hand-authored inline SVG diagrams ARE the icon/illustration system on this site — use them freely
+
+### `.dial-wrap` decision dial
+```html
+<div class="dial-wrap">
+  <div class="dial-title">[What's being judged]</div>
+  <div class="dial-track"><div class="dial-marker" style="left:[0-100]%"></div></div>
+  <div class="dial-labels"><span class="end-left">[left pole]</span><span class="end-right">[right pole]</span></div>
+</div>
+```
+`left%` is a judgment call, not a measured value — pick the position that matches the claim in `dial-title`.
+
+### `.latency-chart` log-scale bar chart
+```html
+<div class="latency-chart">
+  <div class="latency-row">
+    <div class="latency-name">[operation]</div>
+    <div class="latency-track"><div class="latency-bar [tier-fast|tier-mid|tier-slow]" style="width:[0-100]%"></div></div>
+    <div class="latency-val">[~Xns/µs/ms]</div>
+  </div>
+  <!-- one row per data point -->
+</div>
+```
+`tier-fast` = accent (ns range), `tier-mid` = blue (µs–low ms), `tier-slow` = amber (ms+). Bar widths
+should reflect relative log-scale magnitude, not be evenly spaced.
+
+### `.diag-box` role colors (use consistently across all diagrams)
+- `role-client` → blue — clients, gateways, entry points
+- `role-cache` → accent/mint — caches, hot-path services, the thing being explained
+- `role-db` → neutral gray — databases, durable storage
+- `role-async` → amber — queues, workers, async/background paths
 
 ---
 
@@ -146,17 +191,30 @@ Each page must be self-contained and interview-complete. A reader should be able
 
 - Dark hero with site title and tagline
 - Topic cards in a CSS grid (auto-fill, minmax 260px)
-- Each card: category pill + title + one-line desc + difficulty badge + time badge
-- No images. No icons. Pure typography and color.
+- Each card: `<div class="card-num">[01-08, zero-padded]</div>` + category pill + title + one-line desc + difficulty badge + time badge
+- Cards carry `style="--card-i:[0-based index]"` for the staggered fade/slide-in entrance animation (CSS only, see `style.css`)
+- No raster images, no third-party icon libraries — typography, color, and hand-authored inline SVG only
 - Filter row at top: All / Foundations / Question Breakdowns (JS filter, no page reload)
+- New topic cards always get the next sequential `card-num` and `--card-i`; never reuse or skip a number
 
 ---
 
 ## nav.js behavior
 
-- Sidebar on desktop (240px), slide-in drawer on mobile/iPad
-- Section links built from `<section id="...">` + `<h2>` on current page
-- Topic list at bottom of sidebar
-- Active section highlight via IntersectionObserver
+- Sidebar on desktop (240px), slide-in drawer on mobile/iPad (toggled via hamburger below 900px)
+- Section links built from `<section id="...">` + `<h2>` on current page — each gets a small inline SVG icon
+  from the `ICONS` map in `nav.js` keyed by section `id` (mental-model, core-concepts, how-it-works, tradeoffs,
+  when-to-use, interview-moves, follow-ups, plus a couple of per-page extras). Unmapped ids just render without
+  an icon — safe to add a new section id without touching `nav.js`, but prefer reusing the existing ids above
+  so the icon shows.
+- Section `<h2>` is clickable to collapse/expand its body (`.sec-body` wrapper + chevron, JS-driven)
+- Topic list at bottom of sidebar renders from the `TOPICS` array in `nav.js`, each with a numbered step badge
+  (`.sb-step-mark`) that fills in as a checkmark once visited (tracked via `localStorage` key `sdprep-visited`)
+- `.sb-progress-wrap`/`.sb-progress-fill` bar at the top of the sidebar shows overall curriculum progress
+  (visited topics / total topics) — this is the "progression" affordance; keep `TOPICS` in sync with the
+  actual page set whenever a page is added or removed
+- Active section highlight via IntersectionObserver; page-level scroll progress bar at the very top of the viewport
+- Fade-in-on-scroll (`.reveal`/`.in-view`) applies to `main > section[id]`, `.diagram-wrap`, `.compare-grid`,
+  `.flash-card` — new sections/diagrams get this automatically, no per-element opt-in needed
 - "Back to home" link at top
-- On iPad: sidebar hidden by default, hamburger toggles it
+- All motion respects `prefers-reduced-motion` — do not add animation that bypasses this guard

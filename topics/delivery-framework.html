@@ -36,6 +36,42 @@
       <div class="analogy-block">
         The framework is your GPS. You might deviate based on traffic (interviewer cues), but you always know where you are in the journey — and so does your interviewer.
       </div>
+      <div class="diagram-wrap">
+        <svg viewBox="0 0 760 110" xmlns="http://www.w3.org/2000/svg">
+          <defs>
+            <marker id="dfArrow" markerWidth="8" markerHeight="8" refX="6" refY="3" orient="auto"><path d="M0,0 L6,3 L0,6 Z" fill="var(--border2)"/></marker>
+          </defs>
+          <g>
+            <rect class="diag-box role-client" x="10" y="25" width="120" height="55"/>
+            <text class="diag-label" x="70" y="48">1. Clarify</text>
+            <text class="diag-sublabel" x="70" y="65">5 min</text>
+          </g>
+          <path class="diag-arrow-path" d="M130,52 L150,52" marker-end="url(#dfArrow)"/>
+          <g>
+            <rect class="diag-box" x="150" y="25" width="120" height="55"/>
+            <text class="diag-label" x="210" y="48">2. Estimate</text>
+            <text class="diag-sublabel" x="210" y="65">3 min</text>
+          </g>
+          <path class="diag-arrow-path" d="M270,52 L290,52" marker-end="url(#dfArrow)"/>
+          <g>
+            <rect class="diag-box" x="290" y="25" width="120" height="55"/>
+            <text class="diag-label" x="350" y="48">3. API</text>
+            <text class="diag-sublabel" x="350" y="65">5 min</text>
+          </g>
+          <path class="diag-arrow-path" d="M410,52 L430,52" marker-end="url(#dfArrow)"/>
+          <g>
+            <rect class="diag-box role-cache" x="430" y="25" width="150" height="55"/>
+            <text class="diag-label" x="505" y="48">4. High-level</text>
+            <text class="diag-sublabel" x="505" y="65">15 min</text>
+          </g>
+          <path class="diag-arrow-path" d="M580,52 L600,52" marker-end="url(#dfArrow)"/>
+          <g>
+            <rect class="diag-box role-cache" x="600" y="25" width="150" height="55"/>
+            <text class="diag-label" x="675" y="48">5. Deep dive</text>
+            <text class="diag-sublabel" x="675" y="65">15 min</text>
+          </g>
+        </svg>
+      </div>
     </section>
 
     <section id="core-concepts">
@@ -62,15 +98,36 @@
         <div class="stat-card"><div class="stat-val">~1150</div><div class="stat-label">reads/sec (10:1 read:write)</div></div>
         <div class="stat-card"><div class="stat-val">~365GB</div><div class="stat-label">storage/yr (1KB × 10M × 365)</div></div>
       </div>
-      <table class="def-table">
-        <thead><tr><th>Formula</th><th>Example</th></tr></thead>
-        <tbody>
-          <tr><td>Write QPS</td><td>DAU × writes/user/day ÷ 86,400</td></tr>
-          <tr><td>Read QPS</td><td>Write QPS × read:write ratio</td></tr>
-          <tr><td>Storage/yr</td><td>Write QPS × avg object size × 86,400 × 365</td></tr>
-          <tr><td>Bandwidth</td><td>QPS × avg request size</td></tr>
-        </tbody>
-      </table>
+      <div class="diagram-wrap">
+        <svg viewBox="0 0 760 110" xmlns="http://www.w3.org/2000/svg">
+          <defs>
+            <marker id="estArrow" markerWidth="8" markerHeight="8" refX="6" refY="3" orient="auto"><path d="M0,0 L6,3 L0,6 Z" fill="var(--border2)"/></marker>
+          </defs>
+          <g>
+            <rect class="diag-box role-client" x="10" y="25" width="160" height="55"/>
+            <text class="diag-label" x="90" y="48">DAU</text>
+            <text class="diag-sublabel" x="90" y="65">÷ 86,400</text>
+          </g>
+          <path class="diag-arrow-path" d="M170,52 L190,52" marker-end="url(#estArrow)"/>
+          <g>
+            <rect class="diag-box" x="190" y="25" width="160" height="55"/>
+            <text class="diag-label" x="270" y="48">Write QPS</text>
+            <text class="diag-sublabel" x="270" y="65">× R:W ratio</text>
+          </g>
+          <path class="diag-arrow-path" d="M350,52 L370,52" marker-end="url(#estArrow)"/>
+          <g>
+            <rect class="diag-box" x="370" y="25" width="160" height="55"/>
+            <text class="diag-label" x="450" y="48">Read QPS</text>
+          </g>
+          <path class="diag-arrow-path" d="M170,80 C170,95 270,95 270,80" marker-end="url(#estArrow)"/>
+          <g>
+            <rect class="diag-box role-cache" x="550" y="25" width="200" height="55"/>
+            <text class="diag-label" x="650" y="48">Storage/yr</text>
+            <text class="diag-sublabel" x="650" y="65">size × QPS × 86400 × 365</text>
+          </g>
+          <path class="diag-arrow-path" d="M350,52 C440,15 530,15 550,40" marker-end="url(#estArrow)"/>
+        </svg>
+      </div>
       <div class="callout info">These numbers drive your decisions. A system at 100 writes/sec needs no sharding. At 100k writes/sec, you need sharding, Kafka, and a dedicated write path. Say this out loud.</div>
     </section>
 
