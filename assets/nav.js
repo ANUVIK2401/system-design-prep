@@ -37,6 +37,8 @@
   const sidebar  = document.getElementById('sidebar');
   if (!sidebar) return;
 
+  const CHEVRON_SVG = '<svg class="sb-cat-chevron" viewBox="0 0 16 16" width="11" height="11"><path d="M4 6l4 4 4-4" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg>';
+
   const parts      = location.pathname.split('/').filter(Boolean);
   const fileName   = parts[parts.length - 1] || '';
   const curSlug    = fileName.replace('.html', '');
@@ -75,31 +77,53 @@
     <div class="sb-progress-track"><div class="sb-progress-fill" style="width:${(doneCount / TOPICS.length) * 100}%"></div></div>
   </div>`;
 
+  // ── "On this page" — mini TOC for the current page (scroll-spy target) ──
   if (sections.length) {
-    html += `<div class="sb-label">On this page</div>`;
+    html += `<div class="sb-toc">
+      <div class="sb-label sb-toc-label">On this page</div>
+      <div class="sb-toc-list">`;
     sections.forEach(s => {
       html += `<a class="sb-link sb-sublink" href="#${s.id}" data-sec="${s.id}">${s.label}</a>`;
     });
+    html += `</div></div>`;
   }
 
+  // ── Site map — collapsible category accordion ──
+  html += `<div class="sb-sitemap">`;
   const cats = [...new Set(TOPICS.map(t => t.cat))];
-  let stepNum = 0;
   cats.forEach(cat => {
-    html += `<div class="sb-label">${cat}</div>`;
-    TOPICS.filter(t => t.cat === cat).forEach(t => {
-      stepNum++;
+    const catTopics = TOPICS.filter(t => t.cat === cat);
+    const containsActive = catTopics.some(t => t.slug === curSlug);
+    const expanded = containsActive ? ' expanded' : '';
+    html += `<div class="sb-cat${expanded}" data-cat="${cat}">
+      <button type="button" class="sb-cat-head">
+        <span class="sb-cat-name">${cat}</span>
+        <span class="sb-cat-count">${catTopics.length}</span>
+        ${CHEVRON_SVG}
+      </button>
+      <div class="sb-cat-body"><div class="sb-cat-body-inner">`;
+    catTopics.forEach((t, i) => {
       const active = t.slug === curSlug ? ' active' : '';
       const isDone = visited.includes(t.slug) && t.slug !== curSlug;
-      const num = String(stepNum).padStart(2, '0');
+      const num = String(i + 1).padStart(2, '0');
       const stateClass = isDone ? ' done' : '';
       const marker = isDone
         ? `<span class="sb-step-mark sb-step-check">✓</span>`
         : `<span class="sb-step-mark">${num}</span>`;
       html += `<a class="sb-link sb-topic-link${active}${stateClass}" href="${rootToTopics}${t.dir}${t.slug}.html">${marker}<span class="sb-topic-name">${t.name}</span></a>`;
     });
+    html += `</div></div></div>`;
   });
+  html += `</div>`;
 
   sidebar.innerHTML = html;
+
+  // ── Accordion toggle (CSS grid-rows 0fr/1fr transition, no JS height calc) ──
+  sidebar.querySelectorAll('.sb-cat-head').forEach(btn => {
+    btn.addEventListener('click', () => {
+      btn.closest('.sb-cat').classList.toggle('expanded');
+    });
+  });
 
   // Scroll-spy
   if (sections.length) {
