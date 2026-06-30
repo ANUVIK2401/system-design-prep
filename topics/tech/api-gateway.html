@@ -1,0 +1,197 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>API Gateway — SD Prep</title>
+  <link rel="stylesheet" href="../../assets/style.css">
+</head>
+<body>
+  <aside id="sidebar"></aside>
+  <main>
+
+    <header class="page-head">
+      <div class="pill">Key Technologies</div>
+      <h1>API Gateway</h1>
+      <p class="sub">A single front door that centralizes auth, rate limiting, routing, and request shaping so backend services don't each reimplement them.</p>
+      <div class="meta-row">
+        <span class="badge green">12-18 min read</span>
+        <span class="badge blue">Easy-Medium</span>
+      </div>
+    </header>
+
+    <div class="flash-card">
+      <div class="flash-label">Say this in the first 2 minutes</div>
+      <ul>
+        <li>The gateway exists to centralize cross-cutting concerns — auth, rate limiting, routing — so every backend service isn't reimplementing them</li>
+        <li>It validates JWTs/OAuth tokens once at the edge; backend services trust a verified identity header instead of re-checking credentials</li>
+        <li>Rate limiting belongs at the edge (token bucket or sliding window) — stops abusive traffic before it reaches any backend</li>
+        <li>It becomes a single point of failure and a latency bottleneck if not designed for horizontal scale — mention this proactively</li>
+        <li>Request transformation (protocol translation, payload shaping) lets backends evolve independently of the public-facing contract</li>
+      </ul>
+    </div>
+
+    <section id="mental-model">
+      <h2>Mental model</h2>
+      <div class="analogy-block">
+        An API gateway is a building's front desk: it checks ID once, decides which floor you're allowed on, and meters how many people go up at a time — so no individual office has to re-verify every visitor itself.
+      </div>
+    </section>
+
+    <section id="core-concepts">
+      <h2>Core responsibilities</h2>
+      <table class="def-table">
+        <thead><tr><th>Responsibility</th><th>What it does</th></tr></thead>
+        <tbody>
+          <tr><td>Authentication</td><td>Validates JWT/OAuth token signature and expiry once; forwards a trusted identity header downstream</td></tr>
+          <tr><td>Rate limiting</td><td>Token bucket or sliding window per client/API key, rejecting excess requests before they reach backends</td></tr>
+          <tr><td>Routing</td><td>Path-based (<code>/users/*</code> → user service) or header-based (API version, tenant) routing to the right backend</td></tr>
+          <tr><td>Request transformation</td><td>Protocol translation (REST↔gRPC), request/response reshaping, header injection</td></tr>
+          <tr><td>Observability</td><td>Centralized logging, tracing, and metrics for every request crossing the edge</td></tr>
+          <tr><td>TLS termination</td><td>Decrypts HTTPS once at the edge; internal traffic can run plain HTTP/gRPC inside a trusted network</td></tr>
+        </tbody>
+      </table>
+    </section>
+
+    <section id="how-it-works">
+      <h2>Request flow</h2>
+      <div class="diagram-wrap">
+        <svg viewBox="0 0 740 240" xmlns="http://www.w3.org/2000/svg">
+          <defs>
+            <marker id="agArrow" markerWidth="8" markerHeight="8" refX="6" refY="3" orient="auto"><path d="M0,0 L6,3 L0,6 Z" fill="var(--border2)"/></marker>
+            <marker id="agArrowRed" markerWidth="8" markerHeight="8" refX="6" refY="3" orient="auto"><path d="M0,0 L6,3 L0,6 Z" fill="var(--red)"/></marker>
+          </defs>
+
+          <g data-tip="Client sends request with a bearer token">
+            <rect class="diag-box role-client" x="15" y="85" width="100" height="56"/>
+            <text class="diag-label" x="65" y="108" style="font-size:11px">Client</text>
+            <text class="diag-sublabel" x="65" y="125" style="font-size:9px">+ JWT</text>
+          </g>
+          <path class="diag-arrow-path" d="M115,113 L165,113" marker-end="url(#agArrow)"/>
+
+          <g data-tip="1. Verify JWT signature + expiry  2. Check rate limit bucket  3. Route by path">
+            <rect class="diag-box role-cache" x="165" y="40" width="180" height="150"/>
+            <text class="diag-label" x="255" y="65" style="font-size:11px;font-weight:600">API Gateway</text>
+          </g>
+          <text x="180" y="90" font-size="10" fill="#bbb" font-family="Inter,sans-serif">1. Auth check (JWT)</text>
+          <text x="180" y="108" font-size="10" fill="#bbb" font-family="Inter,sans-serif">2. Rate limit check</text>
+          <text x="180" y="126" font-size="10" fill="#bbb" font-family="Inter,sans-serif">3. Route by path</text>
+          <text x="180" y="144" font-size="10" fill="#bbb" font-family="Inter,sans-serif">4. Transform request</text>
+
+          <path class="diag-arrow-path" d="M255,40 L255,15 L40,15 L40,85" marker-end="url(#agArrowRed)" stroke="var(--red)" stroke-dasharray="3 3"/>
+          <text x="100" y="10" font-size="9" fill="var(--red)" font-family="Inter,sans-serif">401 / 429 rejected here — never reaches backends</text>
+
+          <path class="diag-arrow-path" d="M345,80 L420,40" marker-end="url(#agArrow)"/>
+          <path class="diag-arrow-path" d="M345,115 L420,115" marker-end="url(#agArrow)"/>
+          <path class="diag-arrow-path" d="M345,150 L420,190" marker-end="url(#agArrow)"/>
+
+          <g data-tip="Trusts the identity header from the gateway — no re-auth needed">
+            <rect class="diag-box role-db" x="420" y="15" width="150" height="50"/>
+            <text class="diag-label" x="495" y="35" style="font-size:11px">User Service</text>
+          </g>
+          <g data-tip="Trusts the identity header from the gateway">
+            <rect class="diag-box role-db" x="420" y="90" width="150" height="50"/>
+            <text class="diag-label" x="495" y="110" style="font-size:11px">Order Service</text>
+          </g>
+          <g data-tip="Trusts the identity header from the gateway">
+            <rect class="diag-box role-db" x="420" y="165" width="150" height="50"/>
+            <text class="diag-label" x="495" y="185" style="font-size:11px">Payment Service</text>
+          </g>
+        </svg>
+        <div class="diag-legend">
+          <div class="diag-legend-item"><span class="diag-legend-dot role-cache"></span>Gateway — auth, rate limit, route, transform</div>
+          <div class="diag-legend-item"><span class="diag-legend-dot role-db"></span>Backend services — trust the gateway's verified identity</div>
+        </div>
+      </div>
+      <ol class="flow-steps-list">
+        <li><span>Authenticate:</span> validate JWT signature and expiry against the issuer's public key — reject with 401 before touching any backend</li>
+        <li><span>Rate limit:</span> check the client's token bucket / sliding window — reject with 429 if exceeded</li>
+        <li><span>Route:</span> match the request path/headers to the target backend service</li>
+        <li><span>Transform:</span> reshape the request (strip internal headers, translate protocol) and forward with a trusted identity header</li>
+        <li><span>Aggregate (optional):</span> some gateways fan out to multiple services and merge responses (BFF pattern) for mobile-optimized payloads</li>
+      </ol>
+    </section>
+
+    <section id="tradeoffs">
+      <h2>Tradeoffs</h2>
+      <div class="compare-grid">
+        <div class="compare-card good">
+          <div class="compare-label">Wins</div>
+          <ul>
+            <li>Auth/rate-limiting logic lives in one place, not duplicated across N services</li>
+            <li>Backend services can change internal protocols without breaking public clients</li>
+            <li>Centralized observability — every request is logged/traced at one chokepoint</li>
+            <li>Simplifies client code — one endpoint instead of N service URLs</li>
+          </ul>
+        </div>
+        <div class="compare-card bad">
+          <div class="compare-label">Costs</div>
+          <ul>
+            <li>Single point of failure if not deployed redundantly across instances/regions</li>
+            <li>Adds a network hop of latency to every request</li>
+            <li>Can become a bottleneck under load if it does too much synchronous work</li>
+            <li>Another piece of infrastructure to operate, version, and deploy safely</li>
+          </ul>
+        </div>
+      </div>
+      <div class="callout warn">Mitigate the SPOF/bottleneck risk: deploy multiple stateless gateway instances behind a load balancer, keep gateway logic lightweight (no heavy business logic), and consider regional gateways for global traffic to cut cross-region latency.</div>
+    </section>
+
+    <section id="when-to-use">
+      <h2>When to use</h2>
+      <div class="scenario-row use">
+        <span class="scenario-icon">✓</span>
+        <div class="scenario-text"><strong>USE:</strong> any system with more than a couple of backend services that all need auth, rate limiting, or a unified public API surface.</div>
+      </div>
+      <div class="scenario-row avoid">
+        <span class="scenario-icon">✗</span>
+        <div class="scenario-text"><strong>AVOID:</strong> putting heavy business logic or stateful processing inside the gateway — it should stay thin; logic belongs in backend services.</div>
+      </div>
+      <div class="scenario-row watch">
+        <span class="scenario-icon">⚠</span>
+        <div class="scenario-text"><strong>WATCH OUT:</strong> a misconfigured gateway (bad routing rule, broken auth check) takes down access to every backend simultaneously — treat gateway config changes with the same rigor as a DB migration.</div>
+      </div>
+    </section>
+
+    <section id="interview-moves">
+      <h2>Interview moves</h2>
+      <ul class="moves-list">
+        <li><span class="move-num">01</span><div><strong>"I'd centralize JWT validation and rate limiting at the gateway so none of the five backend services reimplement that logic"</strong> — names the core justification immediately</div></li>
+        <li><span class="move-num">02</span><div><strong>"The gateway becomes a single point of failure, so I'd run multiple stateless instances behind a load balancer, and add regional gateways if we're global"</strong> — proactively addresses the obvious follow-up</div></li>
+        <li><span class="move-num">03</span><div><strong>"Rate limiting happens at the edge with a token bucket per API key, so abusive traffic never reaches the backend services at all"</strong> — shows where defense should live</div></li>
+        <li><span class="move-num">04</span><div><strong>"I'd keep the gateway thin — routing, auth, rate limiting only — and push business logic into the services so the gateway doesn't become a deployment bottleneck"</strong> — architectural discipline</div></li>
+      </ul>
+    </section>
+
+    <section id="follow-ups">
+      <h2>Common follow-up questions</h2>
+      <div class="qa-block">
+        <div class="qa-q">How does the gateway avoid becoming a bottleneck?</div>
+        <div class="qa-a">Keep it stateless and horizontally scaled behind a load balancer; avoid synchronous heavy work (DB calls, business logic). Cache auth verification keys locally instead of calling an auth service per request.</div>
+      </div>
+      <div class="qa-block">
+        <div class="qa-q">What's the difference between an API gateway and a load balancer?</div>
+        <div class="qa-a">A load balancer distributes traffic across instances of one service. A gateway routes across many different services and adds auth, rate limiting, and transformation — often sits in front of multiple load balancers.</div>
+      </div>
+      <div class="qa-block">
+        <div class="qa-q">How would you implement rate limiting at the gateway?</div>
+        <div class="qa-a">Token bucket or sliding window counter keyed by API key/user ID, backed by Redis for shared state across gateway instances. Return 429 with a Retry-After header when exceeded.</div>
+      </div>
+      <div class="qa-block">
+        <div class="qa-q">How do backend services trust the identity the gateway asserts?</div>
+        <div class="qa-a">The gateway signs an internal trusted header (or re-issues a short-lived internal JWT) after validating the original token — services verify that signature instead of re-validating the original credential.</div>
+      </div>
+      <div class="qa-block">
+        <div class="qa-q">What is the Backend-for-Frontend (BFF) pattern and how does it relate?</div>
+        <div class="qa-a">A BFF is a gateway variant tailored per client type (mobile vs web) that aggregates multiple backend calls into one optimized response — reduces client-side round trips and over-fetching.</div>
+      </div>
+      <div class="qa-block">
+        <div class="qa-q">How do you handle gateway config changes safely?</div>
+        <div class="qa-a">Treat routing/auth rules as versioned config deployed through CI/CD with canary rollout and automated rollback — a bad rule can silently break every service behind it at once.</div>
+      </div>
+    </section>
+
+  </main>
+  <script src="../../assets/nav.js"></script>
+</body>
+</html>

@@ -1,0 +1,209 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>ZooKeeper — SD Prep</title>
+  <link rel="stylesheet" href="../../assets/style.css">
+</head>
+<body>
+  <aside id="sidebar"></aside>
+  <main>
+
+    <header class="page-head">
+      <div class="pill">Key Technologies</div>
+      <h1>ZooKeeper</h1>
+      <p class="sub">A coordination service for distributed systems — leader election, distributed config, and service discovery, built on a simple hierarchical znode tree.</p>
+      <div class="meta-row">
+        <span class="badge green">12-18 min read</span>
+        <span class="badge blue">Medium</span>
+      </div>
+    </header>
+
+    <div class="flash-card">
+      <div class="flash-label">Say this in the first 2 minutes</div>
+      <ul>
+        <li>ZooKeeper's value isn't the database — it's the coordination primitives: leader election, distributed locks, config propagation</li>
+        <li>Leader election uses ephemeral sequential znodes — lowest sequence number wins, and the watch mechanism notifies the next-in-line on failure</li>
+        <li>Ephemeral nodes disappear automatically when a client disconnects — that's the basis for liveness-based service discovery</li>
+        <li>Watches let clients react to changes (config update, node death) without polling</li>
+        <li>It's increasingly replaced by etcd/Consul in newer systems, but the coordination patterns it embodies are exactly what interviewers want you to reason through — name ZooKeeper or etcd, the pattern is what matters</li>
+      </ul>
+    </div>
+
+    <section id="mental-model">
+      <h2>Mental model</h2>
+      <div class="analogy-block">
+        ZooKeeper is a shared bulletin board with a strict filing system: everyone can post a note in a folder, see who else posted, and get tapped on the shoulder the instant something changes — which turns "who's in charge right now" into a simple, race-free read of who has the lowest ticket number.
+      </div>
+    </section>
+
+    <section id="core-concepts">
+      <h2>Znode tree and node types</h2>
+      <table class="def-table">
+        <thead><tr><th>Znode type</th><th>Behavior</th></tr></thead>
+        <tbody>
+          <tr><td>Persistent</td><td>Exists until explicitly deleted — used for stable config and structure</td></tr>
+          <tr><td>Ephemeral</td><td>Automatically deleted when the creating client's session disconnects — the basis for liveness detection</td></tr>
+          <tr><td>Sequential</td><td>ZooKeeper appends a monotonically increasing counter to the name — guarantees a global, gapless ordering</td></tr>
+          <tr><td>Ephemeral + Sequential</td><td>Combines both — the standard building block for leader election and distributed locks</td></tr>
+          <tr><td>Watch</td><td>A one-time trigger a client sets on a znode — fires on change, client must re-register to keep watching</td></tr>
+        </tbody>
+      </table>
+    </section>
+
+    <section id="how-it-works">
+      <h2>Leader election via ephemeral sequential znodes</h2>
+      <div class="diagram-wrap">
+        <svg viewBox="0 0 720 280" xmlns="http://www.w3.org/2000/svg">
+          <defs>
+            <marker id="zkArrow" markerWidth="8" markerHeight="8" refX="6" refY="3" orient="auto"><path d="M0,0 L6,3 L0,6 Z" fill="var(--border2)"/></marker>
+          </defs>
+
+          <g data-tip="Persistent parent znode — the election 'room' all candidates register under">
+            <rect class="diag-box" x="290" y="15" width="140" height="46"/>
+            <text class="diag-label" x="360" y="35" style="font-size:11px">/election</text>
+            <text class="diag-sublabel" x="360" y="50" style="font-size:9px">persistent znode</text>
+          </g>
+
+          <path class="diag-arrow-path" d="M320,61 L160,110" marker-end="url(#zkArrow)"/>
+          <path class="diag-arrow-path" d="M360,61 L360,110" marker-end="url(#zkArrow)"/>
+          <path class="diag-arrow-path" d="M400,61 L560,110" marker-end="url(#zkArrow)"/>
+
+          <g data-tip="Lowest sequence number among siblings — this client becomes leader">
+            <rect class="diag-box role-cache" x="80" y="110" width="160" height="50"/>
+            <text class="diag-label" x="160" y="130" style="font-size:11px">/election/n_000001</text>
+            <text class="diag-sublabel" x="160" y="146" style="font-size:9px;fill:var(--accent)">LEADER — lowest seq</text>
+          </g>
+          <g data-tip="Watches the znode immediately before it (n_000001), not the leader directly — avoids a herd effect">
+            <rect class="diag-box role-client" x="280" y="110" width="160" height="50"/>
+            <text class="diag-label" x="360" y="130" style="font-size:11px">/election/n_000002</text>
+            <text class="diag-sublabel" x="360" y="146" style="font-size:9px">watches n_000001</text>
+          </g>
+          <g data-tip="Watches n_000002, the node just before it in sequence">
+            <rect class="diag-box role-client" x="480" y="110" width="160" height="50"/>
+            <text class="diag-label" x="560" y="130" style="font-size:11px">/election/n_000003</text>
+            <text class="diag-sublabel" x="560" y="146" style="font-size:9px">watches n_000002</text>
+          </g>
+
+          <path class="diag-arrow-path" d="M280,135 L240,135" marker-end="url(#zkArrow)" stroke="var(--blue)"/>
+          <path class="diag-arrow-path" d="M480,135 L440,135" marker-end="url(#zkArrow)" stroke="var(--blue)"/>
+          <text x="360" y="180" text-anchor="middle" font-size="9.5" fill="var(--blue)" font-family="Inter,sans-serif">each candidate watches only its immediate predecessor</text>
+
+          <text x="360" y="215" text-anchor="middle" font-size="10" fill="var(--amber)" font-family="Inter,sans-serif">If the leader's client disconnects → n_000001 is ephemeral → auto-deleted</text>
+          <text x="360" y="232" text-anchor="middle" font-size="10" fill="var(--amber)" font-family="Inter,sans-serif">n_000002's watch fires → it checks: am I now lowest? → becomes leader</text>
+
+          <g data-tip="On reconnect or restart, the old session's ephemeral znodes are already gone">
+            <rect class="diag-box role-async" x="240" y="245" width="240" height="32" rx="6"/>
+            <text class="diag-label" x="360" y="262" style="font-size:10px">No central coordinator decides — each node self-checks its rank</text>
+          </g>
+        </svg>
+        <div class="diag-legend">
+          <div class="diag-legend-item"><span class="diag-legend-dot role-cache"></span>Current leader — lowest sequence number under /election</div>
+          <div class="diag-legend-item"><span class="diag-legend-dot role-client"></span>Candidates — watch only their immediate predecessor</div>
+        </div>
+      </div>
+      <ol class="flow-steps-list">
+        <li><span>Register:</span> each candidate creates an ephemeral sequential znode under a shared parent (e.g. <code>/election/n_</code>)</li>
+        <li><span>Compare:</span> a candidate lists its siblings; if its own sequence number is lowest, it's the leader</li>
+        <li><span>Watch the predecessor, not the leader:</span> every other candidate sets a watch only on the znode immediately before its own — this avoids every node waking up on every change (the "herd effect")</li>
+        <li><span>Failover:</span> if the leader's session disconnects (crash, network partition), its ephemeral znode is automatically deleted</li>
+        <li><span>Promote:</span> the watch on the deleted znode fires for the next-in-line candidate, which re-checks its rank and becomes leader if it's now lowest</li>
+      </ol>
+    </section>
+
+    <section id="patterns">
+      <h2>Other coordination patterns</h2>
+      <table class="def-table">
+        <thead><tr><th>Pattern</th><th>How ZooKeeper implements it</th></tr></thead>
+        <tbody>
+          <tr><td>Distributed configuration</td><td>Config stored in a persistent znode; clients set a watch and get notified instantly when it changes — no polling</td></tr>
+          <tr><td>Service discovery</td><td>Each service instance registers an ephemeral znode on startup — it vanishes automatically if the instance crashes or loses connectivity, giving accurate liveness without heartbeats to a separate system</td></tr>
+          <tr><td>Distributed lock</td><td>Same ephemeral-sequential pattern as leader election — lowest sequence number holds the lock, releases by disconnecting or deleting its znode</td></tr>
+          <tr><td>Barrier / group membership</td><td>Clients register under a shared znode; the count of children tells every member who else is currently part of the group</td></tr>
+        </tbody>
+      </table>
+    </section>
+
+    <section id="tradeoffs">
+      <h2>Tradeoffs</h2>
+      <div class="compare-grid">
+        <div class="compare-card good">
+          <div class="compare-label">Wins</div>
+          <ul>
+            <li>Battle-tested, strongly consistent coordination primitives</li>
+            <li>Watch mechanism avoids polling for config/leadership changes</li>
+            <li>Ephemeral nodes give accurate liveness detection for free</li>
+            <li>Underpins major systems (Kafka historically, HBase, Hadoop)</li>
+          </ul>
+        </div>
+        <div class="compare-card bad">
+          <div class="compare-label">Costs</div>
+          <ul>
+            <li>Operationally heavy — JVM-based, needs an odd-numbered quorum (3, 5) of dedicated nodes</li>
+            <li>Not designed for high-volume data storage — small values only, coordination metadata</li>
+            <li>etcd (Raft, simpler ops model, gRPC API) has displaced it in many newer systems (Kubernetes uses etcd, not ZK)</li>
+            <li>Kafka itself removed its ZooKeeper dependency (KRaft mode) — a sign of the broader trend</li>
+          </ul>
+        </div>
+      </div>
+    </section>
+
+    <section id="when-to-use">
+      <h2>When to use</h2>
+      <div class="scenario-row use">
+        <span class="scenario-icon">✓</span>
+        <div class="scenario-text"><strong>USE:</strong> any distributed system needing leader election, distributed locks, or coordinated config — whether via ZooKeeper, etcd, or Consul, the pattern is the point.</div>
+      </div>
+      <div class="scenario-row avoid">
+        <span class="scenario-icon">✗</span>
+        <div class="scenario-text"><strong>AVOID:</strong> as a general-purpose data store — it's built for small amounts of coordination metadata, not application data at volume.</div>
+      </div>
+      <div class="scenario-row watch">
+        <span class="scenario-icon">⚠</span>
+        <div class="scenario-text"><strong>WATCH OUT:</strong> a watch only fires once — if you don't re-register it immediately after handling the event, you can miss the next change (a classic correctness bug).</div>
+      </div>
+    </section>
+
+    <section id="interview-moves">
+      <h2>Interview moves</h2>
+      <ul class="moves-list">
+        <li><span class="move-num">01</span><div><strong>"I wouldn't hand-roll leader election with a database row lock — I'd reach for ZooKeeper or etcd, since getting this correct under network partitions is genuinely hard"</strong> — the core justification for using a coordination service at all</div></li>
+        <li><span class="move-num">02</span><div><strong>"Each candidate watches only its immediate predecessor, not the whole election znode — that avoids a thundering herd of every node waking up on every leadership change"</strong> — shows real depth on the mechanism, not just the term</div></li>
+        <li><span class="move-num">03</span><div><strong>"Service instances register an ephemeral znode on startup — if one crashes, that znode disappears automatically, giving us liveness without a separate heartbeat system"</strong> — connects the primitive to a concrete use case</div></li>
+        <li><span class="move-num">04</span><div><strong>"I'd mention etcd is the more common modern choice — Kubernetes uses it — but the coordination pattern, ephemeral-node-based leader election, is identical to what ZooKeeper pioneered"</strong> — shows you're current without dismissing the underlying concept</div></li>
+      </ul>
+    </section>
+
+    <section id="follow-ups">
+      <h2>Common follow-up questions</h2>
+      <div class="qa-block">
+        <div class="qa-q">Why use ephemeral sequential znodes specifically for leader election, instead of just ephemeral?</div>
+        <div class="qa-a">Sequential gives a deterministic, race-free ordering (lowest number wins) without any node needing to coordinate who goes first — pure sequential ephemeral alone can't resolve ties between simultaneous registrations.</div>
+      </div>
+      <div class="qa-block">
+        <div class="qa-q">What happens during a network partition?</div>
+        <div class="qa-a">ZooKeeper uses ZAB (a Paxos-like consensus protocol) requiring a quorum majority to make progress — the minority partition can't elect a new leader or accept writes, avoiding split-brain.</div>
+      </div>
+      <div class="qa-block">
+        <div class="qa-q">How is ZooKeeper different from etcd?</div>
+        <div class="qa-a">etcd uses Raft (generally considered easier to reason about than ZAB), exposes a gRPC/HTTP API instead of a custom protocol, and has become the default in cloud-native systems like Kubernetes.</div>
+      </div>
+      <div class="qa-block">
+        <div class="qa-q">Why did Kafka remove its ZooKeeper dependency?</div>
+        <div class="qa-a">KRaft mode moved metadata management into Kafka itself using a Raft-based quorum of brokers, removing the operational burden of running and scaling a separate ZooKeeper cluster.</div>
+      </div>
+      <div class="qa-block">
+        <div class="qa-q">How would you implement a distributed lock with ZooKeeper?</div>
+        <div class="qa-a">Same ephemeral-sequential pattern as leader election: create a sequential znode, you hold the lock if you're lowest, watch your predecessor, and the lock releases automatically if your session dies.</div>
+      </div>
+      <div class="qa-block">
+        <div class="qa-q">What's the "herd effect" and how does ZooKeeper avoid it?</div>
+        <div class="qa-a">If every client watched the same znode, one change would wake up and re-trigger logic in all of them simultaneously. Watching only your immediate predecessor means a change wakes at most one other client.</div>
+      </div>
+    </section>
+
+  </main>
+  <script src="../../assets/nav.js"></script>
+</body>
+</html>

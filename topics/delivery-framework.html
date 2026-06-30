@@ -41,31 +41,31 @@
           <defs>
             <marker id="dfArrow" markerWidth="8" markerHeight="8" refX="6" refY="3" orient="auto"><path d="M0,0 L6,3 L0,6 Z" fill="var(--border2)"/></marker>
           </defs>
-          <g>
+          <g data-tip="Functional requirements, users, scale, exclusions — get this wrong and everything downstream is wasted effort">
             <rect class="diag-box role-client" x="10" y="25" width="120" height="55"/>
             <text class="diag-label" x="70" y="48">1. Clarify</text>
             <text class="diag-sublabel" x="70" y="65">5 min</text>
           </g>
           <path class="diag-arrow-path" d="M130,52 L150,52" marker-end="url(#dfArrow)"/>
-          <g>
+          <g data-tip="Back-of-envelope QPS, storage, bandwidth — these numbers justify every architecture decision you make next">
             <rect class="diag-box" x="150" y="25" width="120" height="55"/>
             <text class="diag-label" x="210" y="48">2. Estimate</text>
             <text class="diag-sublabel" x="210" y="65">3 min</text>
           </g>
           <path class="diag-arrow-path" d="M270,52 L290,52" marker-end="url(#dfArrow)"/>
-          <g>
+          <g data-tip="Define the core endpoints/contracts — forces precision about what the system actually exposes">
             <rect class="diag-box" x="290" y="25" width="120" height="55"/>
             <text class="diag-label" x="350" y="48">3. API</text>
             <text class="diag-sublabel" x="350" y="65">5 min</text>
           </g>
           <path class="diag-arrow-path" d="M410,52 L430,52" marker-end="url(#dfArrow)"/>
-          <g>
+          <g data-tip="Draw the core components and data flow at a level everyone in the room can follow before zooming in">
             <rect class="diag-box role-cache" x="430" y="25" width="150" height="55"/>
             <text class="diag-label" x="505" y="48">4. High-level</text>
             <text class="diag-sublabel" x="505" y="65">15 min</text>
           </g>
           <path class="diag-arrow-path" d="M580,52 L600,52" marker-end="url(#dfArrow)"/>
-          <g>
+          <g data-tip="Interviewer picks the hardest part — go deep on bottlenecks, failure modes, and tradeoffs here">
             <rect class="diag-box role-cache" x="600" y="25" width="150" height="55"/>
             <text class="diag-label" x="675" y="48">5. Deep dive</text>
             <text class="diag-sublabel" x="675" y="65">15 min</text>
@@ -103,24 +103,24 @@
           <defs>
             <marker id="estArrow" markerWidth="8" markerHeight="8" refX="6" refY="3" orient="auto"><path d="M0,0 L6,3 L0,6 Z" fill="var(--border2)"/></marker>
           </defs>
-          <g>
+          <g data-tip="Start from daily active users — every other estimate in this chain derives from this one number">
             <rect class="diag-box role-client" x="10" y="25" width="160" height="55"/>
             <text class="diag-label" x="90" y="48">DAU</text>
             <text class="diag-sublabel" x="90" y="65">÷ 86,400</text>
           </g>
           <path class="diag-arrow-path" d="M170,52 L190,52" marker-end="url(#estArrow)"/>
-          <g>
+          <g data-tip="Divide DAU by seconds/day to get average write throughput — tells you whether sharding is even on the table">
             <rect class="diag-box" x="190" y="25" width="160" height="55"/>
             <text class="diag-label" x="270" y="48">Write QPS</text>
             <text class="diag-sublabel" x="270" y="65">× R:W ratio</text>
           </g>
           <path class="diag-arrow-path" d="M350,52 L370,52" marker-end="url(#estArrow)"/>
-          <g>
+          <g data-tip="Apply the read:write ratio (often 10:1+) — read QPS usually dominates and drives caching decisions">
             <rect class="diag-box" x="370" y="25" width="160" height="55"/>
             <text class="diag-label" x="450" y="48">Read QPS</text>
           </g>
           <path class="diag-arrow-path" d="M170,80 C170,95 270,95 270,80" marker-end="url(#estArrow)"/>
-          <g>
+          <g data-tip="Multiply record size by writes/day by 365 — surfaces whether you need cold storage tiers or partitioning by age">
             <rect class="diag-box role-cache" x="550" y="25" width="200" height="55"/>
             <text class="diag-label" x="650" y="48">Storage/yr</text>
             <text class="diag-sublabel" x="650" y="65">size × QPS × 86400 × 365</text>

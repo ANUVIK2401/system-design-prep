@@ -1,0 +1,234 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Kafka — SD Prep</title>
+  <link rel="stylesheet" href="../../assets/style.css">
+</head>
+<body>
+  <aside id="sidebar"></aside>
+  <main>
+
+    <header class="page-head">
+      <div class="pill">Key Technologies</div>
+      <h1>Kafka</h1>
+      <p class="sub">A distributed, partitioned, replicated commit log — partitions are the unit of parallelism, consumer groups are the unit of scale.</p>
+      <div class="meta-row">
+        <span class="badge green">15-20 min read</span>
+        <span class="badge blue">Medium</span>
+      </div>
+    </header>
+
+    <div class="flash-card">
+      <div class="flash-label">Say this in the first 2 minutes</div>
+      <ul>
+        <li>A topic is split into partitions — ordering is guaranteed only within a partition, never across the whole topic</li>
+        <li>Partition count is your parallelism ceiling: more consumers than partitions in a group just sit idle</li>
+        <li>Each partition is consumed by exactly one consumer within a consumer group — that's how horizontal scaling works</li>
+        <li>At-least-once + idempotent consumer is the practical default; exactly-once (idempotent producer + transactions) is for when duplicates are unacceptable and can't be deduped downstream</li>
+        <li>Consumer lag (how far behind the latest offset a group is) is your single most important Kafka health metric</li>
+      </ul>
+    </div>
+
+    <section id="mental-model">
+      <h2>Mental model</h2>
+      <div class="analogy-block">
+        A Kafka topic is a set of append-only logs, not a queue. Consumers don't remove messages — they track their own bookmark (offset) and can rewind it. That's what makes replay, multiple independent consumers, and durability all fall out of the same simple structure.
+      </div>
+    </section>
+
+    <section id="core-concepts">
+      <h2>Partitions and consumer groups</h2>
+      <table class="def-table">
+        <thead><tr><th>Concept</th><th>What it means</th></tr></thead>
+        <tbody>
+          <tr><td>Partition</td><td>An ordered, append-only log. The unit of parallelism — more partitions = more concurrent consumers possible</td></tr>
+          <tr><td>Ordering guarantee</td><td>Only within a single partition. Across partitions, no ordering is guaranteed at all</td></tr>
+          <tr><td>Partition key</td><td>Hash of the key picks the partition — same key always lands on the same partition, preserving per-key order</td></tr>
+          <tr><td>Consumer group</td><td>A set of consumers sharing the work of a topic — Kafka assigns each partition to exactly one consumer in the group</td></tr>
+          <tr><td>Consumer lag</td><td>Difference between the latest produced offset and a consumer group's committed offset — the key health signal</td></tr>
+          <tr><td>Rebalancing</td><td>Reassigning partitions across consumers when one joins/leaves the group — briefly pauses consumption</td></tr>
+        </tbody>
+      </table>
+      <div class="callout warn">Picking partition count: if you expect to scale to 12 consumers eventually, provision at least 12 partitions up front — you can add partitions later, but that breaks key-based ordering for existing keys since the hash-to-partition mapping changes.</div>
+    </section>
+
+    <section id="how-it-works">
+      <h2>Producer → partitions → consumer group</h2>
+      <div class="diagram-wrap">
+        <svg viewBox="0 0 740 280" xmlns="http://www.w3.org/2000/svg">
+          <defs>
+            <marker id="kArrow" markerWidth="8" markerHeight="8" refX="6" refY="3" orient="auto"><path d="M0,0 L6,3 L0,6 Z" fill="var(--border2)"/></marker>
+          </defs>
+
+          <g data-tip="Producer hashes the message key to pick a partition">
+            <rect class="diag-box role-client" x="15" y="105" width="110" height="56"/>
+            <text class="diag-label" x="70" y="128" style="font-size:11px">Producer</text>
+            <text class="diag-sublabel" x="70" y="145" style="font-size:9px">hash(key) → partition</text>
+          </g>
+
+          <path class="diag-arrow-path" d="M125,120 L195,40" marker-end="url(#kArrow)"/>
+          <path class="diag-arrow-path" d="M125,133 L195,133" marker-end="url(#kArrow)"/>
+          <path class="diag-arrow-path" d="M125,146 L195,225" marker-end="url(#kArrow)"/>
+
+          <g data-tip="Partition 0 — append-only log, ordered within itself">
+            <rect class="diag-box role-async" x="195" y="15" width="150" height="50"/>
+            <text class="diag-label" x="270" y="35" style="font-size:11px">Partition 0</text>
+            <text class="diag-sublabel" x="270" y="51" style="font-size:9px">offsets 0..n</text>
+          </g>
+          <g data-tip="Partition 1 — independent ordered log">
+            <rect class="diag-box role-async" x="195" y="108" width="150" height="50"/>
+            <text class="diag-label" x="270" y="128" style="font-size:11px">Partition 1</text>
+          </g>
+          <g data-tip="Partition 2 — independent ordered log">
+            <rect class="diag-box role-async" x="195" y="200" width="150" height="50"/>
+            <text class="diag-label" x="270" y="220" style="font-size:11px">Partition 2</text>
+          </g>
+
+          <path class="diag-arrow-path" d="M345,40 L420,40" marker-end="url(#kArrow)"/>
+          <path class="diag-arrow-path" d="M345,133 L420,133" marker-end="url(#kArrow)"/>
+          <path class="diag-arrow-path" d="M345,225 L420,225" marker-end="url(#kArrow)"/>
+
+          <g data-tip="Consumer 1 — owns partition 0 exclusively within this group">
+            <rect class="diag-box role-db" x="420" y="15" width="150" height="50"/>
+            <text class="diag-label" x="495" y="35" style="font-size:11px">Consumer 1</text>
+            <text class="diag-sublabel" x="495" y="51" style="font-size:9px">reads partition 0</text>
+          </g>
+          <g data-tip="Consumer 2 — owns partition 1 exclusively within this group">
+            <rect class="diag-box role-db" x="420" y="108" width="150" height="50"/>
+            <text class="diag-label" x="495" y="128" style="font-size:11px">Consumer 2</text>
+            <text class="diag-sublabel" x="495" y="144" style="font-size:9px">reads partition 1</text>
+          </g>
+          <g data-tip="Consumer 3 — owns partition 2 exclusively within this group">
+            <rect class="diag-box role-db" x="420" y="200" width="150" height="50"/>
+            <text class="diag-label" x="495" y="220" style="font-size:11px">Consumer 3</text>
+            <text class="diag-sublabel" x="495" y="236" style="font-size:9px">reads partition 2</text>
+          </g>
+
+          <g data-tip="Consumer group boundary — Kafka guarantees each partition maps to exactly one consumer inside it">
+            <rect x="405" y="0" width="180" height="265" fill="none" stroke="var(--accent)" stroke-width="1" stroke-dasharray="4 3" rx="8"/>
+          </g>
+          <text x="495" y="280" text-anchor="middle" font-size="10" fill="var(--accent)" font-family="Inter,sans-serif">consumer group: order-processing</text>
+        </svg>
+        <div class="diag-legend">
+          <div class="diag-legend-item"><span class="diag-legend-dot role-async"></span>Partitions — ordered logs, the parallelism unit</div>
+          <div class="diag-legend-item"><span class="diag-legend-dot role-db"></span>Consumer group — 1:1 partition-to-consumer mapping</div>
+        </div>
+      </div>
+      <ol class="flow-steps-list">
+        <li><span>Produce:</span> producer hashes the message key, deterministically picks a partition</li>
+        <li><span>Append:</span> message is written to the end of that partition's log, replicated to followers before ack (if <code>acks=all</code>)</li>
+        <li><span>Assign:</span> Kafka's group coordinator assigns each partition to exactly one consumer in the group</li>
+        <li><span>Consume + commit:</span> consumer reads sequentially, processes, commits its offset — restart resumes from the last committed offset</li>
+        <li><span>Scale:</span> adding a 4th consumer to a 3-partition topic leaves it idle — partition count is the hard ceiling on parallelism</li>
+      </ol>
+    </section>
+
+    <section id="exactly-once">
+      <h2>Delivery guarantees</h2>
+      <div class="compare-grid">
+        <div class="compare-card good">
+          <div class="compare-label">At-least-once + idempotent consumer</div>
+          <ul>
+            <li>Default and simplest — retries on failure may redeliver a message</li>
+            <li>Consumer dedups by a unique key (e.g. UPSERT on order_id) so reprocessing is harmless</li>
+            <li>Lower overhead, easier to reason about, scales further</li>
+            <li>Good enough for the vast majority of real systems</li>
+          </ul>
+        </div>
+        <div class="compare-card bad">
+          <div class="compare-label">Exactly-once semantics (EOS)</div>
+          <ul>
+            <li>Idempotent producer (sequence numbers dedupe retries) + transactional writes across produce + offset commit</li>
+            <li>Needed when duplicates genuinely can't be tolerated and can't be deduped downstream (e.g. financial ledger entries)</li>
+            <li>Higher latency and throughput cost — full transaction coordination per batch</li>
+            <li>Only spans Kafka-to-Kafka; doesn't make external side effects (an API call) exactly-once</li>
+          </ul>
+        </div>
+      </div>
+      <div class="callout info">Most interview answers should default to "at-least-once with an idempotent consumer" and only reach for EOS when explicitly pressed on duplicate-sensitive correctness (e.g. payments).</div>
+    </section>
+
+    <section id="tradeoffs">
+      <h2>Tradeoffs</h2>
+      <div class="compare-grid">
+        <div class="compare-card good">
+          <div class="compare-label">Wins</div>
+          <ul>
+            <li>Decouples producers from consumers — independent scaling and deploys</li>
+            <li>Durable, replayable log — new consumers can read from the beginning</li>
+            <li>Massive throughput — sequential disk I/O, batched writes</li>
+            <li>Multiple independent consumer groups can read the same topic</li>
+          </ul>
+        </div>
+        <div class="compare-card bad">
+          <div class="compare-label">Costs</div>
+          <ul>
+            <li>No ordering across partitions — must design partition keys carefully</li>
+            <li>Operational complexity: brokers, ZooKeeper/KRaft, partition rebalancing</li>
+            <li>Rebalancing pauses consumption briefly when group membership changes</li>
+            <li>Overkill for simple point-to-point task queues (&lt;10k msgs/sec) — SQS/RabbitMQ is simpler</li>
+          </ul>
+        </div>
+      </div>
+    </section>
+
+    <section id="when-to-use">
+      <h2>When to use</h2>
+      <div class="scenario-row use">
+        <span class="scenario-icon">✓</span>
+        <div class="scenario-text"><strong>USE:</strong> event-driven fan-out (one event, many independent consumers), audit/event log, decoupling write-heavy producers from slower consumers, &gt;100k events/sec.</div>
+      </div>
+      <div class="scenario-row avoid">
+        <span class="scenario-icon">✗</span>
+        <div class="scenario-text"><strong>AVOID:</strong> simple request-response or point-to-point task queues at modest scale — a managed queue (SQS) is operationally simpler and sufficient.</div>
+      </div>
+      <div class="scenario-row watch">
+        <span class="scenario-icon">⚠</span>
+        <div class="scenario-text"><strong>WATCH OUT:</strong> growing consumer lag means consumers can't keep up with producers — alert on it before it becomes hours of backlog, not after.</div>
+      </div>
+    </section>
+
+    <section id="interview-moves">
+      <h2>Interview moves</h2>
+      <ul class="moves-list">
+        <li><span class="move-num">01</span><div><strong>"I'd partition by user_id so all events for one user stay ordered, while different users process in parallel"</strong> — shows you understand the ordering-vs-parallelism tradeoff explicitly</div></li>
+        <li><span class="move-num">02</span><div><strong>"Partition count sets the parallelism ceiling — I'd provision for 2-3x our expected consumer count up front since adding partitions later breaks existing key-to-partition mapping"</strong> — concrete capacity planning</div></li>
+        <li><span class="move-num">03</span><div><strong>"At-least-once with an idempotent consumer is the default here — exactly-once only matters if duplicates are truly unrecoverable, like a payment ledger"</strong> — calibrates the right level of guarantee instead of over-engineering</div></li>
+        <li><span class="move-num">04</span><div><strong>"I'd alert on consumer lag, not just broker uptime — a healthy cluster with a backed-up consumer group is still a production incident"</strong> — operational maturity</div></li>
+      </ul>
+    </section>
+
+    <section id="follow-ups">
+      <h2>Common follow-up questions</h2>
+      <div class="qa-block">
+        <div class="qa-q">Why does Kafka only guarantee ordering within a partition?</div>
+        <div class="qa-a">Each partition is a single append-only log handled by one broker leader at a time. Guaranteeing global order across partitions would mean serializing all writes through one node, killing throughput.</div>
+      </div>
+      <div class="qa-block">
+        <div class="qa-q">What causes consumer rebalancing and why is it disruptive?</div>
+        <div class="qa-a">Triggered when a consumer joins, leaves, or is considered dead (missed heartbeat). All partitions get reassigned, briefly pausing consumption across the whole group during the rebalance.</div>
+      </div>
+      <div class="qa-block">
+        <div class="qa-q">How do you choose the number of partitions?</div>
+        <div class="qa-a">Base it on target throughput ÷ per-partition throughput, and your expected max consumer count, since consumers beyond partition count sit idle. Err generous — you can add but not safely shrink.</div>
+      </div>
+      <div class="qa-block">
+        <div class="qa-q">What's the difference between Kafka and a traditional message queue?</div>
+        <div class="qa-a">A queue removes a message once consumed — one logical consumer. Kafka retains messages for a configured period; multiple independent consumer groups can each read the full stream at their own pace.</div>
+      </div>
+      <div class="qa-block">
+        <div class="qa-q">How does Kafka achieve durability?</div>
+        <div class="qa-a">Each partition is replicated across multiple brokers (replication factor, typically 3). A write is acknowledged once it's written to the leader and, with <code>acks=all</code>, replicated to enough followers.</div>
+      </div>
+      <div class="qa-block">
+        <div class="qa-q">When would you NOT use Kafka?</div>
+        <div class="qa-a">Low-volume task queues, simple background jobs, or when you need true exactly-once delivery to an external non-Kafka system without building idempotency yourself — a managed queue or workflow engine is simpler.</div>
+      </div>
+    </section>
+
+  </main>
+  <script src="../../assets/nav.js"></script>
+</body>
+</html>

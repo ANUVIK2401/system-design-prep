@@ -1,0 +1,216 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>DynamoDB — SD Prep</title>
+  <link rel="stylesheet" href="../../assets/style.css">
+</head>
+<body>
+  <aside id="sidebar"></aside>
+  <main>
+
+    <header class="page-head">
+      <div class="pill">Key Technologies</div>
+      <h1>DynamoDB</h1>
+      <p class="sub">A fully managed, partition-key-sharded NoSQL store built for predictable-access-pattern workloads at massive scale with zero ops overhead.</p>
+      <div class="meta-row">
+        <span class="badge green">12-18 min read</span>
+        <span class="badge blue">Medium</span>
+      </div>
+    </header>
+
+    <div class="flash-card">
+      <div class="flash-label">Say this in the first 2 minutes</div>
+      <ul>
+        <li>Partition key hashes to a physical partition — pick a high-cardinality key or you create a hot partition</li>
+        <li>GSI = different partition/sort key, its own throughput, eventually consistent; LSI = same partition key, alternate sort key, can be strongly consistent, must exist at table creation</li>
+        <li>Two capacity modes: provisioned (predictable cost, needs autoscaling) vs on-demand (pay-per-request, handles spiky traffic with zero planning)</li>
+        <li>Single-table design is the advanced DynamoDB pattern — multiple entity types in one table to support several access patterns with one query each</li>
+        <li>It's fully managed — no ops overhead, but you trade away joins and ad-hoc queries for that simplicity</li>
+      </ul>
+    </div>
+
+    <section id="mental-model">
+      <h2>Mental model</h2>
+      <div class="analogy-block">
+        DynamoDB is a giant filing cabinet sorted by a label you choose up front. If you know exactly which drawer (partition key) you need, retrieval is instant — but you can't flip through every drawer looking for something; you must have planned your labeling system before you needed it.
+      </div>
+    </section>
+
+    <section id="core-concepts">
+      <h2>Partition keys and hot partitions</h2>
+      <table class="def-table">
+        <thead><tr><th>Concept</th><th>What it means</th></tr></thead>
+        <tbody>
+          <tr><td>Partition key</td><td>Hashed to determine the physical partition — all items with the same key live together</td></tr>
+          <tr><td>Sort key (optional)</td><td>Orders items within a partition, enables range queries (e.g. all orders for a user, newest first)</td></tr>
+          <tr><td>Hot partition</td><td>Low-cardinality or skewed partition key (e.g. a single popular tenant_id) concentrates traffic on one physical partition, throttling it</td></tr>
+          <tr><td>Choosing a key</td><td>Pick high-cardinality, evenly-accessed values — composite keys (e.g. <code>userId#date</code>) spread load when a natural key alone is too coarse</td></tr>
+        </tbody>
+      </table>
+
+      <h3 style="font-size:13px;color:var(--text);margin:1.5rem 0 0.75rem;font-weight:600">GSI vs LSI</h3>
+      <table class="def-table">
+        <thead><tr><th></th><th>Global Secondary Index (GSI)</th><th>Local Secondary Index (LSI)</th></tr></thead>
+        <tbody>
+          <tr><td>Partition key</td><td>Different from the base table</td><td>Same as the base table</td></tr>
+          <tr><td>Sort key</td><td>Different attribute, your choice</td><td>Alternate attribute, same partition</td></tr>
+          <tr><td>Consistency</td><td>Eventually consistent only</td><td>Can be strongly consistent</td></tr>
+          <tr><td>When created</td><td>Anytime, even after table creation</td><td>Only at table creation — cannot be added later</td></tr>
+          <tr><td>Capacity</td><td>Its own provisioned throughput</td><td>Shares the base table's throughput</td></tr>
+        </tbody>
+      </table>
+      <div class="callout warn">LSI's "must exist at table creation" constraint is the single biggest reason teams default to GSIs — you rarely know every access pattern upfront, and GSIs let you add new query paths as requirements evolve.</div>
+    </section>
+
+    <section id="how-it-works">
+      <h2>Partition routing and capacity modes</h2>
+      <div class="diagram-wrap">
+        <svg viewBox="0 0 720 200" xmlns="http://www.w3.org/2000/svg">
+          <defs>
+            <marker id="ddbArrow" markerWidth="8" markerHeight="8" refX="6" refY="3" orient="auto"><path d="M0,0 L6,3 L0,6 Z" fill="var(--border2)"/></marker>
+          </defs>
+
+          <g data-tip="Write request includes the item's partition key, e.g. userId = 'u882'">
+            <rect class="diag-box role-client" x="15" y="75" width="120" height="50"/>
+            <text class="diag-label" x="75" y="95" style="font-size:11px">PutItem</text>
+            <text class="diag-sublabel" x="75" y="111" style="font-size:9px">userId: "u882"</text>
+          </g>
+          <path class="diag-arrow-path" d="M135,100 L195,100" marker-end="url(#ddbArrow)"/>
+
+          <g data-tip="DynamoDB hashes the partition key to deterministically pick a physical partition">
+            <rect class="diag-box role-cache" x="195" y="75" width="150" height="50"/>
+            <text class="diag-label" x="270" y="95" style="font-size:11px">Hash(partition key)</text>
+            <text class="diag-sublabel" x="270" y="111" style="font-size:9px">internal routing</text>
+          </g>
+
+          <path class="diag-arrow-path" d="M345,90 L420,30" marker-end="url(#ddbArrow)"/>
+          <path class="diag-arrow-path" d="M345,100 L420,100" marker-end="url(#ddbArrow)"/>
+          <path class="diag-arrow-path" d="M345,110 L420,170" marker-end="url(#ddbArrow)"/>
+
+          <g data-tip="High-cardinality keys spread evenly — healthy partition">
+            <rect class="diag-box role-db" x="420" y="5" width="160" height="50"/>
+            <text class="diag-label" x="500" y="25" style="font-size:11px">Partition A</text>
+            <text class="diag-sublabel" x="500" y="41" style="font-size:9px;fill:var(--accent)">even load</text>
+          </g>
+          <g data-tip="Healthy, evenly loaded partition">
+            <rect class="diag-box role-db" x="420" y="75" width="160" height="50"/>
+            <text class="diag-label" x="500" y="95" style="font-size:11px">Partition B</text>
+            <text class="diag-sublabel" x="500" y="111" style="font-size:9px;fill:var(--accent)">even load</text>
+          </g>
+          <g data-tip="A low-cardinality key (e.g. status field) concentrates traffic here — throttles regardless of total table capacity">
+            <rect class="diag-box role-async" x="420" y="145" width="160" height="50"/>
+            <text class="diag-label" x="500" y="165" style="font-size:11px">Partition C</text>
+            <text class="diag-sublabel" x="500" y="181" style="font-size:9px;fill:var(--amber)">hot — throttled</text>
+          </g>
+        </svg>
+        <div class="diag-legend">
+          <div class="diag-legend-item"><span class="diag-legend-dot role-db"></span>Healthy partitions — high-cardinality key spreads load</div>
+          <div class="diag-legend-item"><span class="diag-legend-dot role-async"></span>Hot partition — low-cardinality key concentrates traffic</div>
+        </div>
+      </div>
+      <div class="compare-grid">
+        <div class="compare-card good">
+          <div class="compare-label">Provisioned + auto-scaling</div>
+          <ul>
+            <li>You set read/write capacity units; auto-scaling adjusts within bounds based on utilization</li>
+            <li>Cheaper at steady, predictable traffic</li>
+            <li>Requires capacity planning and tuning scaling policies</li>
+            <li>Can still throttle on sudden spikes faster than auto-scaling reacts</li>
+          </ul>
+        </div>
+        <div class="compare-card bad">
+          <div class="compare-label">On-demand</div>
+          <ul>
+            <li>Pay per request, no capacity planning needed</li>
+            <li>Instantly absorbs traffic spikes — scales to previous peak automatically</li>
+            <li>More expensive per-request at sustained high, predictable volume</li>
+            <li>Best for unpredictable or new workloads where you don't know the traffic shape yet</li>
+          </ul>
+        </div>
+      </div>
+    </section>
+
+    <section id="tradeoffs">
+      <h2>Tradeoffs</h2>
+      <div class="compare-grid">
+        <div class="compare-card good">
+          <div class="compare-label">Wins</div>
+          <ul>
+            <li>Fully managed — no servers, patching, or cluster ops</li>
+            <li>Single-digit millisecond latency at virtually unlimited scale</li>
+            <li>Seamless horizontal scaling via automatic partition splitting</li>
+            <li>Built-in global tables for multi-region active-active replication</li>
+          </ul>
+        </div>
+        <div class="compare-card bad">
+          <div class="compare-label">Costs</div>
+          <ul>
+            <li>No joins, no ad-hoc queries — access patterns must be designed upfront</li>
+            <li>AWS vendor lock-in</li>
+            <li>Hot partitions throttle even when overall table capacity is fine</li>
+            <li>Single-table design (the advanced pattern) has a real learning curve and reduces query flexibility for ease of scaling</li>
+          </ul>
+        </div>
+      </div>
+    </section>
+
+    <section id="when-to-use">
+      <h2>When to use</h2>
+      <div class="scenario-row use">
+        <span class="scenario-icon">✓</span>
+        <div class="scenario-text"><strong>USE:</strong> massive-scale workloads with well-known, stable access patterns — session stores, shopping carts, gaming leaderboards, IoT device state — especially already on AWS.</div>
+      </div>
+      <div class="scenario-row avoid">
+        <span class="scenario-icon">✗</span>
+        <div class="scenario-text"><strong>AVOID:</strong> ad-hoc analytical queries, evolving/unknown access patterns, or anything requiring complex joins across entities.</div>
+      </div>
+      <div class="scenario-row watch">
+        <span class="scenario-icon">⚠</span>
+        <div class="scenario-text"><strong>WATCH OUT:</strong> a low-cardinality partition key (e.g. status: "active"/"inactive") creates a hot partition that throttles regardless of how much total table capacity you provision.</div>
+      </div>
+    </section>
+
+    <section id="interview-moves">
+      <h2>Interview moves</h2>
+      <ul class="moves-list">
+        <li><span class="move-num">01</span><div><strong>"I'd pick userId as the partition key here — high cardinality, evenly distributed — instead of something like region, which would create hot partitions"</strong> — shows you understand the hot-partition failure mode concretely</div></li>
+        <li><span class="move-num">02</span><div><strong>"I'd start with on-demand capacity since we don't know the traffic shape yet, and switch to provisioned with autoscaling once we have steady-state data"</strong> — pragmatic, justified capacity choice</div></li>
+        <li><span class="move-num">03</span><div><strong>"For this 'get all orders by status' query I'd add a GSI rather than an LSI, since we'll likely need new indexes later and LSIs must be defined at table creation"</strong> — correct, specific tradeoff reasoning</div></li>
+        <li><span class="move-num">04</span><div><strong>"I'd briefly mention single-table design as an option here, but keep it simple with separate tables unless we have a specific reason to optimize for fewer round trips"</strong> — shows awareness without over-engineering</div></li>
+      </ul>
+    </section>
+
+    <section id="follow-ups">
+      <h2>Common follow-up questions</h2>
+      <div class="qa-block">
+        <div class="qa-q">What is single-table design and why would you use it?</div>
+        <div class="qa-a">Storing multiple entity types in one DynamoDB table using generic partition/sort key names, so a single query can retrieve related entities together. Reduces round trips but adds real schema complexity.</div>
+      </div>
+      <div class="qa-block">
+        <div class="qa-q">How do you fix a hot partition?</div>
+        <div class="qa-a">Add a random or calculated suffix to the partition key to spread writes (write sharding), or redesign the key to a higher-cardinality attribute that better matches actual access patterns.</div>
+      </div>
+      <div class="qa-block">
+        <div class="qa-q">Why can't you add an LSI after table creation?</div>
+        <div class="qa-a">LSIs share the base table's partition structure and storage internally — DynamoDB needs to know about every LSI when items are first written so it can maintain them inline, hence the upfront requirement.</div>
+      </div>
+      <div class="qa-block">
+        <div class="qa-q">DynamoDB vs Cassandra — how do you choose?</div>
+        <div class="qa-a">DynamoDB for zero-ops on AWS with comparable performance. Cassandra for multi-cloud/on-prem flexibility or when you specifically need tunable consistency per query rather than DynamoDB's simpler consistency model.</div>
+      </div>
+      <div class="qa-block">
+        <div class="qa-q">How does DynamoDB handle strong consistency?</div>
+        <div class="qa-a">Reads default to eventually consistent (cheaper, faster) but support a strongly consistent read flag that reads from the leader replica — costs roughly 2x the read capacity of an eventually consistent read.</div>
+      </div>
+      <div class="qa-block">
+        <div class="qa-q">What's DynamoDB Streams used for?</div>
+        <div class="qa-a">A change log of item-level modifications, consumable by Lambda or Kinesis — common for triggering downstream processing, replicating to Elasticsearch, or building event-driven workflows off table changes.</div>
+      </div>
+    </section>
+
+  </main>
+  <script src="../../assets/nav.js"></script>
+</body>
+</html>

@@ -41,27 +41,31 @@
     <section id="core-concepts">
       <h2>CAP theorem</h2>
       <div class="diagram-wrap">
-        <svg viewBox="0 0 400 230" xmlns="http://www.w3.org/2000/svg">
-          <polygon points="200,20 30,200 370,200" fill="none" stroke="var(--border2)" stroke-width="1.5"/>
-          <line x1="200" y1="20" x2="200" y2="200" stroke="var(--border)" stroke-width="1" stroke-dasharray="3,3"/>
-          <g>
-            <circle class="diag-box role-client" cx="200" cy="20" r="34"/>
-            <text class="diag-label" x="200" y="16">C</text>
-            <text class="diag-sublabel" x="200" y="32">Consistency</text>
+        <svg viewBox="0 0 400 270" xmlns="http://www.w3.org/2000/svg">
+          <polygon points="200,40 38,234 362,234" fill="none" stroke="var(--border2)" stroke-width="1.5"/>
+          <line x1="200" y1="40" x2="200" y2="234" stroke="var(--border)" stroke-width="1" stroke-dasharray="3,3"/>
+          <g class="cap-node" data-cap="C" tabindex="0">
+            <circle class="diag-box role-client" cx="200" cy="40" r="34"/>
+            <text class="diag-label" x="200" y="36">C</text>
+            <text class="diag-sublabel" x="200" y="52">Consistency</text>
           </g>
-          <g>
-            <circle class="diag-box role-cache" cx="30" cy="200" r="34"/>
-            <text class="diag-label" x="30" y="196">A</text>
-            <text class="diag-sublabel" x="30" y="212">Availability</text>
+          <g class="cap-node" data-cap="A" tabindex="0">
+            <circle class="diag-box role-cache" cx="38" cy="234" r="34"/>
+            <text class="diag-label" x="38" y="230">A</text>
+            <text class="diag-sublabel" x="38" y="246">Availability</text>
           </g>
-          <g>
-            <circle class="diag-box role-async" cx="370" cy="200" r="34"/>
-            <text class="diag-label" x="370" y="196">P</text>
-            <text class="diag-sublabel" x="370" y="212">Partition tol.</text>
+          <g class="cap-node" data-cap="P" tabindex="0">
+            <circle class="diag-box role-async" cx="362" cy="234" r="34"/>
+            <text class="diag-label" x="362" y="230">P</text>
+            <text class="diag-sublabel" x="362" y="246">Partition tol.</text>
           </g>
-          <text class="diag-sublabel" x="200" y="120" style="font-size:10px">pick 2 — P is</text>
-          <text class="diag-sublabel" x="200" y="134" style="font-size:10px">non-negotiable</text>
+          <text class="diag-sublabel" x="200" y="145" style="font-size:10px">click a corner —</text>
+          <text class="diag-sublabel" x="200" y="159" style="font-size:10px">P is non-negotiable</text>
         </svg>
+        <div class="cap-detail" id="cap-detail">
+          <div class="cap-detail-title">Click C, A, or P above</div>
+          <div class="cap-detail-body">See which two are guaranteed, what's sacrificed, and a real system that made that choice.</div>
+        </div>
         <div class="diag-legend">
           <div class="diag-legend-item"><span class="diag-legend-dot role-client"></span>Every read returns latest write, or errors</div>
           <div class="diag-legend-item"><span class="diag-legend-dot role-cache"></span>Every request gets a non-error response</div>

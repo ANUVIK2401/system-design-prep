@@ -1,0 +1,181 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Dealing with Contention — SD Prep</title>
+  <link rel="stylesheet" href="../../assets/style.css">
+</head>
+<body>
+  <aside id="sidebar"></aside>
+  <main>
+
+    <header class="page-head">
+      <div class="pill">Patterns</div>
+      <h1>Dealing with Contention</h1>
+      <p class="sub">Race conditions, optimistic vs pessimistic locking, and distributed locks — how to stop two writers from stepping on each other.</p>
+      <div class="meta-row">
+        <span class="badge green">15-20 min</span>
+        <span class="badge blue">Medium</span>
+      </div>
+    </header>
+
+    <div class="flash-card">
+      <div class="flash-label">Say this in the first 2 minutes</div>
+      <ul>
+        <li>Name the race condition explicitly: "two requests read the same value, both write back, one update is lost"</li>
+        <li>Default to optimistic locking (version column) — it scales better because it doesn't hold a lock during I/O</li>
+        <li>Reach for pessimistic locking only when conflict rate is high and retries would thrash</li>
+        <li>Distributed locks (Redis/Zookeeper) are for cross-service coordination, not single-DB row updates</li>
+        <li>Any distributed lock needs a TTL — and any TTL needs a fencing token, or you risk two holders at once</li>
+      </ul>
+    </div>
+
+    <section id="mental-model">
+      <h2>Mental model</h2>
+      <div class="analogy-block">
+        Contention is two people grabbing the same shopping cart in a store. Optimistic locking lets both reach for it and only complains if they collide — cheap when collisions are rare. Pessimistic locking puts a "do not touch" sign on the cart the moment one person approaches — safer when collisions are common, but everyone else waits.
+      </div>
+    </section>
+
+    <section id="core-concepts">
+      <h2>Core concepts</h2>
+      <table class="def-table">
+        <thead><tr><th>Term</th><th>Definition</th></tr></thead>
+        <tbody>
+          <tr><td>Race condition</td><td>Outcome depends on the unpredictable timing of concurrent operations</td></tr>
+          <tr><td>Lost update</td><td>One write silently overwrites another because neither saw the other's change</td></tr>
+          <tr><td>Optimistic locking</td><td>Read with a version, write only if version still matches; retry on mismatch</td></tr>
+          <tr><td>Pessimistic locking</td><td><code>SELECT ... FOR UPDATE</code> — acquire the lock before reading, hold until commit</td></tr>
+          <tr><td>Compare-and-swap (CAS)</td><td>Atomic primitive: "set X to B only if X is currently A"</td></tr>
+          <tr><td>Distributed lock</td><td>A mutex that works across processes/machines (Redis SETNX, Zookeeper)</td></tr>
+          <tr><td>Fencing token</td><td>Monotonically increasing number issued with a lock, so stale lock holders can be rejected</td></tr>
+        </tbody>
+      </table>
+      <div class="dial-wrap">
+        <div class="dial-title">Contention level → which lock strategy</div>
+        <div class="dial-track"><div class="dial-marker" style="left:25%"></div></div>
+        <div class="dial-labels"><span class="end-left">Low contention — optimistic</span><span class="end-right">High contention — pessimistic</span></div>
+      </div>
+    </section>
+
+    <section id="how-it-works">
+      <h2>Optimistic locking: read-modify-write with version check</h2>
+      <div class="diagram-wrap" data-paths='{"conflict":{"boxes":["read1","read2","write1","write2fail","retry"],"arrows":["a1","a2","a3","a4","a5"]}}'>
+        <svg viewBox="0 0 760 230" xmlns="http://www.w3.org/2000/svg">
+          <defs>
+            <marker id="oc1" markerWidth="8" markerHeight="8" refX="6" refY="3" orient="auto"><path d="M0,0 L6,3 L0,6 Z" fill="var(--border2)"/></marker>
+            <marker id="oc2" markerWidth="8" markerHeight="8" refX="6" refY="3" orient="auto"><path d="M0,0 L6,3 L0,6 Z" fill="var(--amber)"/></marker>
+          </defs>
+
+          <text class="diag-sublabel" x="100" y="14" style="font-size:10px;fill:var(--blue)">Request A</text>
+          <g data-tip="Both requests read row with version=1" data-id="read1"><rect class="diag-box role-client" x="10" y="25" width="170" height="45" data-id="read1"/><text class="diag-label" x="95" y="48" style="font-size:11px">Read row (v=1)</text></g>
+          <path class="diag-arrow-path" data-id="a1" d="M180,47 L240,47" marker-end="url(#oc1)"/>
+          <g data-tip="A commits first — version becomes 2" data-id="write1"><rect class="diag-box role-cache" x="240" y="25" width="190" height="45" data-id="write1"/><text class="diag-label" x="335" y="42" style="font-size:11px">UPDATE WHERE v=1</text><text class="diag-sublabel" x="335" y="58">success → v=2</text></g>
+
+          <text class="diag-sublabel" x="100" y="104" style="font-size:10px;fill:var(--blue)">Request B (concurrent)</text>
+          <g data-tip="B also read v=1, unaware A already committed" data-id="read2"><rect class="diag-box role-client" x="10" y="115" width="170" height="45" data-id="read2"/><text class="diag-label" x="95" y="138" style="font-size:11px">Read row (v=1)</text></g>
+          <path class="diag-arrow-path" data-id="a2" d="M180,137 L240,137" marker-end="url(#oc2)"/>
+          <g data-tip="DB rejects: WHERE v=1 matches 0 rows since v is now 2" data-id="write2fail"><rect class="diag-box" x="240" y="115" width="190" height="45" stroke="var(--amber)" data-id="write2fail"/><text class="diag-label" x="335" y="132" style="font-size:11px">UPDATE WHERE v=1</text><text class="diag-sublabel" x="335" y="148" style="fill:var(--amber)">0 rows affected — conflict!</text></g>
+
+          <path class="diag-arrow-path" data-id="a3" d="M335,160 C335,185 335,185 200,185" marker-end="url(#oc2)"/>
+          <g data-tip="B re-reads the new value (v=2) and retries the operation" data-id="retry"><rect class="diag-box role-async" x="20" y="163" width="180" height="45" data-id="retry"/><text class="diag-label" x="110" y="180" style="font-size:11px">Retry: re-read v=2</text><text class="diag-sublabel" x="110" y="196">re-apply change</text></g>
+          <path class="diag-arrow-path" data-id="a4" d="M200,185 L420,185" marker-end="url(#oc2)" stroke-dasharray="4 3"/>
+          <path class="diag-arrow-path" data-id="a5" d="M420,185 L430,160" marker-end="url(#oc2)" stroke-dasharray="4 3"/>
+          <text class="diag-sublabel" x="600" y="185" style="font-size:9px">retry succeeds against v=2</text>
+        </svg>
+        <div class="diag-legend">
+          <div class="diag-legend-item"><span class="diag-legend-dot role-client"></span>Read with version</div>
+          <div class="diag-legend-item"><span class="diag-legend-dot role-cache"></span>Write succeeds (version matched)</div>
+          <div class="diag-legend-item"><span class="diag-legend-dot role-async"></span>Conflict path — retry with fresh read</div>
+        </div>
+      </div>
+      <ol class="flow-steps-list">
+        <li><span>Read:</span> fetch the row along with its current version number</li>
+        <li><span>Modify:</span> compute the new value in application code</li>
+        <li><span>Write:</span> <code>UPDATE ... SET value=?, version=version+1 WHERE id=? AND version=?</code></li>
+        <li><span>Check:</span> if 0 rows affected, someone else won the race — re-read and retry</li>
+      </ol>
+    </section>
+
+    <section id="tradeoffs">
+      <h2>Tradeoffs</h2>
+      <div class="compare-grid">
+        <div class="compare-card good">
+          <div class="compare-label">Optimistic locking wins</div>
+          <ul>
+            <li>No lock held during I/O — much higher throughput under low contention</li>
+            <li>No deadlock risk between transactions</li>
+            <li>Scales horizontally — works fine across DB replicas/shards</li>
+          </ul>
+        </div>
+        <div class="compare-card bad">
+          <div class="compare-label">Optimistic locking costs</div>
+          <ul>
+            <li>Wasted work on every conflict — must retry the whole read-modify-write</li>
+            <li>Under high contention, retries can thrash and starve some requests</li>
+            <li>Requires every writer to participate (a version/CAS check) — easy to bypass by mistake</li>
+          </ul>
+        </div>
+      </div>
+    </section>
+
+    <section id="when-to-use">
+      <h2>When to use</h2>
+      <div class="scenario-row use">
+        <span class="scenario-icon">✓</span>
+        <div class="scenario-text"><strong>Use optimistic locking</strong> as the default for most web app updates — profile edits, inventory counts, cart updates — where conflicts are rare.</div>
+      </div>
+      <div class="scenario-row use">
+        <span class="scenario-icon">✓</span>
+        <div class="scenario-text"><strong>Use pessimistic locking</strong> for hot, narrow contention like seat booking or flash-sale checkout, where many requests target the exact same row at once.</div>
+      </div>
+      <div class="scenario-row watch">
+        <span class="scenario-icon">⚠</span>
+        <div class="scenario-text"><strong>Watch out with distributed locks</strong> — if a lock holder pauses (GC, network blip) past the TTL, another process can acquire the lock while the first still thinks it holds it. Use fencing tokens.</div>
+      </div>
+    </section>
+
+    <section id="interview-moves">
+      <h2>Interview moves</h2>
+      <ul class="moves-list">
+        <li><span class="move-num">01</span><div><strong>"I'll add a version column and use it as a compare-and-swap on write — that's optimistic locking, and it's my default"</strong> — names the pattern and justifies it as the baseline</div></li>
+        <li><span class="move-num">02</span><div><strong>"This row gets hammered by concurrent writers, so I'd switch to SELECT FOR UPDATE here specifically — not everywhere"</strong> — shows you scope pessimistic locking narrowly</div></li>
+        <li><span class="move-num">03</span><div><strong>"Across services I can't take a DB lock, so I'd use a Redis-based distributed lock with a short TTL"</strong> — shows you know locks don't cross service/DB boundaries</div></li>
+        <li><span class="move-num">04</span><div><strong>"Any TTL-based lock can expire mid-operation — I'd attach a fencing token so a late writer gets rejected by the resource itself"</strong> — the detail that separates senior answers from junior ones</div></li>
+        <li><span class="move-num">05</span><div><strong>"On conflict I'd retry with exponential backoff and a retry cap, then surface an error rather than retry forever"</strong> — shows you've thought about the failure path, not just the happy path</div></li>
+      </ul>
+    </section>
+
+    <section id="follow-ups">
+      <h2>Common follow-up questions</h2>
+      <div class="qa-block">
+        <div class="qa-q">Why is optimistic locking usually the default in interviews?</div>
+        <div class="qa-a">Most systems have low real contention — locks held during I/O block unrelated traffic and don't scale across replicas. Optimistic locking only pays a cost when conflicts actually happen.</div>
+      </div>
+      <div class="qa-block">
+        <div class="qa-q">What's a fencing token and why does it matter?</div>
+        <div class="qa-a">A monotonically increasing number issued alongside a distributed lock. The protected resource rejects any write carrying an older token than the last one seen — stops a "zombie" lock holder from corrupting state after expiry.</div>
+      </div>
+      <div class="qa-block">
+        <div class="qa-q">When would you choose Zookeeper over Redis for distributed locks?</div>
+        <div class="qa-a">Zookeeper gives strongly consistent, session-based locks with automatic release on disconnect — better correctness guarantees. Redis (Redlock) is faster and simpler but has known edge cases under clock drift and network partitions.</div>
+      </div>
+      <div class="qa-block">
+        <div class="qa-q">How do you prevent deadlocks with pessimistic locking?</div>
+        <div class="qa-a">Always acquire locks in a consistent global order across transactions, keep lock-held time short, and set a lock/statement timeout so a stuck transaction fails instead of hanging others.</div>
+      </div>
+      <div class="qa-block">
+        <div class="qa-q">How does optimistic locking handle high contention gracefully?</div>
+        <div class="qa-a">It often doesn't — retries pile up and some requests starve. At that point, switch that specific hot path to pessimistic locking or a queue that serializes writes to the contended resource.</div>
+      </div>
+      <div class="qa-block">
+        <div class="qa-q">Can you combine optimistic locking with a queue?</div>
+        <div class="qa-a">Yes — route writes to a contended key through a single-consumer queue (partitioned by key) so they're naturally serialized, eliminating the conflict instead of detecting and retrying it.</div>
+      </div>
+    </section>
+
+  </main>
+  <script src="../../assets/nav.js"></script>
+</body>
+</html>

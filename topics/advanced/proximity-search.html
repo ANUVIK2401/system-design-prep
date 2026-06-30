@@ -1,0 +1,231 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Proximity Search — SD Prep</title>
+  <link rel="stylesheet" href="../../assets/style.css">
+</head>
+<body>
+  <aside id="sidebar"></aside>
+  <main>
+
+    <header class="page-head">
+      <div class="pill">Advanced Topics</div>
+      <h1>Proximity Search</h1>
+      <p class="sub">How "find nearby" actually works at scale — geohashing, quadtrees, and R-trees.</p>
+      <div class="meta-row">
+        <span class="badge green">15-20 min</span>
+        <span class="badge blue">Medium</span>
+      </div>
+    </header>
+
+    <div class="flash-card">
+      <div class="flash-label">Say this in the first 2 minutes</div>
+      <ul>
+        <li>Naive lat/lng range queries don't work — a degree of longitude shrinks toward the poles, so a fixed box isn't a fixed physical radius</li>
+        <li>Geohashing turns 2D coordinates into a 1D string where shared prefix ≈ spatial proximity, so a normal B-tree index can do spatial range queries</li>
+        <li>Geohash has a boundary problem — two points 10 meters apart across a cell edge can share zero prefix characters, so you always query neighboring cells too</li>
+        <li>Quadtrees adapt to data density (fine-grained in cities, coarse in rural areas); R-trees group nearby objects into bounding boxes and are what production geo-databases like PostGIS actually use</li>
+        <li>Always post-filter candidates with exact haversine distance — the index gets you "probably close," not "definitely within 5km"</li>
+      </ul>
+    </div>
+
+    <section id="mental-model">
+      <h2>Mental model</h2>
+      <div class="analogy-block">
+        Geohashing is like a postal address read left to right — "USA, California, San Francisco, Mission St" — each added character narrows the area, and two addresses sharing a long prefix are probably close together, even though the system has no idea what "distance" actually means.
+      </div>
+    </section>
+
+    <section id="core-concepts">
+      <h2>Core concepts</h2>
+      <table class="def-table">
+        <thead><tr><th>Term</th><th>Definition</th></tr></thead>
+        <tbody>
+          <tr><td>Geohash</td><td>Base32 string encoding lat/lng; each extra char adds precision and shrinks the cell</td></tr>
+          <tr><td>Prefix proximity</td><td>Two geohashes sharing a long prefix are usually near each other (not guaranteed)</td></tr>
+          <tr><td>Quadtree</td><td>Recursively splits a square into 4 quadrants until each leaf holds few enough points</td></tr>
+          <tr><td>R-tree</td><td>Tree of nested minimum bounding rectangles (MBRs) grouping nearby geometries</td></tr>
+          <tr><td>GiST index</td><td>Postgres's generalized search tree — the index type PostGIS builds R-trees on top of</td></tr>
+          <tr><td>Boundary problem</td><td>Points near a cell edge can land in different cells with totally different prefixes</td></tr>
+          <tr><td>Haversine distance</td><td>Exact great-circle distance formula used to post-filter index candidates</td></tr>
+        </tbody>
+      </table>
+      <div class="callout warn">A 1° longitude box is ~111km wide at the equator but only ~78km wide at 45° latitude and 0km at the poles. Filtering with raw <code>WHERE lng BETWEEN x AND y</code> gives wildly inconsistent physical radii by latitude — this is why naive range queries fail.</div>
+    </section>
+
+    <section id="how-it-works">
+      <h2>Geohash cell subdivision</h2>
+      <div class="diagram-wrap">
+        <svg viewBox="0 0 640 360" xmlns="http://www.w3.org/2000/svg">
+          <defs>
+            <marker id="psArrow" markerWidth="8" markerHeight="8" refX="6" refY="3" orient="auto"><path d="M0,0 L6,3 L0,6 Z" fill="var(--border2)"/></marker>
+          </defs>
+
+          <text class="diag-sublabel" x="170" y="16" style="font-size:10px;fill:var(--accent)">LEVEL 1 — world split into a coarse 8x4 grid (1 char)</text>
+          <g>
+            <!-- 8 cols x 4 rows top-level grid -->
+            <g stroke="var(--border2)" stroke-width="1" fill="none">
+              <rect x="20" y="26" width="280" height="140"/>
+              <line x1="55" y1="26" x2="55" y2="166"/><line x1="90" y1="26" x2="90" y2="166"/><line x1="125" y1="26" x2="125" y2="166"/>
+              <line x1="160" y1="26" x2="160" y2="166"/><line x1="195" y1="26" x2="195" y2="166"/><line x1="230" y1="26" x2="230" y2="166"/><line x1="265" y1="26" x2="265" y2="166"/>
+              <line x1="20" y1="61" x2="300" y2="61"/><line x1="20" y1="96" x2="300" y2="96"/><line x1="20" y1="131" x2="300" y2="131"/>
+            </g>
+            <g data-tip="Top-level geohash cell '9' — roughly covers a quarter of North America at this resolution">
+              <rect x="125" y="61" width="35" height="35" fill="#0d1f17" stroke="var(--accent)" stroke-width="1.5"/>
+              <text class="diag-label" x="142" y="83" style="font-size:11px;fill:var(--accent)">9</text>
+            </g>
+          </g>
+
+          <path d="M300,78 L340,78" stroke="var(--border2)" stroke-width="1.5" marker-end="url(#psArrow)" fill="none"/>
+          <text x="320" y="68" text-anchor="middle" font-size="9" fill="var(--muted)" font-family="Inter,sans-serif">zoom in</text>
+
+          <text class="diag-sublabel" x="500" y="16" style="font-size:10px;fill:var(--blue)">LEVEL 2 — cell '9' subdivided again (2 chars)</text>
+          <g>
+            <g stroke="var(--border2)" stroke-width="1" fill="none">
+              <rect x="360" y="26" width="240" height="140"/>
+              <line x1="420" y1="26" x2="420" y2="166"/><line x1="480" y1="26" x2="480" y2="166"/><line x1="540" y1="26" x2="540" y2="166"/>
+              <line x1="360" y1="61" x2="600" y2="61"/><line x1="360" y1="96" x2="600" y2="96"/><line x1="360" y1="131" x2="600" y2="131"/>
+            </g>
+            <g data-tip="Geohash '9q' — covers roughly the US West Coast at 2-character precision">
+              <rect x="420" y="61" width="60" height="35" fill="#0a1830" stroke="var(--blue)" stroke-width="1.5"/>
+              <text class="diag-label" x="450" y="83" style="font-size:11px;fill:var(--blue)">9q</text>
+            </g>
+          </g>
+
+          <path d="M460,166 C460,200 230,200 230,260" stroke="var(--border2)" stroke-width="1.5" marker-end="url(#psArrow)" fill="none"/>
+          <text x="345" y="195" text-anchor="middle" font-size="9" fill="var(--muted)" font-family="Inter,sans-serif">zoom in again — 4 more levels to "9q8yyk" (~3.7m precision)</text>
+
+          <text class="diag-sublabel" x="230" y="252" style="font-size:10px;fill:var(--amber)">LEVEL 3 — fine cell, ~150m x 150m at 6 chars</text>
+          <g>
+            <g stroke="var(--border2)" stroke-width="1" fill="none">
+              <rect x="80" y="262" width="300" height="90"/>
+              <line x1="155" y1="262" x2="155" y2="352"/><line x1="230" y1="262" x2="230" y2="352"/><line x1="305" y1="262" x2="305" y2="352"/>
+              <line x1="80" y1="307" x2="380" y2="307"/>
+            </g>
+            <g data-tip="Two restaurants 30m apart, but on opposite sides of this cell edge — they get prefixes '9q8yyk' and '9q8yym', sharing only 5 of 6 characters despite being almost adjacent">
+              <rect x="155" y="262" width="75" height="45" fill="#221a00" stroke="var(--amber)" stroke-width="1.5"/>
+              <text class="diag-label" x="192" y="288" style="font-size:10px;fill:var(--amber)">9q8yyk</text>
+              <circle cx="222" cy="298" r="3" fill="var(--amber)"/>
+            </g>
+            <g data-tip="A point one cell over — looks unrelated by prefix alone even though it's physically next door">
+              <rect x="230" y="262" width="75" height="45" fill="#1a1a1a" stroke="var(--border2)" stroke-width="1.5"/>
+              <text class="diag-label" x="267" y="288" style="font-size:10px">9q8yym</text>
+              <circle cx="238" cy="298" r="3" fill="var(--text)"/>
+            </g>
+            <path d="M222,298 L238,298" stroke="var(--amber)" stroke-width="1.5" stroke-dasharray="2 2"/>
+            <text x="230" y="318" text-anchor="middle" font-size="9" fill="var(--amber)" font-family="Inter,sans-serif">~30m apart, but split across a cell boundary</text>
+          </g>
+        </svg>
+        <div class="diag-legend">
+          <div class="diag-legend-item"><span class="diag-legend-dot role-cache"></span>Each level adds a base32 char and divides the cell again</div>
+          <div class="diag-legend-item"><span class="diag-legend-dot role-async"></span>Boundary problem — adjacent points can land in sibling cells with different prefixes</div>
+        </div>
+      </div>
+      <ol class="flow-steps-list">
+        <li>Encode lat/lng by interleaving binary subdivisions of latitude and longitude ranges into base32 characters.</li>
+        <li>Each additional character roughly halves the cell's width and height — 1 char ≈ 5,000km, 6 chars ≈ 150m, 9 chars ≈ 5m.</li>
+        <li>To find nearby points, query rows whose geohash starts with the user's prefix using a normal indexed <code>LIKE 'prefix%'</code> or range scan.</li>
+        <li>Also query the 8 neighboring cells (geohash has a standard neighbor-calculation algorithm) to catch points split across a boundary.</li>
+        <li>Post-filter every candidate with exact haversine distance and sort — the index narrows the field, it doesn't give exact distance.</li>
+      </ol>
+    </section>
+
+    <section id="comparison">
+      <h2>Geohash vs quadtree vs R-tree</h2>
+      <table class="def-table">
+        <thead><tr><th>Structure</th><th>Precision control</th><th>Query complexity</th><th>Write cost</th><th>Real-world usage</th></tr></thead>
+        <tbody>
+          <tr><td>Geohash</td><td>Fixed steps via string length</td><td>Simple prefix/range scan, needs neighbor lookups</td><td>Cheap — just encode and insert</td><td>Redis <code>GEOADD</code>/<code>GEOSEARCH</code>, Elasticsearch geo_point, Firestore</td></tr>
+          <tr><td>Quadtree</td><td>Adapts to point density automatically</td><td>Tree traversal, naturally handles uneven density</td><td>Moderate — may trigger node splits</td><td>MongoDB 2d indexes (legacy), game engines, mapping tools</td></tr>
+          <tr><td>R-tree</td><td>Bounding boxes fit actual geometry, not a grid</td><td>Best query performance for ranges/polygons, not just points</td><td>Higher — box updates can cascade up the tree</td><td>PostGIS (via GiST), most production spatial databases</td></tr>
+        </tbody>
+      </table>
+      <div class="callout info">Redis specifically chose geohash because it can encode 2D location into a single 52-bit integer and reuse its existing sorted-set (ZSET) infrastructure — no new data structure needed. PostGIS chose R-trees/GiST because it already needed to index polygons and lines, not just points, where bounding boxes generalize better than a fixed grid.</div>
+    </section>
+
+    <section id="tradeoffs">
+      <h2>Tradeoffs</h2>
+      <div class="compare-grid">
+        <div class="compare-card good">
+          <h3>Wins</h3>
+          <ul>
+            <li>Geohash reuses ordinary B-tree/string indexes — no custom spatial extension required</li>
+            <li>Quadtrees self-adjust to density — dense cities get fine cells, empty deserts stay coarse</li>
+            <li>R-trees give the tightest, most accurate candidate sets and support arbitrary shapes (polygons, routes)</li>
+            <li>All three turn an O(n) full scan into a narrow indexed lookup</li>
+          </ul>
+        </div>
+        <div class="compare-card bad">
+          <h3>Costs</h3>
+          <ul>
+            <li>Geohash boundary problem means you must always check neighbor cells, adding query complexity</li>
+            <li>Quadtree rebalancing on skewed inserts can be expensive and isn't trivially indexable in a normal RDBMS</li>
+            <li>R-trees are the most complex to implement from scratch — you'll use a library/extension (PostGIS), not hand-roll one</li>
+            <li>None of these give exact distance — every approach needs a post-filter pass</li>
+          </ul>
+        </div>
+      </div>
+    </section>
+
+    <section id="when-to-use">
+      <h2>When to use which</h2>
+      <div class="scenario-row use">
+        <span class="scenario-icon">✓</span>
+        <div class="scenario-text"><strong>Use geohash</strong> when you're building on Redis/Elasticsearch already, need "nearby" search with simple infra, and points (not polygons) are enough.</div>
+      </div>
+      <div class="scenario-row watch">
+        <span class="scenario-icon">⚠</span>
+        <div class="scenario-text"><strong>Watch out for</strong> uneven data density with a fixed-precision geohash — choose precision carefully, or pair with quadtree-style adaptive depth if density varies wildly (rural vs. downtown).</div>
+      </div>
+      <div class="scenario-row avoid">
+        <span class="scenario-icon">✗</span>
+        <div class="scenario-text"><strong>Avoid</strong> hand-rolling R-trees yourself — use PostGIS, MongoDB geospatial indexes, or a managed geo-search service (Elasticsearch, Algolia) instead of building the tree from scratch.</div>
+      </div>
+    </section>
+
+    <section id="interview-moves">
+      <h2>Interview moves</h2>
+      <ul class="moves-list">
+        <li><span class="move-num">01</span><div><strong>"Naive lat/lng range filtering doesn't work — longitude degrees shrink toward the poles"</strong> — shows you understand why this is a real problem, not just a lookup</div></li>
+        <li><span class="move-num">02</span><div><strong>"I'd geohash the location so I can index it with a normal string prefix/B-tree, then range-query nearby prefixes"</strong> — names the concrete mechanism</div></li>
+        <li><span class="move-num">03</span><div><strong>"I'll also query the 8 neighbor cells to handle the boundary problem — two close points can hash totally differently near a cell edge"</strong> — anticipates the classic gotcha</div></li>
+        <li><span class="move-num">04</span><div><strong>"The index gets me candidates, not the answer — I post-filter with exact haversine distance and sort"</strong> — clarifies precision vs. recall tradeoff</div></li>
+        <li><span class="move-num">05</span><div><strong>"For polygons or routes I'd reach for PostGIS and R-trees instead — geohash is point-oriented"</strong> — shows awareness of structure limits</div></li>
+        <li><span class="move-num">06</span><div><strong>"At very large scale I'd shard by geohash prefix so nearby data colocates on the same node"</strong> — connects geo-indexing to sharding strategy</div></li>
+      </ul>
+    </section>
+
+    <section id="follow-ups">
+      <h2>Common follow-up questions</h2>
+      <div class="qa-block">
+        <div class="qa-q">How do you pick geohash precision (string length)?</div>
+        <div class="qa-a">Match it to your typical search radius — 6 chars (~150m cells) for "restaurants nearby," 5 chars (~5km) for "delivery zone." Shorter strings mean coarser cells and fewer rows scanned but more post-filtering.</div>
+      </div>
+      <div class="qa-block">
+        <div class="qa-q">Why not just use a hash map keyed by rounded lat/lng?</div>
+        <div class="qa-a">That's effectively a fixed-grid geohash with no prefix structure — you lose the ability to do range queries at multiple zoom levels with one index.</div>
+      </div>
+      <div class="qa-block">
+        <div class="qa-q">How does Redis's GEO command work internally?</div>
+        <div class="qa-a">It encodes lat/lng into a 52-bit geohash-like integer and stores it as the score in a sorted set (ZSET), reusing ZRANGEBYSCORE for proximity queries.</div>
+      </div>
+      <div class="qa-block">
+        <div class="qa-q">How would you shard a geo-indexed dataset across multiple DB nodes?</div>
+        <div class="qa-a">Shard by geohash prefix so physically nearby data lives on the same shard — keeps "nearby" queries from fanning out across every node.</div>
+      </div>
+      <div class="qa-block">
+        <div class="qa-q">What's the actual distance error from using geohash prefix match alone?</div>
+        <div class="qa-a">Unbounded in the worst case near a cell edge — two points meters apart can share zero prefix. That's exactly why neighbor-cell lookups plus an exact-distance post-filter are mandatory, not optional.</div>
+      </div>
+      <div class="qa-block">
+        <div class="qa-q">When would a quadtree beat a geohash?</div>
+        <div class="qa-a">When data density is extremely uneven (all points in cities, none elsewhere) — a quadtree naturally goes deep only where points cluster, while geohash precision is uniform everywhere by default.</div>
+      </div>
+    </section>
+
+  </main>
+  <script src="../../assets/nav.js"></script>
+</body>
+</html>

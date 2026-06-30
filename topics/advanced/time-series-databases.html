@@ -1,0 +1,220 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Time-Series Databases — SD Prep</title>
+  <link rel="stylesheet" href="../../assets/style.css">
+</head>
+<body>
+  <aside id="sidebar"></aside>
+  <main>
+
+    <header class="page-head">
+      <div class="pill">Advanced Topics</div>
+      <h1>Time-Series Databases</h1>
+      <p class="sub">Write-heavy, time-ordered data — downsampling, retention, and why metrics need their own database.</p>
+      <div class="meta-row">
+        <span class="badge green">15-20 min</span>
+        <span class="badge blue">Medium</span>
+      </div>
+    </header>
+
+    <div class="flash-card">
+      <div class="flash-label">Say this in the first 2 minutes</div>
+      <ul>
+        <li>Time-series workloads are append-mostly, naturally ordered by time, and almost never updated after write — that shape enables compression a general-purpose OLTP DB can't exploit</li>
+        <li>Row-per-event in a regular relational DB falls over at scale — index bloat and no time-aware compression mean storage and query cost grow linearly with every single data point</li>
+        <li>Downsampling rolls up old high-resolution data into coarser aggregates over time — keep raw 1s data for days, 1min rollups for months, 1hr rollups forever</li>
+        <li>Retention policies auto-expire raw data after a TTL, deleting old high-resolution rows once they've been downsampled or are no longer useful</li>
+        <li>Cardinality explosion is the classic gotcha — too many unique tag/label combinations (e.g. tagging every request with a unique user ID) blows up a TSDB's index and kills performance</li>
+      </ul>
+    </div>
+
+    <section id="mental-model">
+      <h2>Mental model</h2>
+      <div class="analogy-block">
+        A time-series database is like a security camera system that automatically degrades old footage from full HD to low-res thumbnails the further back in time you go — you keep perfect detail for "what just happened" and only a rough shape for "what happened last year," because nobody needs frame-by-frame detail from six months ago.
+      </div>
+    </section>
+
+    <section id="core-concepts">
+      <h2>Core concepts</h2>
+      <table class="def-table">
+        <thead><tr><th>Term</th><th>Definition</th></tr></thead>
+        <tbody>
+          <tr><td>Time-series data</td><td>Timestamped, append-mostly data naturally ordered by time (metrics, sensor readings, logs)</td></tr>
+          <tr><td>Downsampling</td><td>Rolling up high-resolution old data into lower-resolution aggregates to save storage</td></tr>
+          <tr><td>Retention policy</td><td>Automatic expiry/deletion of raw data after a configured TTL</td></tr>
+          <tr><td>Delta encoding</td><td>Storing the difference between consecutive values instead of the full value — exploits slow-changing metrics</td></tr>
+          <tr><td>Delta-of-delta</td><td>Storing the change in the rate of change — exploits near-constant time intervals between points</td></tr>
+          <tr><td>Cardinality</td><td>Number of unique tag/label combinations — high cardinality blows up index size</td></tr>
+          <tr><td>Tag/label</td><td>Indexed metadata on a metric (host, region, endpoint) used for filtering and grouping</td></tr>
+        </tbody>
+      </table>
+      <div class="callout warn">Tagging every metric with a unique request ID or user ID turns a metric with a few hundred reasonable time series into millions — this is cardinality explosion, and it's the single most common way teams accidentally take down their own TSDB.</div>
+    </section>
+
+    <section id="how-it-works">
+      <h2>Downsampling and retention tiers</h2>
+      <div class="diagram-wrap">
+        <svg viewBox="0 0 720 220" xmlns="http://www.w3.org/2000/svg">
+          <defs>
+            <marker id="tsArrow" markerWidth="8" markerHeight="8" refX="6" refY="3" orient="auto"><path d="M0,0 L6,3 L0,6 Z" fill="var(--border2)"/></marker>
+          </defs>
+
+          <text class="diag-sublabel" x="360" y="16" style="font-size:10px;fill:var(--muted)" text-anchor="middle">TIME →  (right edge = now)</text>
+          <line x1="20" y1="30" x2="700" y2="30" stroke="var(--border2)" stroke-width="1"/>
+          <path d="M690,25 L700,30 L690,35" stroke="var(--border2)" stroke-width="1.5" fill="none"/>
+
+          <g data-tip="Raw 1-second resolution data, kept for 7 days — every individual data point retained for recent incident debugging">
+            <rect class="diag-box role-cache" x="500" y="55" width="200" height="50" rx="6"/>
+            <text class="diag-label" x="600" y="76" style="font-size:11px">Raw — 1s resolution</text>
+            <text class="diag-sublabel" x="600" y="92">kept 7 days</text>
+          </g>
+
+          <g data-tip="1-minute rollup aggregates (avg/min/max/p99 per minute), kept for 90 days — enough detail for weekly/monthly trend analysis">
+            <rect class="diag-box role-async" x="240" y="55" width="240" height="50" rx="6"/>
+            <text class="diag-label" x="360" y="76" style="font-size:11px">1min rollup</text>
+            <text class="diag-sublabel" x="360" y="92">kept 90 days</text>
+          </g>
+
+          <g data-tip="1-hour rollup aggregates, kept forever — enough for year-over-year capacity planning at minimal storage cost">
+            <rect class="diag-box role-db" x="20" y="55" width="200" height="50" rx="6"/>
+            <text class="diag-label" x="120" y="76" style="font-size:11px">1hr rollup</text>
+            <text class="diag-sublabel" x="120" y="92">kept forever</text>
+          </g>
+
+          <path d="M500,80 L480,80" stroke="var(--border2)" stroke-width="1.5" marker-end="url(#tsArrow)" fill="none"/>
+          <text x="490" y="70" text-anchor="middle" font-size="9" fill="var(--muted)" font-family="Inter,sans-serif">downsample</text>
+          <path d="M240,80 L220,80" stroke="var(--border2)" stroke-width="1.5" marker-end="url(#tsArrow)" fill="none"/>
+          <text x="230" y="70" text-anchor="middle" font-size="9" fill="var(--muted)" font-family="Inter,sans-serif">downsample</text>
+
+          <g data-tip="Raw data older than the 7-day retention window is deleted entirely once it's been downsampled into the 1min tier">
+            <rect x="500" y="130" width="200" height="36" rx="6" fill="#220a0a" stroke="var(--red)"/>
+            <text x="600" y="153" text-anchor="middle" font-size="10" fill="#f87171" font-family="Inter,sans-serif">retention TTL deletes raw &gt;7d</text>
+          </g>
+          <path d="M600,130 L600,108" stroke="#f87171" stroke-width="1.5" stroke-dasharray="3 3" fill="none"/>
+
+          <g data-tip="1min rollups older than 90 days are deleted once captured in the 1hr tier — storage cost stays bounded forever">
+            <rect x="240" y="130" width="240" height="36" rx="6" fill="#220a0a" stroke="var(--red)"/>
+            <text x="360" y="153" text-anchor="middle" font-size="10" fill="#f87171" font-family="Inter,sans-serif">retention TTL deletes 1min rollup &gt;90d</text>
+          </g>
+          <path d="M360,130 L360,108" stroke="#f87171" stroke-width="1.5" stroke-dasharray="3 3" fill="none"/>
+
+          <text x="120" y="190" text-anchor="middle" font-size="10" fill="var(--accent)" font-family="Inter,sans-serif">storage cost stays bounded — total size doesn't grow unboundedly with time</text>
+        </svg>
+        <div class="diag-legend">
+          <div class="diag-legend-item"><span class="diag-legend-dot role-cache"></span>Recent data — full resolution for incident debugging</div>
+          <div class="diag-legend-item"><span class="diag-legend-dot role-async"></span>Mid-term — downsampled for trend analysis</div>
+          <div class="diag-legend-item"><span class="diag-legend-dot role-db"></span>Long-term — coarse rollups kept indefinitely at low cost</div>
+        </div>
+      </div>
+      <ol class="flow-steps-list">
+        <li>Writes land at full resolution (e.g. 1s) in the hot tier — optimized for fast, append-only ingest.</li>
+        <li>A background process periodically aggregates older raw points into coarser rollups (avg/min/max/p99 per minute, then per hour).</li>
+        <li>Retention policies auto-delete each tier once it ages past its TTL and has already been captured in the next coarser tier.</li>
+        <li>Queries automatically route to the appropriate tier — "last 1 hour" hits raw data, "last 6 months" hits hourly rollups — keeping query cost bounded regardless of time range.</li>
+        <li>Delta and delta-of-delta encoding compress each tier further by storing changes instead of absolute values, since consecutive points and intervals barely change.</li>
+      </ol>
+    </section>
+
+    <section id="comparison">
+      <h2>Purpose-built TSDB vs general-purpose DB</h2>
+      <table class="def-table">
+        <thead><tr><th>Property</th><th>TSDB (InfluxDB/TimescaleDB/Prometheus)</th><th>General OLTP DB (Postgres/MySQL row-per-event)</th></tr></thead>
+        <tbody>
+          <tr><td>Compression</td><td>Delta/delta-of-delta encoding — often 10-20x smaller</td><td>Generic row storage — no time-aware compression</td></tr>
+          <tr><td>Write pattern</td><td>Optimized for high-throughput append-only ingest</td><td>General-purpose, optimized for mixed read/write/update</td></tr>
+          <tr><td>Query pattern</td><td>Built-in "last N hours aggregated by 1min" time-bucket queries</td><td>Manual GROUP BY + date_trunc, slower at scale</td></tr>
+          <tr><td>Downsampling</td><td>Built-in continuous aggregates / rollup policies</td><td>Hand-rolled cron jobs and rollup tables</td></tr>
+          <tr><td>Retention</td><td>Built-in TTL/retention policies</td><td>Hand-rolled delete jobs, risk of table bloat</td></tr>
+          <tr><td>Index behavior at scale</td><td>Time-partitioned, indexes stay small per partition</td><td>Single growing index — bloats and slows down over time</td></tr>
+        </tbody>
+      </table>
+    </section>
+
+    <section id="tradeoffs">
+      <h2>Tradeoffs</h2>
+      <div class="compare-grid">
+        <div class="compare-card good">
+          <h3>Wins</h3>
+          <ul>
+            <li>Massive compression ratios from exploiting the time-ordered, slow-changing nature of metrics</li>
+            <li>Built-in downsampling and retention remove a whole category of hand-rolled cron jobs</li>
+            <li>Time-bucketed queries (e.g. Prometheus PromQL) are first-class, not bolted on</li>
+            <li>Designed for the actual access pattern — append now, query recent at full detail, query old at low detail</li>
+          </ul>
+        </div>
+        <div class="compare-card bad">
+          <h3>Costs</h3>
+          <ul>
+            <li>Another specialized system to operate alongside your primary OLTP database</li>
+            <li>Cardinality explosion from over-tagging can degrade performance badly and is easy to introduce by accident</li>
+            <li>Not designed for arbitrary relational joins or transactional updates — wrong tool for general CRUD</li>
+            <li>Downsampled historical data loses precision — can't recover exact raw values once rolled up and the raw tier expires</li>
+          </ul>
+        </div>
+      </div>
+    </section>
+
+    <section id="when-to-use">
+      <h2>When to use</h2>
+      <div class="scenario-row use">
+        <span class="scenario-icon">✓</span>
+        <div class="scenario-text"><strong>Use a TSDB</strong> for metrics, observability, IoT sensor data, or any workload that's overwhelmingly append-heavy, timestamp-ordered, and queried in time ranges/aggregates.</div>
+      </div>
+      <div class="scenario-row watch">
+        <span class="scenario-icon">⚠</span>
+        <div class="scenario-text"><strong>Watch out for</strong> cardinality explosion — never tag a metric with unbounded-cardinality fields like user ID or request ID; keep tags to bounded sets like host, region, or status code.</div>
+      </div>
+      <div class="scenario-row avoid">
+        <span class="scenario-icon">✗</span>
+        <div class="scenario-text"><strong>Avoid a TSDB</strong> for general CRUD workloads needing relational joins, transactional updates, or strong consistency across unrelated entities — that's still a job for a regular OLTP database.</div>
+      </div>
+    </section>
+
+    <section id="interview-moves">
+      <h2>Interview moves</h2>
+      <ul class="moves-list">
+        <li><span class="move-num">01</span><div><strong>"This is a metrics/observability workload — I'd reach for a purpose-built TSDB, not bolt time-series patterns onto a general OLTP DB"</strong> — names the right tool immediately</div></li>
+        <li><span class="move-num">02</span><div><strong>"Row-per-event in Postgres falls over here — no time-aware compression, and the index keeps growing forever"</strong> — justifies the choice with a concrete failure mode</div></li>
+        <li><span class="move-num">03</span><div><strong>"I'd set up tiered retention — raw at 1s for 7 days, 1min rollups for 90 days, hourly forever — so storage cost stays bounded"</strong> — shows you can design the lifecycle, not just pick the DB</div></li>
+        <li><span class="move-num">04</span><div><strong>"I'd watch cardinality carefully — tagging every event with a unique user or request ID would blow up the index"</strong> — flags the most common real-world TSDB outage cause</div></li>
+        <li><span class="move-num">05</span><div><strong>"Queries route by time range — recent queries hit raw data, historical queries hit rollups — so query cost doesn't scale with total retained history"</strong> — connects downsampling to query performance directly</div></li>
+        <li><span class="move-num">06</span><div><strong>"Delta-of-delta encoding works here because both the values and the time intervals between points barely change — that's specific to time-series, not general data"</strong> — shows you understand why the compression works</div></li>
+      </ul>
+    </section>
+
+    <section id="follow-ups">
+      <h2>Common follow-up questions</h2>
+      <div class="qa-block">
+        <div class="qa-q">Why does Postgres row-per-event fall over at scale specifically?</div>
+        <div class="qa-a">No time-aware compression means storage grows linearly with raw events, and a single growing B-tree index degrades — TimescaleDB fixes this by automatically partitioning into time-based chunks.</div>
+      </div>
+      <div class="qa-block">
+        <div class="qa-q">What exactly is cardinality explosion and why does it hurt?</div>
+        <div class="qa-a">Each unique tag combination creates a separate indexed time series — millions of unique combinations (e.g. per-user tags) means millions of tiny series, blowing up index memory and query latency.</div>
+      </div>
+      <div class="qa-block">
+        <div class="qa-q">How do continuous aggregates / rollup policies work?</div>
+        <div class="qa-a">A background job periodically (or incrementally) computes aggregates like avg/p99 over fixed time buckets and stores them in a separate, much smaller rollup table or materialized view.</div>
+      </div>
+      <div class="qa-block">
+        <div class="qa-q">What's lost when you downsample?</div>
+        <div class="qa-a">Individual data points within a bucket — you can't recover the exact raw value once it's rolled into an aggregate and the raw tier's retention has expired.</div>
+      </div>
+      <div class="qa-block">
+        <div class="qa-q">How would you handle a sudden spike in write throughput (e.g. IoT fleet doubling)?</div>
+        <div class="qa-a">Shard by time + a bounded tag (e.g. device group), scale ingest nodes horizontally, and ensure the hot/raw tier's retention window is short enough to keep storage growth manageable.</div>
+      </div>
+      <div class="qa-block">
+        <div class="qa-q">When would you NOT use Prometheus for metrics?</div>
+        <div class="qa-a">When you need long-term, high-cardinality historical storage — Prometheus is built for short-term local retention; pair it with a remote-write long-term store (e.g. Thanos, Mimir) for that.</div>
+      </div>
+    </section>
+
+  </main>
+  <script src="../../assets/nav.js"></script>
+</body>
+</html>

@@ -1,0 +1,211 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Cassandra — SD Prep</title>
+  <link rel="stylesheet" href="../../assets/style.css">
+</head>
+<body>
+  <aside id="sidebar"></aside>
+  <main>
+
+    <header class="page-head">
+      <div class="pill">Key Technologies</div>
+      <h1>Cassandra</h1>
+      <p class="sub">A wide-column, AP-leaning store built for write-heavy, high-availability workloads — schema is designed around the query, not the entity.</p>
+      <div class="meta-row">
+        <span class="badge green">15-20 min read</span>
+        <span class="badge blue">Medium-Hard</span>
+      </div>
+    </header>
+
+    <div class="flash-card">
+      <div class="flash-label">Say this in the first 2 minutes</div>
+      <ul>
+        <li>Cassandra is query-first schema design — you model tables around the exact queries you'll run, denormalizing aggressively, because there are no joins</li>
+        <li>Partition key decides which node owns the data; clustering columns decide sort order within that partition</li>
+        <li>Consistency is tunable per-query (ONE, QUORUM, ALL) — it's not a fixed property of the database</li>
+        <li>Writes are fast by design: append to commit log + memtable, no read-before-write, no random disk I/O on the write path</li>
+        <li>It's AP-leaning on the CAP spectrum — favors availability and partition tolerance over strict consistency by default</li>
+      </ul>
+    </div>
+
+    <section id="mental-model">
+      <h2>Mental model</h2>
+      <div class="analogy-block">
+        Cassandra is a write-optimized ledger, not a queryable spreadsheet. You don't ask it new questions after the fact — you decide the questions up front, build a table per question, and it answers each one in constant time because the data is already laid out for that exact lookup.
+      </div>
+    </section>
+
+    <section id="core-concepts">
+      <h2>Wide-column model</h2>
+      <table class="def-table">
+        <thead><tr><th>Concept</th><th>What it means</th></tr></thead>
+        <tbody>
+          <tr><td>Partition key</td><td>Determines which node(s) own the row — all rows with the same partition key live together, on the same node</td></tr>
+          <tr><td>Clustering columns</td><td>Sort order of rows within a partition — enables efficient range scans (e.g. latest 50 events for a user)</td></tr>
+          <tr><td>Denormalization</td><td>Same data duplicated across multiple tables, one per query pattern — storage is cheap, joins are not available</td></tr>
+          <tr><td>No joins</td><td>Query patterns must be known at schema design time; changing access patterns later often means a new table</td></tr>
+        </tbody>
+      </table>
+
+      <h3 style="font-size:13px;color:var(--text);margin:1.5rem 0 0.75rem;font-weight:600">Tunable consistency</h3>
+      <div class="dial-wrap">
+        <div class="dial-title">Cassandra default posture — consistency vs availability (CAP)</div>
+        <div class="dial-track"><div class="dial-marker" style="left:78%"></div></div>
+        <div class="dial-labels"><span class="end-left">Strong consistency</span><span class="end-right">Availability</span></div>
+      </div>
+      <table class="def-table">
+        <thead><tr><th>Consistency level</th><th>Behavior</th></tr></thead>
+        <tbody>
+          <tr><td>ONE</td><td>Acked by a single replica — fastest, weakest guarantee, used for high-throughput non-critical writes</td></tr>
+          <tr><td>QUORUM</td><td>Acked by majority of replicas (e.g. 2 of 3) — common production default, balances latency and consistency</td></tr>
+          <tr><td>ALL</td><td>Acked by every replica — strongest read-after-write guarantee, lowest availability (any replica down blocks the request)</td></tr>
+        </tbody>
+      </table>
+      <div class="callout info">Read QUORUM + write QUORUM gives you strong consistency for that specific query, since the read and write replica sets are guaranteed to overlap by at least one node. This is set per-query, not globally.</div>
+    </section>
+
+    <section id="how-it-works">
+      <h2>Write path</h2>
+      <div class="diagram-wrap">
+        <svg viewBox="0 0 740 200" xmlns="http://www.w3.org/2000/svg">
+          <defs>
+            <marker id="cassArrow" markerWidth="8" markerHeight="8" refX="6" refY="3" orient="auto"><path d="M0,0 L6,3 L0,6 Z" fill="var(--border2)"/></marker>
+          </defs>
+
+          <g data-tip="Write request arrives at a coordinator node">
+            <rect class="diag-box role-client" x="15" y="75" width="110" height="50"/>
+            <text class="diag-label" x="70" y="95" style="font-size:11px">Write request</text>
+            <text class="diag-sublabel" x="70" y="111" style="font-size:9px">INSERT</text>
+          </g>
+          <path class="diag-arrow-path" d="M125,90 L185,40" marker-end="url(#cassArrow)"/>
+          <path class="diag-arrow-path" d="M125,100 L185,100" marker-end="url(#cassArrow)"/>
+
+          <g data-tip="Append-only sequential write — durability before the memtable ack">
+            <rect class="diag-box role-async" x="185" y="15" width="140" height="50"/>
+            <text class="diag-label" x="255" y="35" style="font-size:11px">Commit log</text>
+            <text class="diag-sublabel" x="255" y="51" style="font-size:9px">sequential disk write</text>
+          </g>
+          <g data-tip="In-memory sorted structure — write is acked once both commit log and memtable succeed">
+            <rect class="diag-box role-cache" x="185" y="75" width="140" height="50"/>
+            <text class="diag-label" x="255" y="95" style="font-size:11px">Memtable</text>
+            <text class="diag-sublabel" x="255" y="111" style="font-size:9px">in-memory, sorted</text>
+          </g>
+
+          <path class="diag-arrow-path" d="M325,100 L395,100" marker-end="url(#cassArrow)" stroke-dasharray="3 3"/>
+          <text x="360" y="92" font-size="9" fill="var(--amber)" font-family="Inter,sans-serif">flush</text>
+          <g data-tip="Memtable flushed to an immutable file on disk once it's full">
+            <rect class="diag-box role-db" x="395" y="75" width="140" height="50"/>
+            <text class="diag-label" x="465" y="95" style="font-size:11px">SSTable</text>
+            <text class="diag-sublabel" x="465" y="111" style="font-size:9px">immutable on-disk file</text>
+          </g>
+
+          <path class="diag-arrow-path" d="M535,100 L605,100" marker-end="url(#cassArrow)" stroke-dasharray="3 3"/>
+          <text x="565" y="92" font-size="9" fill="var(--amber)" font-family="Inter,sans-serif">merge</text>
+          <g data-tip="Background process merges SSTables, discards overwritten/deleted data">
+            <rect class="diag-box role-db" x="605" y="75" width="120" height="50"/>
+            <text class="diag-label" x="665" y="95" style="font-size:11px">Compaction</text>
+            <text class="diag-sublabel" x="665" y="111" style="font-size:9px">reclaims space</text>
+          </g>
+
+          <text x="255" y="155" text-anchor="middle" font-size="10" fill="var(--accent)" font-family="Inter,sans-serif">Write acked after commit log + memtable — no read-before-write</text>
+        </svg>
+        <div class="diag-legend">
+          <div class="diag-legend-item"><span class="diag-legend-dot role-async"></span>Commit log — durability, replayed on crash recovery</div>
+          <div class="diag-legend-item"><span class="diag-legend-dot role-cache"></span>Memtable — in-memory, what makes writes fast</div>
+          <div class="diag-legend-item"><span class="diag-legend-dot role-db"></span>SSTable + compaction — eventual on-disk durable form</div>
+        </div>
+      </div>
+      <ol class="flow-steps-list">
+        <li><span>Commit log:</span> write appended sequentially to disk first — guarantees durability if the node crashes before flush</li>
+        <li><span>Memtable:</span> write also applied to an in-memory sorted structure — this is what makes the write path so fast, no random I/O</li>
+        <li><span>Ack:</span> write is acknowledged to the client once both succeed, satisfying the requested consistency level across replicas</li>
+        <li><span>Flush:</span> when the memtable fills up, it's flushed to disk as an immutable SSTable</li>
+        <li><span>Compaction:</span> background process merges SSTables over time, discarding overwritten or tombstoned (deleted) data</li>
+      </ol>
+    </section>
+
+    <section id="tradeoffs">
+      <h2>Tradeoffs</h2>
+      <div class="compare-grid">
+        <div class="compare-card good">
+          <div class="compare-label">Wins</div>
+          <ul>
+            <li>Extremely fast writes — no read-before-write, sequential disk I/O</li>
+            <li>Linear horizontal scalability — add nodes, capacity grows proportionally</li>
+            <li>No single point of failure — masterless, peer-to-peer architecture</li>
+            <li>Multi-region active-active writes are a first-class capability</li>
+          </ul>
+        </div>
+        <div class="compare-card bad">
+          <div class="compare-label">Costs</div>
+          <ul>
+            <li>No joins — every new query pattern often needs a new denormalized table</li>
+            <li>Eventual consistency by default — strong consistency costs latency (QUORUM/ALL)</li>
+            <li>Deletes create tombstones that must be compacted away — can degrade read performance if mismanaged</li>
+            <li>Schema changes are harder once query patterns shift — redesign means backfilling new tables</li>
+          </ul>
+        </div>
+      </div>
+    </section>
+
+    <section id="when-to-use">
+      <h2>When to use</h2>
+      <div class="scenario-row use">
+        <span class="scenario-icon">✓</span>
+        <div class="scenario-text"><strong>USE:</strong> write-heavy, high-availability workloads with known query patterns — time-series/IoT sensor data, activity feeds, messaging history.</div>
+      </div>
+      <div class="scenario-row avoid">
+        <span class="scenario-icon">✗</span>
+        <div class="scenario-text"><strong>AVOID:</strong> ad-hoc analytical queries, workloads needing joins, or anything where the access pattern isn't known upfront and changes frequently.</div>
+      </div>
+      <div class="scenario-row watch">
+        <span class="scenario-icon">⚠</span>
+        <div class="scenario-text"><strong>WATCH OUT:</strong> heavy delete-and-rewrite workloads generate tombstones that slow reads until compaction catches up — design around updates/appends where possible.</div>
+      </div>
+    </section>
+
+    <section id="interview-moves">
+      <h2>Interview moves</h2>
+      <ul class="moves-list">
+        <li><span class="move-num">01</span><div><strong>"I'd design the schema around our three known query patterns first, denormalizing into separate tables, since Cassandra has no joins"</strong> — shows you understand query-first modeling, the core Cassandra skill</div></li>
+        <li><span class="move-num">02</span><div><strong>"For this time-series workload — writes far outnumber reads, need horizontal scale and multi-region availability — Cassandra fits better than Postgres"</strong> — justifies the choice with the actual access pattern</div></li>
+        <li><span class="move-num">03</span><div><strong>"I'd use QUORUM consistency on both reads and writes here since we need read-after-write correctness for this specific table"</strong> — shows consistency is a per-query dial, not a fixed property</div></li>
+        <li><span class="move-num">04</span><div><strong>"The write path never does a read-before-write — that's specifically why Cassandra writes are so much faster than a B-tree-indexed relational table"</strong> — internals-level justification</div></li>
+      </ul>
+    </section>
+
+    <section id="follow-ups">
+      <h2>Common follow-up questions</h2>
+      <div class="qa-block">
+        <div class="qa-q">Why is Cassandra's write path so much faster than a typical relational DB?</div>
+        <div class="qa-a">No read-before-write and no random disk I/O — it's a sequential append to a commit log plus an in-memory write, with reconciliation (compaction) deferred to the background.</div>
+      </div>
+      <div class="qa-block">
+        <div class="qa-q">How do you choose a partition key?</div>
+        <div class="qa-a">High cardinality to spread load evenly across nodes, but matching your primary query's filter (e.g. user_id) so a single query hits one partition instead of scanning the whole cluster.</div>
+      </div>
+      <div class="qa-block">
+        <div class="qa-q">What's a tombstone and why does it matter?</div>
+        <div class="qa-a">A marker written on delete instead of immediate removal — reads must skip past tombstones until compaction physically removes them. Too many tombstones in a partition slows reads significantly.</div>
+      </div>
+      <div class="qa-block">
+        <div class="qa-q">How does Cassandra achieve high availability with no master?</div>
+        <div class="qa-a">Peer-to-peer gossip protocol — every node can accept reads/writes for the data it owns or coordinates. Replication factor (commonly 3) spreads copies so node failure doesn't mean data loss.</div>
+      </div>
+      <div class="qa-block">
+        <div class="qa-q">What happens if you need a new query pattern you didn't design for?</div>
+        <div class="qa-a">Usually means creating a new denormalized table for that pattern and backfilling it — there's no ad-hoc join to fall back on. This is the main schema-evolution cost of the model.</div>
+      </div>
+      <div class="qa-block">
+        <div class="qa-q">Cassandra vs DynamoDB — when would you pick one over the other?</div>
+        <div class="qa-a">Cassandra for multi-region active-active writes outside AWS or to avoid vendor lock-in. DynamoDB for zero-ops on AWS with comparable performance and built-in autoscaling.</div>
+      </div>
+    </section>
+
+  </main>
+  <script src="../../assets/nav.js"></script>
+</body>
+</html>

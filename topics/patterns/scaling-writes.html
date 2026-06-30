@@ -1,0 +1,199 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Scaling Writes — SD Prep</title>
+  <link rel="stylesheet" href="../../assets/style.css">
+</head>
+<body>
+  <aside id="sidebar"></aside>
+  <main>
+
+    <header class="page-head">
+      <div class="pill">Patterns</div>
+      <h1>Scaling Writes</h1>
+      <p class="sub">Sharding, write buffering, async writes, and batching — how to absorb write volume a single DB can't handle.</p>
+      <div class="meta-row">
+        <span class="badge green">20-25 min</span>
+        <span class="badge blue">Hard</span>
+      </div>
+    </header>
+
+    <div class="flash-card">
+      <div class="flash-label">Say this in the first 2 minutes</div>
+      <ul>
+        <li>Reach for write scaling only after caching and replicas are maxed out — it's the most operationally expensive lever</li>
+        <li>Sharding splits data across N databases by a shard key — pick the key based on your access pattern</li>
+        <li>Hash sharding spreads load evenly but kills range queries; range sharding enables range queries but risks hot shards</li>
+        <li>A queue in front of the DB absorbs write spikes — the DB drains it at a steady, sustainable rate</li>
+        <li>Async writes trade some durability for throughput — be explicit about what you're willing to lose</li>
+      </ul>
+    </div>
+
+    <section id="mental-model">
+      <h2>Mental model</h2>
+      <div class="analogy-block">
+        Scaling writes is like a post office overwhelmed at one counter. Sharding opens multiple counters, each handling a fixed slice of the alphabet. A queue is the line that forms outside — it lets people arrive in bursts while clerks process at a steady pace.
+      </div>
+    </section>
+
+    <section id="core-concepts">
+      <h2>Core concepts</h2>
+      <table class="def-table">
+        <thead><tr><th>Term</th><th>Definition</th></tr></thead>
+        <tbody>
+          <tr><td>Sharding</td><td>Splitting a dataset across multiple independent databases by a shard key</td></tr>
+          <tr><td>Hash sharding</td><td>shard = hash(key) % N — evenly distributes load, destroys ordering</td></tr>
+          <tr><td>Range sharding</td><td>Shard boundaries are key ranges — keeps order, risks a hot shard</td></tr>
+          <tr><td>Hot partition</td><td>One shard receives disproportionate traffic (e.g. a viral key)</td></tr>
+          <tr><td>Key salting</td><td>Append a random suffix to a hot key to spread its writes across shards</td></tr>
+          <tr><td>Write buffering</td><td>A queue absorbs bursts; consumers write to the DB at a sustainable rate</td></tr>
+          <tr><td>Batching</td><td>Grouping multiple writes into one DB round-trip to cut per-write overhead</td></tr>
+        </tbody>
+      </table>
+    </section>
+
+    <section id="how-it-works">
+      <h2>Hash sharding — write path demo</h2>
+      <div class="diagram-wrap">
+        <svg id="shard-svg" viewBox="0 0 700 220" xmlns="http://www.w3.org/2000/svg">
+          <defs><marker id="shArrow" markerWidth="8" markerHeight="8" refX="6" refY="3" orient="auto"><path d="M0,0 L6,3 L0,6 Z" fill="var(--border2)"/></marker></defs>
+          <g data-tip="Incoming write request carries a key, e.g. user_id=482"><rect class="diag-box role-client" x="10" y="85" width="110" height="50"/><text class="diag-label" x="65" y="110" style="font-size:11px">Write(key)</text></g>
+          <path class="diag-arrow-path" d="M120,110 L165,110" marker-end="url(#shArrow)"/>
+          <g data-tip="hash(key) % 4 picks the target shard deterministically"><rect class="diag-box role-cache" x="165" y="85" width="130" height="50"/><text class="diag-label" x="230" y="105" style="font-size:11px">hash(key) % 4</text><text class="diag-sublabel" x="230" y="121">router</text></g>
+
+          <g class="shard-box" data-shard="N1" data-tip="Shard N1 — owns hash bucket 0"><rect x="370" y="10" width="120" height="50" fill="var(--surface2)" stroke="var(--border2)" stroke-width="1.5" rx="7"/><text class="diag-label" x="430" y="35" style="font-size:11px">Shard N1</text></g>
+          <g class="shard-box" data-shard="N2" data-tip="Shard N2 — owns hash bucket 1"><rect x="370" y="68" width="120" height="50" fill="var(--surface2)" stroke="var(--border2)" stroke-width="1.5" rx="7"/><text class="diag-label" x="430" y="93" style="font-size:11px">Shard N2</text></g>
+          <g class="shard-box" data-shard="N3" data-tip="Shard N3 — owns hash bucket 2"><rect x="370" y="126" width="120" height="50" fill="var(--surface2)" stroke="var(--border2)" stroke-width="1.5" rx="7"/><text class="diag-label" x="430" y="151" style="font-size:11px">Shard N3</text></g>
+          <g class="shard-box" data-shard="N4" data-tip="Shard N4 — owns hash bucket 3"><rect x="370" y="184" width="120" height="50" fill="var(--surface2)" stroke="var(--border2)" stroke-width="1.5" rx="7"/><text class="diag-label" x="430" y="209" style="font-size:11px">Shard N4</text></g>
+
+          <path id="shard-path-N1" d="M295,105 C330,105 330,35 370,35" fill="none" stroke="none"/>
+          <path id="shard-path-N2" d="M295,108 C330,108 330,93 370,93" fill="none" stroke="none"/>
+          <path id="shard-path-N3" d="M295,112 C330,112 330,151 370,151" fill="none" stroke="none"/>
+          <path id="shard-path-N4" d="M295,115 C330,115 330,209 370,209" fill="none" stroke="none"/>
+
+          <path class="diag-arrow-path" d="M295,105 C330,105 330,35 365,35" marker-end="url(#shArrow)" stroke-dasharray="3 3" opacity="0.4"/>
+          <path class="diag-arrow-path" d="M295,108 C330,108 330,93 365,93" marker-end="url(#shArrow)" stroke-dasharray="3 3" opacity="0.4"/>
+          <path class="diag-arrow-path" d="M295,112 C330,112 330,151 365,151" marker-end="url(#shArrow)" stroke-dasharray="3 3" opacity="0.4"/>
+          <path class="diag-arrow-path" d="M295,115 C330,115 330,209 365,209" marker-end="url(#shArrow)" stroke-dasharray="3 3" opacity="0.4"/>
+        </svg>
+        <div class="hash-ring-controls" style="flex-wrap:wrap">
+          <button class="hr-btn" id="sh-write-1">Write key: user:482</button>
+          <button class="hr-btn" id="sh-write-2">Write key: user:17</button>
+          <button class="hr-btn" id="sh-write-3">Write key: user:903</button>
+          <button class="hr-btn" id="sh-write-4">Write key: user:256</button>
+        </div>
+        <p style="font-size:11px;color:var(--faint);margin-top:8px">Click a key — the router lights up only the shard that owns it. Every other shard is untouched.</p>
+      </div>
+      <script>
+      (function(){
+        function boot(){
+          var svg = document.getElementById('shard-svg');
+          if (!svg || !window.animateShardWrite) return;
+          var demo = {
+            'sh-write-1': { shard: 'N1', path: 'M295,105 C330,105 330,35 430,35' },
+            'sh-write-2': { shard: 'N2', path: 'M295,108 C330,108 330,93 430,93' },
+            'sh-write-3': { shard: 'N3', path: 'M295,112 C330,112 330,151 430,151' },
+            'sh-write-4': { shard: 'N4', path: 'M295,115 C330,115 330,209 430,209' }
+          };
+          Object.keys(demo).forEach(function(btnId){
+            var btn = document.getElementById(btnId);
+            if (!btn) return;
+            btn.addEventListener('click', function(){
+              window.animateShardWrite(svg, demo[btnId].shard, demo[btnId].path);
+            });
+          });
+        }
+        if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', boot);
+        else boot();
+      })();
+      </script>
+      <ol class="flow-steps-list">
+        <li><span>Hash:</span> compute <code>hash(shard_key) % N</code> to deterministically pick a shard</li>
+        <li><span>Route:</span> send the write directly to that shard's connection</li>
+        <li><span>Isolation:</span> every other shard is untouched by this write — no cross-shard coordination needed</li>
+      </ol>
+    </section>
+
+    <section id="tradeoffs">
+      <h2>Tradeoffs</h2>
+      <div class="compare-grid">
+        <div class="compare-card good">
+          <div class="compare-label">Hash sharding</div>
+          <ul>
+            <li>Even distribution — no single shard naturally gets more traffic</li>
+            <li>Simple router logic, predictable capacity planning</li>
+            <li>Cost: range queries ("all orders this week") require fanning out to every shard</li>
+          </ul>
+        </div>
+        <div class="compare-card bad">
+          <div class="compare-label">Range sharding</div>
+          <ul>
+            <li>Range queries stay efficient — adjacent keys live on the same shard</li>
+            <li>Easy to reason about and rebalance by splitting a range</li>
+            <li>Cost: sequential/skewed keys (timestamps, celebrity IDs) create hot shards</li>
+          </ul>
+        </div>
+      </div>
+    </section>
+
+    <section id="when-to-use">
+      <h2>When to use</h2>
+      <div class="scenario-row use">
+        <span class="scenario-icon">✓</span>
+        <div class="scenario-text"><strong>Use sharding</strong> once a single primary can't handle write QPS even after read offload, write buffering, and vertical scaling are exhausted.</div>
+      </div>
+      <div class="scenario-row use">
+        <span class="scenario-icon">✓</span>
+        <div class="scenario-text"><strong>Use a write buffer/queue</strong> for bursty traffic (flash sales, IoT spikes) so the DB drains writes at a steady rate instead of falling over.</div>
+      </div>
+      <div class="scenario-row avoid">
+        <span class="scenario-icon">✗</span>
+        <div class="scenario-text"><strong>Avoid sharding too early</strong> — it adds cross-shard query complexity, rebalancing operations, and multi-shard transaction headaches. Exhaust simpler levers first.</div>
+      </div>
+    </section>
+
+    <section id="interview-moves">
+      <h2>Interview moves</h2>
+      <ul class="moves-list">
+        <li><span class="move-num">01</span><div><strong>"Before sharding, I'd check if caching, replicas, and batching already solve this — sharding is the most expensive lever"</strong> — shows you don't reach for the heaviest tool first</div></li>
+        <li><span class="move-num">02</span><div><strong>"I'd shard by user_id since almost every query in this system is scoped to a single user"</strong> — justifies the shard key against actual access patterns, not arbitrarily</div></li>
+        <li><span class="move-num">03</span><div><strong>"Hash sharding here since we don't need range queries — it gives even distribution and avoids hot shards"</strong> — names the tradeoff explicitly</div></li>
+        <li><span class="move-num">04</span><div><strong>"If one key gets disproportionate traffic, I'd salt it — append a random suffix and fan writes across several sub-keys"</strong> — the standard hot-partition mitigation</div></li>
+        <li><span class="move-num">05</span><div><strong>"I'd put a queue in front of the writer so traffic spikes get absorbed instead of overwhelming the DB directly"</strong> — connects write buffering to real burst scenarios</div></li>
+      </ul>
+    </section>
+
+    <section id="follow-ups">
+      <h2>Common follow-up questions</h2>
+      <div class="qa-block">
+        <div class="qa-q">How do you pick a shard key?</div>
+        <div class="qa-a">Pick the field most queries filter by, with high cardinality and even distribution. A bad key (e.g. status with 3 values) creates massive imbalance.</div>
+      </div>
+      <div class="qa-block">
+        <div class="qa-q">How do you handle a query that needs to join across shards?</div>
+        <div class="qa-a">Avoid it where possible by denormalizing. Otherwise, fan out to all shards in parallel and merge in the application layer — accept the latency cost.</div>
+      </div>
+      <div class="qa-block">
+        <div class="qa-q">What's key salting and when do you need it?</div>
+        <div class="qa-a">Appending a random suffix (e.g. user:482#3) to spread a hot key's writes across multiple shards/partitions, then aggregating reads across the salted variants. Needed when one key (a viral post, a popular product) dominates traffic.</div>
+      </div>
+      <div class="qa-block">
+        <div class="qa-q">How do you rebalance shards as data grows?</div>
+        <div class="qa-a">Hash sharding: use consistent hashing so adding a shard only remaps a fraction of keys. Range sharding: split an oversized range into two and migrate that slice only.</div>
+      </div>
+      <div class="qa-block">
+        <div class="qa-q">What's the durability tradeoff with async writes?</div>
+        <div class="qa-a">A write acknowledged to the client before it's durably persisted can be lost on crash. Mitigate with a write-ahead log or by accepting the loss for non-critical data (e.g. view counts).</div>
+      </div>
+      <div class="qa-block">
+        <div class="qa-q">When does batching writes help, and when does it hurt?</div>
+        <div class="qa-a">Helps when per-write overhead (network round-trip, transaction commit) dominates — batch 100s of rows per insert. Hurts latency-sensitive single writes, since you wait for the batch window to fill or flush.</div>
+      </div>
+    </section>
+
+  </main>
+  <script src="../../assets/nav.js"></script>
+</body>
+</html>

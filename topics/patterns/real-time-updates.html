@@ -1,0 +1,193 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Real-Time Updates — SD Prep</title>
+  <link rel="stylesheet" href="../../assets/style.css">
+</head>
+<body>
+  <aside id="sidebar"></aside>
+  <main>
+
+    <header class="page-head">
+      <div class="pill">Patterns</div>
+      <h1>Real-Time Updates</h1>
+      <p class="sub">How to push fresh data to clients — polling, long-polling, WebSockets, and SSE — and how to justify the choice.</p>
+      <div class="meta-row">
+        <span class="badge green">15-20 min</span>
+        <span class="badge blue">Medium</span>
+      </div>
+    </header>
+
+    <div class="flash-card">
+      <div class="flash-label">Say this in the first 2 minutes</div>
+      <ul>
+        <li>Ask: is this one-way server push, or does the client also need to send frequent messages?</li>
+        <li>One-way push (feeds, notifications, live scores) → SSE, not WebSockets — simpler infra, free reconnect</li>
+        <li>Bidirectional + low-latency (chat, games, collab editing) → WebSockets</li>
+        <li>WebSockets are stateful connections — horizontal scaling needs a pub/sub backplane (Redis) so any node can deliver to any client</li>
+        <li>Long-polling is the fallback when WS/SSE are blocked by a corporate proxy, not the primary design</li>
+      </ul>
+    </div>
+
+    <section id="mental-model">
+      <h2>Mental model</h2>
+      <div class="analogy-block">
+        Polling is calling the restaurant every 5 minutes to ask if your order is ready. Long-polling is staying on hold until they tell you. SSE is the restaurant texting you the moment it's done. WebSockets is a walkie-talkie — both sides can talk anytime, on the same open channel.
+      </div>
+    </section>
+
+    <section id="core-concepts">
+      <h2>Core concepts</h2>
+      <table class="def-table">
+        <thead><tr><th>Term</th><th>Definition</th></tr></thead>
+        <tbody>
+          <tr><td>Polling</td><td>Client repeatedly requests on a timer; mostly empty responses</td></tr>
+          <tr><td>Long-polling</td><td>Server holds the request open until data is ready, then responds</td></tr>
+          <tr><td>SSE</td><td>Server-Sent Events — one persistent HTTP connection, server streams events</td></tr>
+          <tr><td>WebSocket</td><td>Full-duplex socket over a single TCP connection after an HTTP upgrade</td></tr>
+          <tr><td>Sticky session</td><td>Load balancer routes a client to the same backend node every request</td></tr>
+          <tr><td>Backplane</td><td>Shared pub/sub layer (Redis) so any server node can broadcast to any connected client</td></tr>
+          <tr><td>Heartbeat</td><td>Periodic ping/pong to detect dead connections behind proxies and NATs</td></tr>
+        </tbody>
+      </table>
+    </section>
+
+    <section id="how-it-works">
+      <h2>Connection lifecycle: polling vs WebSocket</h2>
+      <div class="diagram-wrap">
+        <svg viewBox="0 0 740 240" xmlns="http://www.w3.org/2000/svg">
+          <defs>
+            <marker id="rtu1" markerWidth="8" markerHeight="8" refX="6" refY="3" orient="auto"><path d="M0,0 L6,3 L0,6 Z" fill="var(--border2)"/></marker>
+            <marker id="rtu2" markerWidth="8" markerHeight="8" refX="6" refY="3" orient="auto"><path d="M0,0 L6,3 L0,6 Z" fill="var(--accent)"/></marker>
+          </defs>
+
+          <text class="diag-sublabel" x="170" y="14" style="font-size:10px;fill:var(--blue)">POLLING — N short-lived connections</text>
+          <g data-tip="Client opens a new HTTP request"><rect class="diag-box role-client" x="10" y="25" width="90" height="40"/><text class="diag-label" x="55" y="45" style="font-size:11px">Client</text></g>
+          <path class="diag-arrow-path" d="M100,38 L185,38" marker-end="url(#rtu1)"/>
+          <text class="diag-sublabel" x="142" y="30" style="font-size:9px">GET (empty)</text>
+          <g data-tip="Server responds immediately, even if nothing changed"><rect class="diag-box" x="185" y="20" width="120" height="50"/><text class="diag-label" x="245" y="48" style="font-size:11px">Server</text></g>
+          <path class="diag-arrow-path" d="M100,55 L185,55" marker-end="url(#rtu1)"/>
+          <text class="diag-sublabel" x="142" y="68" style="font-size:9px">GET (empty)</text>
+          <path class="diag-arrow-path" d="M100,72 L185,72" marker-end="url(#rtu1)"/>
+          <text class="diag-sublabel" x="142" y="84" style="font-size:9px">GET (data!)</text>
+          <text class="diag-sublabel" x="245" y="90" style="font-size:9px;fill:var(--amber)">connection closes after every reply</text>
+
+          <text class="diag-sublabel" x="170" y="130" style="font-size:10px;fill:var(--accent)">WEBSOCKET — one long-lived connection</text>
+          <g data-tip="Client opens one connection via HTTP Upgrade"><rect class="diag-box role-client" x="10" y="145" width="90" height="40"/><text class="diag-label" x="55" y="165" style="font-size:11px">Client</text></g>
+          <path class="diag-arrow-path" d="M100,158 L185,158" marker-end="url(#rtu2)"/>
+          <text class="diag-sublabel" x="142" y="150" style="font-size:9px">Upgrade: websocket</text>
+          <g data-tip="Connection stays open — server pushes whenever data is ready, client can send anytime"><rect class="diag-box role-cache" x="185" y="140" width="160" height="50"/><text class="diag-label" x="265" y="162" style="font-size:11px">Server</text><text class="diag-sublabel" x="265" y="178">socket held open</text></g>
+          <path class="diag-arrow-path" d="M345,158 C380,158 380,158 405,158" marker-end="url(#rtu2)" stroke-dasharray="3 3"/>
+          <text class="diag-sublabel" x="420" y="150" style="font-size:9px;text-anchor:start">push 1</text>
+          <path class="diag-arrow-path" d="M345,175 C380,185 380,185 405,185" marker-end="url(#rtu2)" stroke-dasharray="3 3"/>
+          <text class="diag-sublabel" x="420" y="190" style="font-size:9px;text-anchor:start">push 2 (no new request needed)</text>
+
+          <text x="520" y="35" style="font-size:42px;fill:var(--border2);font-family:Inter">≫</text>
+        </svg>
+        <div class="diag-legend">
+          <div class="diag-legend-item"><span class="diag-legend-dot role-client"></span>Client</div>
+          <div class="diag-legend-item"><span class="diag-legend-dot role-cache"></span>Persistent connection (WS / SSE)</div>
+        </div>
+      </div>
+      <ol class="flow-steps-list">
+        <li><span>Polling:</span> client opens and closes a connection on every tick — most responses carry nothing new</li>
+        <li><span>Long-polling:</span> server delays the response until data exists or a timeout hits, then the client immediately reopens</li>
+        <li><span>SSE / WebSocket:</span> one connection stays open; server pushes data the instant it's available, no re-request</li>
+      </ol>
+    </section>
+
+    <section id="tradeoffs">
+      <h2>Tradeoffs</h2>
+      <table class="def-table">
+        <thead><tr><th>Dimension</th><th>Polling</th><th>Long-polling</th><th>SSE</th><th>WebSocket</th></tr></thead>
+        <tbody>
+          <tr><td>Direction</td><td>Client pull</td><td>Client pull, delayed</td><td>Server push only</td><td>Full duplex</td></tr>
+          <tr><td>Latency</td><td>Up to poll interval</td><td>Near-instant</td><td>Near-instant</td><td>Near-instant</td></tr>
+          <tr><td>Infra cost</td><td>Low, but wasteful QPS</td><td>Medium — many held requests</td><td>Medium — 1 conn/client</td><td>Higher — stateful, sticky sessions</td></tr>
+          <tr><td>Browser support</td><td>Universal</td><td>Universal</td><td>Good, no IE</td><td>Universal (modern)</td></tr>
+          <tr><td>Auto-reconnect</td><td>N/A (stateless)</td><td>Manual</td><td>Built-in (browser native)</td><td>Manual (you write it)</td></tr>
+        </tbody>
+      </table>
+      <div class="compare-grid">
+        <div class="compare-card good">
+          <div class="compare-label">SSE wins</div>
+          <ul>
+            <li>Just HTTP — works through normal proxies, load balancers, CDNs</li>
+            <li>Browser auto-reconnects with <code>Last-Event-ID</code> for free</li>
+            <li>Much less server-side state to manage than WebSockets</li>
+            <li>Simple to reason about: it's a stream, not a protocol</li>
+          </ul>
+        </div>
+        <div class="compare-card bad">
+          <div class="compare-label">WebSocket costs</div>
+          <ul>
+            <li>Stateful — needs sticky sessions or a shared backplane to scale out</li>
+            <li>No native reconnect or message replay — you build it</li>
+            <li>Harder to load balance and harder to debug in prod</li>
+            <li>Overkill if the client never needs to send much back</li>
+          </ul>
+        </div>
+      </div>
+    </section>
+
+    <section id="when-to-use">
+      <h2>When to use</h2>
+      <div class="scenario-row use">
+        <span class="scenario-icon">✓</span>
+        <div class="scenario-text"><strong>Use SSE</strong> for live feeds, notification badges, stock tickers, progress bars — anything where only the server speaks.</div>
+      </div>
+      <div class="scenario-row use">
+        <span class="scenario-icon">✓</span>
+        <div class="scenario-text"><strong>Use WebSockets</strong> for chat, multiplayer games, collaborative editing — frequent bidirectional, low-latency messages.</div>
+      </div>
+      <div class="scenario-row watch">
+        <span class="scenario-icon">⚠</span>
+        <div class="scenario-text"><strong>Watch out for corporate proxies/firewalls</strong> that block long-lived connections — keep a long-polling fallback path for those clients.</div>
+      </div>
+    </section>
+
+    <section id="interview-moves">
+      <h2>Interview moves</h2>
+      <ul class="moves-list">
+        <li><span class="move-num">01</span><div><strong>"Does the client need to send data back frequently, or just receive it?"</strong> — this single question picks SSE vs WebSocket for you</div></li>
+        <li><span class="move-num">02</span><div><strong>"I'd default to SSE — it's just HTTP, gets auto-reconnect for free, and is much easier to scale"</strong> — shows you don't reach for WebSockets reflexively</div></li>
+        <li><span class="move-num">03</span><div><strong>"WebSockets are stateful, so a load balancer alone can't route a push to the right client — I'd add a Redis pub/sub backplane"</strong> — the single most important WS scaling fact</div></li>
+        <li><span class="move-num">04</span><div><strong>"I'd keep long-polling as a fallback, not the primary path, for clients behind proxies that strip WebSocket upgrades"</strong> — shows pragmatism about real-world networks</div></li>
+        <li><span class="move-num">05</span><div><strong>"On reconnect, the client needs to resync missed state — either replay from a sequence number or just refetch a snapshot"</strong> — addresses the gap nobody mentions until asked</div></li>
+      </ul>
+    </section>
+
+    <section id="follow-ups">
+      <h2>Common follow-up questions</h2>
+      <div class="qa-block">
+        <div class="qa-q">How do you scale WebSockets across multiple servers?</div>
+        <div class="qa-a">Sticky sessions route a client to the same node. Use Redis pub/sub (or Kafka) as a backplane so any node publishing an event reaches the node holding that client's socket.</div>
+      </div>
+      <div class="qa-block">
+        <div class="qa-q">Why not just use WebSockets for everything?</div>
+        <div class="qa-a">Stateful connections are expensive to scale, harder to load balance, and need custom reconnect/heartbeat logic. SSE gets you 90% of the value with HTTP-level simplicity for one-way push.</div>
+      </div>
+      <div class="qa-block">
+        <div class="qa-q">How does a client recover missed messages after disconnect?</div>
+        <div class="qa-a">SSE: send <code>Last-Event-ID</code> header on reconnect, server replays from there. WebSocket: you implement a sequence number and a "resync" message yourself.</div>
+      </div>
+      <div class="qa-block">
+        <div class="qa-q">What's the failure mode of long-polling at scale?</div>
+        <div class="qa-a">Each held request ties up a server thread/connection slot. At high concurrency this exhausts connection pools faster than short polling — needs async I/O servers (Node, Netty) to hold many idle connections cheaply.</div>
+      </div>
+      <div class="qa-block">
+        <div class="qa-q">How do you detect a dead WebSocket connection?</div>
+        <div class="qa-a">Ping/pong heartbeat every 30s. If no pong within a timeout, the server closes and the client reconnects. Without this, dead sockets behind NATs linger silently.</div>
+      </div>
+      <div class="qa-block">
+        <div class="qa-q">Mobile clients drain battery on persistent connections — what do you do?</div>
+        <div class="qa-a">Use platform push notifications (APNs/FCM) to wake the app instead of holding an open socket in the background; only open WS/SSE while the app is foregrounded.</div>
+      </div>
+    </section>
+
+  </main>
+  <script src="../../assets/nav.js"></script>
+</body>
+</html>

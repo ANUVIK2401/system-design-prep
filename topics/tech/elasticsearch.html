@@ -1,0 +1,240 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Elasticsearch — SD Prep</title>
+  <link rel="stylesheet" href="../../assets/style.css">
+</head>
+<body>
+  <aside id="sidebar"></aside>
+  <main>
+
+    <header class="page-head">
+      <div class="pill">Key Technologies</div>
+      <h1>Elasticsearch</h1>
+      <p class="sub">A distributed search engine built on an inverted index — fed from your real database, never the source of truth itself.</p>
+      <div class="meta-row">
+        <span class="badge green">15-20 min read</span>
+        <span class="badge blue">Medium</span>
+      </div>
+    </header>
+
+    <div class="flash-card">
+      <div class="flash-label">Say this in the first 2 minutes</div>
+      <ul>
+        <li>Elasticsearch is a secondary, read-optimized index — never the system of record</li>
+        <li>It's fast at full-text search because of the inverted index: term → list of doc IDs, not row scans</li>
+        <li>Data lands in ES via CDC or dual-write from the real DB, with a near-real-time refresh delay (~1s default)</li>
+        <li>Sharding (primary + replica) gives both horizontal scale and read availability</li>
+        <li>A relational DB's native full-text search (e.g. Postgres tsvector) is "good enough" up to ~10M rows — justify ES with relevance scoring, fuzzy match, or facets, not just "search"</li>
+      </ul>
+    </div>
+
+    <section id="mental-model">
+      <h2>Mental model</h2>
+      <div class="analogy-block">
+        A relational DB index speeds up "find the row where id = 5." An inverted index flips that: it answers "find every document containing this word" by storing the word once and pointing to every document it appears in — like a book's back-of-the-page index instead of reading cover to cover.
+      </div>
+    </section>
+
+    <section id="core-concepts">
+      <h2>Inverted index</h2>
+      <p style="font-size:13px;color:#999;margin-bottom:1rem">A forward index maps doc → words. An inverted index maps word → docs. Search becomes a set lookup instead of a scan.</p>
+      <div class="diagram-wrap">
+        <svg viewBox="0 0 740 220" xmlns="http://www.w3.org/2000/svg">
+          <defs>
+            <marker id="esArrow" markerWidth="8" markerHeight="8" refX="6" refY="3" orient="auto"><path d="M0,0 L6,3 L0,6 Z" fill="var(--border2)"/></marker>
+          </defs>
+
+          <g data-tip="Raw document submitted for indexing">
+            <rect class="diag-box role-client" x="15" y="20" width="150" height="56"/>
+            <text class="diag-label" x="90" y="42" style="font-size:11px">Document</text>
+            <text class="diag-sublabel" x="90" y="60" style="font-size:9px">"fast distributed search"</text>
+          </g>
+          <path class="diag-arrow-path" d="M165,48 L210,48" marker-end="url(#esArrow)"/>
+
+          <g data-tip="Analyzer: lowercases, removes stopwords, stems words (running → run)">
+            <rect class="diag-box" x="210" y="20" width="150" height="56"/>
+            <text class="diag-label" x="285" y="42" style="font-size:11px">Analyzer</text>
+            <text class="diag-sublabel" x="285" y="60" style="font-size:9px">tokenize + normalize</text>
+          </g>
+          <path class="diag-arrow-path" d="M360,48 L405,48" marker-end="url(#esArrow)"/>
+
+          <g data-tip="Each term now maps to the list of document IDs containing it">
+            <rect class="diag-box role-cache" x="405" y="10" width="320" height="76"/>
+            <text class="diag-label" x="565" y="30" style="font-size:11px">Inverted index</text>
+          </g>
+          <text x="420" y="48" font-size="10" fill="#bbb" font-family="Inter,sans-serif">fast      → [doc7, doc12, doc88]</text>
+          <text x="420" y="62" font-size="10" fill="#bbb" font-family="Inter,sans-serif">distribut → [doc2, doc7, doc41]</text>
+          <text x="420" y="76" font-size="10" fill="#bbb" font-family="Inter,sans-serif">search    → [doc7, doc9, doc12]</text>
+
+          <text class="diag-sublabel" x="370" y="116" style="font-size:10px;fill:var(--accent)">QUERY TIME</text>
+          <g data-tip="Query 'fast search' is analyzed the same way as documents">
+            <rect class="diag-box role-client" x="15" y="130" width="150" height="50"/>
+            <text class="diag-label" x="90" y="150" style="font-size:11px">Query</text>
+            <text class="diag-sublabel" x="90" y="166" style="font-size:9px">"fast search"</text>
+          </g>
+          <path class="diag-arrow-path" d="M165,155 L405,155" marker-end="url(#esArrow)"/>
+          <g data-tip="Intersect posting lists for each term, score by relevance (BM25), return ranked results">
+            <rect class="diag-box role-async" x="405" y="125" width="320" height="60"/>
+            <text class="diag-label" x="565" y="148" style="font-size:11px">Intersect + score (BM25)</text>
+            <text class="diag-sublabel" x="565" y="165" style="font-size:9px">doc7 (both terms) ranks highest</text>
+          </g>
+        </svg>
+        <div class="diag-legend">
+          <div class="diag-legend-item"><span class="diag-legend-dot role-cache"></span>Inverted index — term → doc ID postings list</div>
+          <div class="diag-legend-item"><span class="diag-legend-dot role-async"></span>Query execution — set intersection, not a table scan</div>
+        </div>
+      </div>
+
+      <h3 style="font-size:13px;color:var(--text);margin:1.5rem 0 0.75rem;font-weight:600">ES vs a database's native search</h3>
+      <table class="def-table">
+        <thead><tr><th>Need</th><th>Pick</th></tr></thead>
+        <tbody>
+          <tr><td>Exact match, small dataset (&lt;10M rows)</td><td>DB native (WHERE, LIKE, tsvector) — one less system to operate</td></tr>
+          <tr><td>Relevance-ranked full-text search</td><td>Elasticsearch — BM25 scoring out of the box</td></tr>
+          <tr><td>Faceted search / aggregations at scale</td><td>Elasticsearch — built for filter + aggregate combos</td></tr>
+          <tr><td>Fuzzy matching, typo tolerance, autocomplete</td><td>Elasticsearch — edit-distance and n-gram analyzers</td></tr>
+          <tr><td>Strong read-your-writes consistency</td><td>DB native — ES refresh interval adds lag (see below)</td></tr>
+        </tbody>
+      </table>
+    </section>
+
+    <section id="how-it-works">
+      <h2>Sharding</h2>
+      <div class="diagram-wrap">
+        <svg viewBox="0 0 700 220" xmlns="http://www.w3.org/2000/svg">
+          <defs>
+            <marker id="esArrow2" markerWidth="8" markerHeight="8" refX="6" refY="3" orient="auto"><path d="M0,0 L6,3 L0,6 Z" fill="var(--border2)"/></marker>
+          </defs>
+          <g data-tip="Client request routed by the coordinating node to relevant shards">
+            <rect class="diag-box role-client" x="15" y="80" width="110" height="50"/>
+            <text class="diag-label" x="70" y="100" style="font-size:11px">Query</text>
+            <text class="diag-sublabel" x="70" y="116" style="font-size:9px">index: products</text>
+          </g>
+          <path class="diag-arrow-path" d="M125,105 L185,40" marker-end="url(#esArrow2)"/>
+          <path class="diag-arrow-path" d="M125,105 L185,105" marker-end="url(#esArrow2)"/>
+          <path class="diag-arrow-path" d="M125,105 L185,170" marker-end="url(#esArrow2)"/>
+
+          <g data-tip="Primary shard 0 — owns a routed subset of docs, e.g. hash(doc_id) % 3 == 0">
+            <rect class="diag-box role-cache" x="185" y="15" width="160" height="50"/>
+            <text class="diag-label" x="265" y="35" style="font-size:11px">Primary shard 0</text>
+            <text class="diag-sublabel" x="265" y="51" style="font-size:9px">routes by doc_id hash</text>
+          </g>
+          <g data-tip="Primary shard 1">
+            <rect class="diag-box role-cache" x="185" y="80" width="160" height="50"/>
+            <text class="diag-label" x="265" y="100" style="font-size:11px">Primary shard 1</text>
+          </g>
+          <g data-tip="Primary shard 2">
+            <rect class="diag-box role-cache" x="185" y="145" width="160" height="50"/>
+            <text class="diag-label" x="265" y="165" style="font-size:11px">Primary shard 2</text>
+          </g>
+
+          <path class="diag-arrow-path" d="M345,40 L405,40" marker-end="url(#esArrow2)" stroke-dasharray="3 3"/>
+          <path class="diag-arrow-path" d="M345,105 L405,105" marker-end="url(#esArrow2)" stroke-dasharray="3 3"/>
+          <path class="diag-arrow-path" d="M345,170 L405,170" marker-end="url(#esArrow2)" stroke-dasharray="3 3"/>
+
+          <g data-tip="Replica of shard 0 — serves reads, promoted if primary node fails">
+            <rect class="diag-box role-async" x="405" y="15" width="160" height="50"/>
+            <text class="diag-label" x="485" y="35" style="font-size:11px">Replica 0'</text>
+          </g>
+          <g data-tip="Replica of shard 1">
+            <rect class="diag-box role-async" x="405" y="80" width="160" height="50"/>
+            <text class="diag-label" x="485" y="100" style="font-size:11px">Replica 1'</text>
+          </g>
+          <g data-tip="Replica of shard 2">
+            <rect class="diag-box role-async" x="405" y="145" width="160" height="50"/>
+            <text class="diag-label" x="485" y="165" style="font-size:11px">Replica 2'</text>
+          </g>
+        </svg>
+        <div class="diag-legend">
+          <div class="diag-legend-item"><span class="diag-legend-dot role-cache"></span>Primary shards — fixed at index creation, can't reshard without reindexing</div>
+          <div class="diag-legend-item"><span class="diag-legend-dot role-async"></span>Replica shards — read scale + failover</div>
+        </div>
+      </div>
+      <div class="callout warn">Primary shard count is set at index creation and is expensive to change — pick it based on projected data volume, not current volume. Replica count can be changed anytime.</div>
+    </section>
+
+    <section id="tradeoffs">
+      <h2>Tradeoffs</h2>
+      <div class="compare-grid">
+        <div class="compare-card good">
+          <div class="compare-label">Wins</div>
+          <ul>
+            <li>Relevance-ranked full-text search out of the box (BM25)</li>
+            <li>Fast faceted/aggregation queries across large datasets</li>
+            <li>Horizontally scales via sharding, built-in replication</li>
+            <li>Fuzzy matching, autocomplete, geo queries built in</li>
+          </ul>
+        </div>
+        <div class="compare-card bad">
+          <div class="compare-label">Costs</div>
+          <ul>
+            <li>Near-real-time only — default 1s refresh interval before new docs are searchable</li>
+            <li>Operationally heavy: JVM tuning, shard sizing, cluster management</li>
+            <li>No real transactions or strong consistency — eventually consistent by design</li>
+            <li>Must stay in sync with the real DB — adds a CDC/dual-write pipeline to maintain</li>
+          </ul>
+        </div>
+      </div>
+    </section>
+
+    <section id="when-to-use">
+      <h2>When to use</h2>
+      <div class="scenario-row use">
+        <span class="scenario-icon">✓</span>
+        <div class="scenario-text"><strong>USE:</strong> product search with relevance ranking, log/event analytics, autocomplete, or any query mixing full-text + filters + aggregations at scale.</div>
+      </div>
+      <div class="scenario-row avoid">
+        <span class="scenario-icon">✗</span>
+        <div class="scenario-text"><strong>AVOID:</strong> as your primary transactional store — no real ACID guarantees, and losing the index just means rebuilding it from the source of truth.</div>
+      </div>
+      <div class="scenario-row watch">
+        <span class="scenario-icon">⚠</span>
+        <div class="scenario-text"><strong>WATCH OUT:</strong> read-your-write expectations break — a user who just created a record may not see it in search results for up to the refresh interval (~1s default, tunable but costs indexing throughput).</div>
+      </div>
+    </section>
+
+    <section id="interview-moves">
+      <h2>Interview moves</h2>
+      <ul class="moves-list">
+        <li><span class="move-num">01</span><div><strong>"Postgres stays the source of truth; I'd feed Elasticsearch via CDC so search never blocks the write path"</strong> — the single most important sentence in any ES design</div></li>
+        <li><span class="move-num">02</span><div><strong>"Given we need typo-tolerant search with relevance ranking, a DB LIKE query won't cut it — that's exactly what ES's inverted index and BM25 scoring are for"</strong> — justifies the technology with the specific requirement</div></li>
+        <li><span class="move-num">03</span><div><strong>"There's a near-real-time gap — if the product spec needs read-your-writes, I'd flag that ES isn't the right fit for that specific flow"</strong> — shows you understand the consistency tradeoff, not just the happy path</div></li>
+        <li><span class="move-num">04</span><div><strong>"I'd size primary shards for projected 2-year data volume since resharding means reindexing"</strong> — operational foresight</div></li>
+      </ul>
+    </section>
+
+    <section id="follow-ups">
+      <h2>Common follow-up questions</h2>
+      <div class="qa-block">
+        <div class="qa-q">How do you keep Elasticsearch in sync with the source database?</div>
+        <div class="qa-a">CDC (Debezium reading the DB's write-ahead log) into a queue, then a consumer indexes into ES. Dual-write is simpler but risks the two stores drifting apart on partial failure.</div>
+      </div>
+      <div class="qa-block">
+        <div class="qa-q">What happens if Elasticsearch goes down?</div>
+        <div class="qa-a">Search degrades or fails, but the source DB is untouched since ES isn't authoritative. Recovery is a reindex from the DB or CDC replay — no data is permanently lost.</div>
+      </div>
+      <div class="qa-block">
+        <div class="qa-q">Why can't you just reshard an ES index like you would a database?</div>
+        <div class="qa-a">Primary shard count is fixed at index creation because document routing (hash → shard) depends on it. Changing it requires creating a new index with the new shard count and reindexing all data.</div>
+      </div>
+      <div class="qa-block">
+        <div class="qa-q">How does Elasticsearch rank results?</div>
+        <div class="qa-a">BM25 by default — scores based on term frequency, inverse document frequency, and field length normalization. Custom scoring functions (boosts, decay by recency) can be layered on top.</div>
+      </div>
+      <div class="qa-block">
+        <div class="qa-q">When would plain Postgres full-text search be enough?</div>
+        <div class="qa-a">Up to roughly 10M rows with moderate query volume and no need for complex facets — Postgres tsvector + GIN index handles it without adding an entire extra system to operate.</div>
+      </div>
+      <div class="qa-block">
+        <div class="qa-q">What's the refresh interval and why does it matter?</div>
+        <div class="qa-a">New/updated documents aren't searchable until the next refresh (default ~1s) — it batches index segment writes for efficiency. Lowering it improves freshness but increases indexing overhead.</div>
+      </div>
+    </section>
+
+  </main>
+  <script src="../../assets/nav.js"></script>
+</body>
+</html>

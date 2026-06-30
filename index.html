@@ -19,6 +19,9 @@
     <div class="filter-row">
       <button class="filter-btn active" data-filter="all">All</button>
       <button class="filter-btn" data-filter="foundations">Foundations</button>
+      <button class="filter-btn" data-filter="patterns">Patterns</button>
+      <button class="filter-btn" data-filter="tech">Key Technologies</button>
+      <button class="filter-btn" data-filter="advanced">Advanced Topics</button>
       <button class="filter-btn" data-filter="questions">Questions</button>
     </div>
 
@@ -91,9 +94,232 @@
         </div>
       </a>
 
-      <!-- QUESTIONS -->
-      <a class="topic-card" href="topics/question-breakdowns.html" data-cat="questions" style="--card-i:6">
+      <!-- PATTERNS -->
+      <a class="topic-card" href="topics/patterns/real-time-updates.html" data-cat="patterns" style="--card-i:6">
         <div class="card-num">07</div>
+        <div class="card-cat">Patterns</div>
+        <h3>Real-Time Updates</h3>
+        <p>Polling vs long-polling vs WebSockets vs SSE — picking the right push model</p>
+        <div class="card-meta">
+          <span class="badge green">12 min</span>
+          <span class="badge blue">Pattern</span>
+        </div>
+      </a>
+
+      <a class="topic-card" href="topics/patterns/dealing-with-contention.html" data-cat="patterns" style="--card-i:7">
+        <div class="card-num">08</div>
+        <div class="card-cat">Patterns</div>
+        <h3>Dealing with Contention</h3>
+        <p>Optimistic vs pessimistic locking, distributed locks, race conditions</p>
+        <div class="card-meta">
+          <span class="badge green">12 min</span>
+          <span class="badge blue">Pattern</span>
+        </div>
+      </a>
+
+      <a class="topic-card" href="topics/patterns/multi-step-processes.html" data-cat="patterns" style="--card-i:8">
+        <div class="card-num">09</div>
+        <div class="card-cat">Patterns</div>
+        <h3>Multi-Step Processes</h3>
+        <p>Saga pattern, orchestration vs choreography, compensating transactions</p>
+        <div class="card-meta">
+          <span class="badge green">12 min</span>
+          <span class="badge blue">Pattern</span>
+        </div>
+      </a>
+
+      <a class="topic-card" href="topics/patterns/scaling-reads.html" data-cat="patterns" style="--card-i:9">
+        <div class="card-num">10</div>
+        <div class="card-cat">Patterns</div>
+        <h3>Scaling Reads</h3>
+        <p>Replicas, caching strategies, CDN, read-through patterns</p>
+        <div class="card-meta">
+          <span class="badge green">12 min</span>
+          <span class="badge blue">Pattern</span>
+        </div>
+      </a>
+
+      <a class="topic-card" href="topics/patterns/scaling-writes.html" data-cat="patterns" style="--card-i:10">
+        <div class="card-num">11</div>
+        <div class="card-cat">Patterns</div>
+        <h3>Scaling Writes</h3>
+        <p>Sharding, write buffering, async writes, batching</p>
+        <div class="card-meta">
+          <span class="badge green">12 min</span>
+          <span class="badge blue">Pattern</span>
+        </div>
+      </a>
+
+      <a class="topic-card" href="topics/patterns/handling-large-blobs.html" data-cat="patterns" style="--card-i:11">
+        <div class="card-num">12</div>
+        <div class="card-cat">Patterns</div>
+        <h3>Handling Large Blobs</h3>
+        <p>Object storage, pre-signed URLs, chunked upload, CDN for media</p>
+        <div class="card-meta">
+          <span class="badge green">10 min</span>
+          <span class="badge blue">Pattern</span>
+        </div>
+      </a>
+
+      <a class="topic-card" href="topics/patterns/managing-long-running-processes.html" data-cat="patterns" style="--card-i:12">
+        <div class="card-num">13</div>
+        <div class="card-cat">Patterns</div>
+        <h3>Long-Running Processes</h3>
+        <p>Async job queues, status polling, webhooks, idempotency keys</p>
+        <div class="card-meta">
+          <span class="badge green">12 min</span>
+          <span class="badge blue">Pattern</span>
+        </div>
+      </a>
+
+      <!-- KEY TECHNOLOGIES -->
+      <a class="topic-card" href="topics/tech/redis.html" data-cat="tech" style="--card-i:13">
+        <div class="card-num">14</div>
+        <div class="card-cat">Key Technologies</div>
+        <h3>Redis</h3>
+        <p>Data structures, eviction policies, persistence, cluster mode</p>
+        <div class="card-meta">
+          <span class="badge green">14 min</span>
+          <span class="badge blue">Deep dive</span>
+        </div>
+      </a>
+
+      <a class="topic-card" href="topics/tech/elasticsearch.html" data-cat="tech" style="--card-i:14">
+        <div class="card-num">15</div>
+        <div class="card-cat">Key Technologies</div>
+        <h3>Elasticsearch</h3>
+        <p>Inverted index, sharding, when to use vs DB-native search</p>
+        <div class="card-meta">
+          <span class="badge green">12 min</span>
+          <span class="badge blue">Deep dive</span>
+        </div>
+      </a>
+
+      <a class="topic-card" href="topics/tech/kafka.html" data-cat="tech" style="--card-i:15">
+        <div class="card-num">16</div>
+        <div class="card-cat">Key Technologies</div>
+        <h3>Kafka</h3>
+        <p>Partitions, consumer groups, exactly-once semantics</p>
+        <div class="card-meta">
+          <span class="badge green">14 min</span>
+          <span class="badge blue">Deep dive</span>
+        </div>
+      </a>
+
+      <a class="topic-card" href="topics/tech/api-gateway.html" data-cat="tech" style="--card-i:16">
+        <div class="card-num">17</div>
+        <div class="card-cat">Key Technologies</div>
+        <h3>API Gateway</h3>
+        <p>Auth, rate limiting, routing, request transformation</p>
+        <div class="card-meta">
+          <span class="badge green">10 min</span>
+          <span class="badge blue">Deep dive</span>
+        </div>
+      </a>
+
+      <a class="topic-card" href="topics/tech/cassandra.html" data-cat="tech" style="--card-i:17">
+        <div class="card-num">18</div>
+        <div class="card-cat">Key Technologies</div>
+        <h3>Cassandra</h3>
+        <p>Wide column model, tunable consistency, write path</p>
+        <div class="card-meta">
+          <span class="badge green">13 min</span>
+          <span class="badge blue">Deep dive</span>
+        </div>
+      </a>
+
+      <a class="topic-card" href="topics/tech/dynamodb.html" data-cat="tech" style="--card-i:18">
+        <div class="card-num">19</div>
+        <div class="card-cat">Key Technologies</div>
+        <h3>DynamoDB</h3>
+        <p>Partition keys, GSI/LSI, capacity modes</p>
+        <div class="card-meta">
+          <span class="badge green">12 min</span>
+          <span class="badge blue">Deep dive</span>
+        </div>
+      </a>
+
+      <a class="topic-card" href="topics/tech/postgresql.html" data-cat="tech" style="--card-i:19">
+        <div class="card-num">20</div>
+        <div class="card-cat">Key Technologies</div>
+        <h3>PostgreSQL</h3>
+        <p>Indexing strategies, replication, when it scales enough</p>
+        <div class="card-meta">
+          <span class="badge green">13 min</span>
+          <span class="badge blue">Deep dive</span>
+        </div>
+      </a>
+
+      <a class="topic-card" href="topics/tech/flink.html" data-cat="tech" style="--card-i:20">
+        <div class="card-num">21</div>
+        <div class="card-cat">Key Technologies</div>
+        <h3>Flink</h3>
+        <p>Stream processing, windowing, state management</p>
+        <div class="card-meta">
+          <span class="badge green">13 min</span>
+          <span class="badge blue">Deep dive</span>
+        </div>
+      </a>
+
+      <a class="topic-card" href="topics/tech/zookeeper.html" data-cat="tech" style="--card-i:21">
+        <div class="card-num">22</div>
+        <div class="card-cat">Key Technologies</div>
+        <h3>ZooKeeper</h3>
+        <p>Leader election, distributed config, service discovery</p>
+        <div class="card-meta">
+          <span class="badge green">11 min</span>
+          <span class="badge blue">Deep dive</span>
+        </div>
+      </a>
+
+      <!-- ADVANCED TOPICS -->
+      <a class="topic-card" href="topics/advanced/proximity-search.html" data-cat="advanced" style="--card-i:22">
+        <div class="card-num">23</div>
+        <div class="card-cat">Advanced Topics</div>
+        <h3>Proximity Search</h3>
+        <p>Geohashing, quadtrees, R-trees for location queries</p>
+        <div class="card-meta">
+          <span class="badge green">13 min</span>
+          <span class="badge amber">Advanced</span>
+        </div>
+      </a>
+
+      <a class="topic-card" href="topics/advanced/data-structures-big-data.html" data-cat="advanced" style="--card-i:23">
+        <div class="card-num">24</div>
+        <div class="card-cat">Advanced Topics</div>
+        <h3>Big Data Structures</h3>
+        <p>Bloom filters, HyperLogLog, count-min sketch</p>
+        <div class="card-meta">
+          <span class="badge green">13 min</span>
+          <span class="badge amber">Advanced</span>
+        </div>
+      </a>
+
+      <a class="topic-card" href="topics/advanced/vector-databases.html" data-cat="advanced" style="--card-i:24">
+        <div class="card-num">25</div>
+        <div class="card-cat">Advanced Topics</div>
+        <h3>Vector Databases</h3>
+        <p>Embeddings, ANN search, HNSW, use cases for RAG</p>
+        <div class="card-meta">
+          <span class="badge green">14 min</span>
+          <span class="badge amber">Advanced</span>
+        </div>
+      </a>
+
+      <a class="topic-card" href="topics/advanced/time-series-databases.html" data-cat="advanced" style="--card-i:25">
+        <div class="card-num">26</div>
+        <div class="card-cat">Advanced Topics</div>
+        <h3>Time-Series Databases</h3>
+        <p>Write-heavy timestamped data, downsampling, retention policies</p>
+        <div class="card-meta">
+          <span class="badge green">12 min</span>
+          <span class="badge amber">Advanced</span>
+        </div>
+      </a>
+
+      <!-- QUESTIONS -->
+      <a class="topic-card" href="topics/question-breakdowns.html" data-cat="questions" style="--card-i:26">
+        <div class="card-num">27</div>
         <div class="card-cat">Questions</div>
         <h3>Question Breakdowns</h3>
         <p>Canonical system design questions with full walkthroughs</p>
@@ -103,8 +329,8 @@
         </div>
       </a>
 
-      <a class="topic-card" href="topics/url-shortener.html" data-cat="questions" style="--card-i:7">
-        <div class="card-num">08</div>
+      <a class="topic-card" href="topics/url-shortener.html" data-cat="questions" style="--card-i:27">
+        <div class="card-num">28</div>
         <div class="card-cat">Questions · Easy</div>
         <h3>URL Shortener</h3>
         <p>Hash generation, redirect service, cache layer, CDN, analytics decoupling</p>

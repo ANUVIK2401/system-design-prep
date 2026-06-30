@@ -1,0 +1,230 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Flink — SD Prep</title>
+  <link rel="stylesheet" href="../../assets/style.css">
+</head>
+<body>
+  <aside id="sidebar"></aside>
+  <main>
+
+    <header class="page-head">
+      <div class="pill">Key Technologies</div>
+      <h1>Flink</h1>
+      <p class="sub">A true stream processing engine — continuous computation over unbounded data, with windowing and checkpointed state for low-latency exactly-once results.</p>
+      <div class="meta-row">
+        <span class="badge green">15-20 min read</span>
+        <span class="badge blue">Hard</span>
+      </div>
+    </header>
+
+    <div class="flash-card">
+      <div class="flash-label">Say this in the first 2 minutes</div>
+      <ul>
+        <li>Flink treats streams as the primitive — batch is just a stream with a known end, not the other way around</li>
+        <li>Windowing buckets an infinite stream into finite chunks for aggregation: tumbling (fixed, non-overlapping), sliding (fixed, overlapping), session (gap-based, dynamic)</li>
+        <li>Keyed state lets each key (e.g. user_id) maintain its own running state across events, partitioned like Kafka partitions</li>
+        <li>Checkpointing periodically snapshots all operator state — recovery replays from the last checkpoint, giving exactly-once semantics</li>
+        <li>Reach for Flink over Kafka Streams or Spark Streaming when you need true low-latency processing with complex, large keyed state</li>
+      </ul>
+    </div>
+
+    <section id="mental-model">
+      <h2>Mental model</h2>
+      <div class="analogy-block">
+        Batch processing is reading a finished book cover to cover. Stream processing is reading a book as pages arrive forever — you maintain a running understanding (state) and periodically save your place (checkpoint) so a crash doesn't mean starting over.
+      </div>
+    </section>
+
+    <section id="core-concepts">
+      <h2>Windowing</h2>
+      <p style="font-size:13px;color:#999;margin-bottom:1rem">Windows bucket an unbounded stream into finite chunks so aggregations (count, sum, average) have a defined scope.</p>
+      <div class="diagram-wrap">
+        <svg viewBox="0 0 720 230" xmlns="http://www.w3.org/2000/svg">
+          <defs>
+            <marker id="flArrow" markerWidth="8" markerHeight="8" refX="6" refY="3" orient="auto"><path d="M0,0 L6,3 L0,6 Z" fill="var(--border2)"/></marker>
+          </defs>
+
+          <text class="diag-sublabel" x="60" y="14" style="font-size:10px;text-anchor:start">Event stream (time →)</text>
+          <line x1="20" y1="30" x2="700" y2="30" stroke="var(--border2)" stroke-width="1.5"/>
+          <circle cx="60"  cy="30" r="4" fill="var(--blue)"/>
+          <circle cx="110" cy="30" r="4" fill="var(--blue)"/>
+          <circle cx="190" cy="30" r="4" fill="var(--blue)"/>
+          <circle cx="260" cy="30" r="4" fill="var(--blue)"/>
+          <circle cx="330" cy="30" r="4" fill="var(--blue)"/>
+          <circle cx="410" cy="30" r="4" fill="var(--blue)"/>
+          <circle cx="480" cy="30" r="4" fill="var(--blue)"/>
+          <circle cx="560" cy="30" r="4" fill="var(--blue)"/>
+          <circle cx="630" cy="30" r="4" fill="var(--blue)"/>
+
+          <text class="diag-sublabel" x="40" y="62" style="font-size:9.5px;fill:var(--accent);text-anchor:start">Tumbling — fixed, non-overlapping</text>
+          <rect x="20" y="68" width="200" height="32" fill="none" stroke="var(--accent)" stroke-width="1.5" rx="4"/>
+          <rect x="220" y="68" width="200" height="32" fill="none" stroke="var(--accent)" stroke-width="1.5" rx="4"/>
+          <rect x="420" y="68" width="200" height="32" fill="none" stroke="var(--accent)" stroke-width="1.5" rx="4"/>
+          <text x="120" y="89" text-anchor="middle" font-size="9" fill="var(--accent)" font-family="Inter,sans-serif">[0-5min]</text>
+          <text x="320" y="89" text-anchor="middle" font-size="9" fill="var(--accent)" font-family="Inter,sans-serif">[5-10min]</text>
+          <text x="520" y="89" text-anchor="middle" font-size="9" fill="var(--accent)" font-family="Inter,sans-serif">[10-15min]</text>
+
+          <text class="diag-sublabel" x="40" y="122" style="font-size:9.5px;fill:var(--blue);text-anchor:start">Sliding — fixed, overlapping (size 5min, slide 2.5min)</text>
+          <rect x="20" y="128" width="200" height="20" fill="none" stroke="var(--blue)" stroke-width="1.5" rx="4"/>
+          <rect x="120" y="152" width="200" height="20" fill="none" stroke="var(--blue)" stroke-width="1.5" rx="4" opacity="0.7"/>
+          <rect x="220" y="128" width="200" height="20" fill="none" stroke="var(--blue)" stroke-width="1.5" rx="4"/>
+
+          <text class="diag-sublabel" x="40" y="196" style="font-size:9.5px;fill:var(--amber);text-anchor:start">Session — gap-based, closes after inactivity</text>
+          <rect x="50" y="202" width="120" height="20" fill="none" stroke="var(--amber)" stroke-width="1.5" rx="4"/>
+          <rect x="270" y="202" width="90" height="20" fill="none" stroke="var(--amber)" stroke-width="1.5" rx="4"/>
+          <rect x="520" y="202" width="160" height="20" fill="none" stroke="var(--amber)" stroke-width="1.5" rx="4"/>
+          <text x="200" y="216" text-anchor="middle" font-size="8" fill="var(--faint)" font-family="Inter,sans-serif">gap →</text>
+        </svg>
+      </div>
+      <table class="def-table">
+        <thead><tr><th>Window type</th><th>Behavior</th><th>Use case</th></tr></thead>
+        <tbody>
+          <tr><td>Tumbling</td><td>Fixed size, non-overlapping — each event belongs to exactly one window</td><td>"Requests per 5-minute bucket"</td></tr>
+          <tr><td>Sliding</td><td>Fixed size, overlapping by a slide interval — an event can belong to multiple windows</td><td>"Rolling 5-min average, updated every 30s"</td></tr>
+          <tr><td>Session</td><td>Dynamic size, closes after a gap of inactivity — no fixed boundary</td><td>"Group a user's clicks into one session"</td></tr>
+        </tbody>
+      </table>
+    </section>
+
+    <section id="how-it-works">
+      <h2>Stream → window → sink, with checkpointing</h2>
+      <div class="diagram-wrap">
+        <svg viewBox="0 0 740 220" xmlns="http://www.w3.org/2000/svg">
+          <defs>
+            <marker id="flArrow2" markerWidth="8" markerHeight="8" refX="6" refY="3" orient="auto"><path d="M0,0 L6,3 L0,6 Z" fill="var(--border2)"/></marker>
+          </defs>
+
+          <g data-tip="Unbounded source — e.g. a Kafka topic of click events">
+            <rect class="diag-box role-async" x="15" y="70" width="130" height="56"/>
+            <text class="diag-label" x="80" y="93" style="font-size:11px">Event stream</text>
+            <text class="diag-sublabel" x="80" y="110" style="font-size:9px">Kafka source</text>
+          </g>
+          <path class="diag-arrow-path" d="M145,98 L205,98" marker-end="url(#flArrow2)"/>
+
+          <g data-tip="Partitions the stream by key (e.g. user_id) — each key maintains independent state">
+            <rect class="diag-box role-client" x="205" y="70" width="130" height="56"/>
+            <text class="diag-label" x="270" y="93" style="font-size:11px">keyBy(userId)</text>
+            <text class="diag-sublabel" x="270" y="110" style="font-size:9px">keyed state</text>
+          </g>
+          <path class="diag-arrow-path" d="M335,98 L395,98" marker-end="url(#flArrow2)"/>
+
+          <g data-tip="Buckets events into time windows, applies the aggregation function">
+            <rect class="diag-box role-cache" x="395" y="70" width="150" height="56"/>
+            <text class="diag-label" x="470" y="93" style="font-size:11px">Tumbling window</text>
+            <text class="diag-sublabel" x="470" y="110" style="font-size:9px">count() per 1min</text>
+          </g>
+          <path class="diag-arrow-path" d="M545,98 L605,98" marker-end="url(#flArrow2)"/>
+
+          <g data-tip="Window results written out — DB, dashboard, alert system">
+            <rect class="diag-box role-db" x="605" y="70" width="120" height="56"/>
+            <text class="diag-label" x="665" y="93" style="font-size:11px">Sink</text>
+            <text class="diag-sublabel" x="665" y="110" style="font-size:9px">DB / dashboard</text>
+          </g>
+
+          <path class="diag-arrow-path" d="M270,126 L270,170" marker-end="url(#flArrow2)" stroke-dasharray="3 3"/>
+          <path class="diag-arrow-path" d="M470,126 L470,170" marker-end="url(#flArrow2)" stroke-dasharray="3 3"/>
+          <g data-tip="Periodic snapshot of all operator state — barriers flow through the pipeline so every operator's state is captured at a consistent point">
+            <rect class="diag-box role-async" x="180" y="170" width="380" height="40" rx="6"/>
+            <text class="diag-label" x="370" y="195" style="font-size:11px">Checkpoint barrier → durable state snapshot</text>
+          </g>
+        </svg>
+        <div class="diag-legend">
+          <div class="diag-legend-item"><span class="diag-legend-dot role-client"></span>Keyed state — per-key, partitioned like Kafka partitions</div>
+          <div class="diag-legend-item"><span class="diag-legend-dot role-cache"></span>Windowing — buckets the stream for aggregation</div>
+          <div class="diag-legend-item"><span class="diag-legend-dot role-async"></span>Checkpointing — periodic durable snapshot for recovery</div>
+        </div>
+      </div>
+      <ol class="flow-steps-list">
+        <li><span>Source:</span> consume an unbounded stream, typically from Kafka</li>
+        <li><span>keyBy:</span> partition the stream by key so each key's state and processing is independent and parallelizable</li>
+        <li><span>Window:</span> bucket events by time (tumbling/sliding/session) and apply an aggregation function</li>
+        <li><span>Checkpoint:</span> Flink periodically injects a barrier into the stream; as it flows through each operator, that operator snapshots its state to durable storage</li>
+        <li><span>Recover:</span> on failure, restart from the last checkpoint and replay the source from that offset — combined with idempotent sinks, this gives exactly-once results</li>
+      </ol>
+    </section>
+
+    <section id="tradeoffs">
+      <h2>Tradeoffs</h2>
+      <div class="compare-grid">
+        <div class="compare-card good">
+          <div class="compare-label">Wins</div>
+          <ul>
+            <li>True low-latency stream processing — milliseconds, not micro-batches</li>
+            <li>Rich, large keyed state managed natively with efficient checkpointing</li>
+            <li>Exactly-once semantics via checkpoint barriers, even across complex pipelines</li>
+            <li>Flexible windowing (event-time, watermarks for out-of-order events)</li>
+          </ul>
+        </div>
+        <div class="compare-card bad">
+          <div class="compare-label">Costs</div>
+          <ul>
+            <li>Steep operational learning curve — cluster, state backends, checkpoint tuning</li>
+            <li>Heavier to run than Kafka Streams for simple stateless transformations</li>
+            <li>Large state can make checkpoints slow if not tuned (incremental checkpointing helps)</li>
+            <li>Smaller ecosystem/talent pool than Spark</li>
+          </ul>
+        </div>
+      </div>
+    </section>
+
+    <section id="when-to-use">
+      <h2>When to use</h2>
+      <div class="scenario-row use">
+        <span class="scenario-icon">✓</span>
+        <div class="scenario-text"><strong>USE:</strong> true low-latency stream processing with complex stateful logic — fraud detection, real-time recommendations, sessionization, anomaly detection.</div>
+      </div>
+      <div class="scenario-row avoid">
+        <span class="scenario-icon">✗</span>
+        <div class="scenario-text"><strong>AVOID:</strong> simple stateless filtering/transformation embedded in one service — Kafka Streams is a lighter-weight library with no separate cluster to operate.</div>
+      </div>
+      <div class="scenario-row watch">
+        <span class="scenario-icon">⚠</span>
+        <div class="scenario-text"><strong>WATCH OUT:</strong> out-of-order or late-arriving events need watermarks and an explicit lateness policy, or window results will be silently wrong/incomplete.</div>
+      </div>
+    </section>
+
+    <section id="interview-moves">
+      <h2>Interview moves</h2>
+      <ul class="moves-list">
+        <li><span class="move-num">01</span><div><strong>"Given we need sub-second fraud signals with large per-user state, I'd reach for Flink over Spark Streaming's micro-batch model"</strong> — justifies Flink with the specific latency and state requirement</div></li>
+        <li><span class="move-num">02</span><div><strong>"I'd use a sliding window here since the dashboard needs a rolling average that updates more often than the window size"</strong> — shows you can match window type to the actual product requirement</div></li>
+        <li><span class="move-num">03</span><div><strong>"Checkpointing gives us exactly-once recovery — if a task manager crashes, we restart from the last checkpoint and replay from that Kafka offset"</strong> — concrete fault-tolerance explanation</div></li>
+        <li><span class="move-num">04</span><div><strong>"I'd flag that late-arriving events need a watermark strategy — otherwise a window might close and emit results before all its events have actually arrived"</strong> — surfaces a subtlety most candidates miss</div></li>
+      </ul>
+    </section>
+
+    <section id="follow-ups">
+      <h2>Common follow-up questions</h2>
+      <div class="qa-block">
+        <div class="qa-q">How does Flink achieve exactly-once semantics?</div>
+        <div class="qa-a">Checkpoint barriers flow through the pipeline; every operator snapshots state when the barrier passes. On failure, the job restarts from the last consistent checkpoint and replays the source from that point.</div>
+      </div>
+      <div class="qa-block">
+        <div class="qa-q">Flink vs Spark Streaming — what's the core difference?</div>
+        <div class="qa-a">Flink is a native stream processor with true per-event processing. Spark Structured Streaming uses micro-batching — processes small batches on an interval, which adds latency Flink avoids.</div>
+      </div>
+      <div class="qa-block">
+        <div class="qa-q">Flink vs Kafka Streams — when would you pick Flink?</div>
+        <div class="qa-a">Kafka Streams is a lightweight library embedded in your app, simpler to deploy. Flink is a separate cluster better suited for complex stateful jobs, large state, and advanced windowing/watermark needs.</div>
+      </div>
+      <div class="qa-block">
+        <div class="qa-q">What's a watermark and why does it matter?</div>
+        <div class="qa-a">A watermark is Flink's estimate of "we've seen all events up to time T" — it lets windows close and emit results despite some events arriving out of order, with a configurable allowed lateness.</div>
+      </div>
+      <div class="qa-block">
+        <div class="qa-q">How does keyed state scale?</div>
+        <div class="qa-a">State is partitioned by key, similar to Kafka partitions — each parallel task owns a subset of keys and their state, so scaling out adds more parallel state partitions.</div>
+      </div>
+      <div class="qa-block">
+        <div class="qa-q">What happens if checkpoints become too slow due to large state?</div>
+        <div class="qa-a">Use incremental checkpointing (RocksDB state backend) which only persists state deltas since the last checkpoint, rather than a full snapshot every time.</div>
+      </div>
+    </section>
+
+  </main>
+  <script src="../../assets/nav.js"></script>
+</body>
+</html>

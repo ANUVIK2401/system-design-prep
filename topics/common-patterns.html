@@ -192,25 +192,55 @@
     <section id="tradeoffs">
       <h2>Pattern 8 — Consistent hashing</h2>
       <p style="font-size:13px;color:#bbb;margin-bottom:1rem">Triggered by: distributing keys across a cache cluster or sharded DB</p>
-      <div class="diagram-wrap">
-        <svg viewBox="0 0 300 260" xmlns="http://www.w3.org/2000/svg">
-          <circle cx="150" cy="130" r="100" fill="none" stroke="var(--border2)" stroke-width="1.5"/>
-          <circle class="diag-box role-db" cx="150" cy="30" r="22"/><text class="diag-label" x="150" y="34" style="font-size:10px">N1</text>
-          <circle class="diag-box role-cache" cx="237" cy="80" r="22"/><text class="diag-label" x="237" y="84" style="font-size:10px">N2</text>
-          <circle class="diag-box role-db" cx="237" cy="180" r="22"/><text class="diag-label" x="237" y="184" style="font-size:10px">N3</text>
-          <circle class="diag-box role-cache" cx="63" cy="180" r="22"/><text class="diag-label" x="63" y="184" style="font-size:10px">N4</text>
-          <circle class="diag-box role-db" cx="63" cy="80" r="22"/><text class="diag-label" x="63" y="84" style="font-size:10px">N5 (new)</text>
-          <circle class="diag-dot" cx="190" cy="50" r="4"/>
-          <circle class="diag-dot" cx="200" cy="140" r="4"/>
-          <circle class="diag-dot" cx="100" cy="155" r="4"/>
-          <circle class="diag-dot" cx="110" cy="55" r="4"/>
-          <text class="diag-sublabel" x="150" y="250" style="font-size:9px">keys hash onto ring; each maps to next node clockwise</text>
-        </svg>
-        <div class="diag-legend">
-          <div class="diag-legend-item"><span class="diag-legend-dot role-db"></span>Existing node — unaffected by N5 join</div>
-          <div class="diag-legend-item"><span class="diag-legend-dot role-cache"></span>Only adjacent node loses a key range to N5</div>
+      <div class="diagram-wrap hash-ring-wrap">
+        <div id="patterns-hash-ring"></div>
+        <div class="hash-ring-controls">
+          <button class="hr-btn" id="hr-add-node">+ Add node N5</button>
+          <button class="hr-btn" id="hr-reset-ring" disabled>Reset ring</button>
         </div>
+        <div class="diag-legend">
+          <div class="diag-legend-item"><span class="diag-legend-dot role-cache"></span>Node on the ring</div>
+          <div class="diag-legend-item"><span class="diag-legend-dot role-db" style="background:var(--muted);opacity:.6"></span>Key — stable, unaffected</div>
+          <div class="diag-legend-item"><span class="diag-legend-dot role-async"></span>Key — remapped to the new node</div>
+        </div>
+        <p style="font-size:11px;color:var(--faint);margin-top:8px">Click "Add node N5" — only keys in N5's new arc remap. Every other key stays put.</p>
       </div>
+      <script>
+      (function(){
+        var ORIGINAL_NODES = [
+          { id:'N1', label:'N1', hash:10 },
+          { id:'N2', label:'N2', hash:95 },
+          { id:'N3', label:'N3', hash:180 },
+          { id:'N4', label:'N4', hash:270 },
+        ];
+        var KEYS = [
+          { id:'k1', label:'key:user:42',  hash:40 },
+          { id:'k2', label:'key:order:7',  hash:120 },
+          { id:'k3', label:'key:sess:9',   hash:205 },
+          { id:'k4', label:'key:cart:3',   hash:300 },
+          { id:'k5', label:'key:img:88',   hash:340 },
+        ];
+        function boot(){
+          var el = document.getElementById('patterns-hash-ring');
+          if (!el || !window.renderHashRing) return;
+          var ring = window.renderHashRing(el, { nodes: ORIGINAL_NODES.slice(), keys: KEYS, size: 300 });
+          var addBtn = document.getElementById('hr-add-node');
+          var resetBtn = document.getElementById('hr-reset-ring');
+          addBtn.addEventListener('click', function(){
+            ring.addNode({ id:'N5', label:'N5 (new)', hash: 350 });
+            addBtn.disabled = true;
+            resetBtn.disabled = false;
+          });
+          resetBtn.addEventListener('click', function(){
+            ring.reset(ORIGINAL_NODES);
+            addBtn.disabled = false;
+            resetBtn.disabled = true;
+          });
+        }
+        if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', boot);
+        else boot();
+      })();
+      </script>
       <div class="compare-grid">
         <div class="compare-card good">
           <div class="compare-label">Consistent hashing wins</div>

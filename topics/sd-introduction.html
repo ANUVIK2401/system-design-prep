@@ -79,33 +79,33 @@
           <defs>
             <marker id="introArrow" markerWidth="8" markerHeight="8" refX="6" refY="3" orient="auto"><path d="M0,0 L6,3 L0,6 Z" fill="var(--border2)"/></marker>
           </defs>
-          <g>
+          <g data-tip="Nail down functional requirements, users, scale, and what you're explicitly NOT building">
             <rect class="diag-box role-client" x="10" y="35" width="130" height="60"/>
             <text class="diag-label" x="75" y="60">Clarify</text>
             <text class="diag-sublabel" x="75" y="76">5 min</text>
           </g>
           <path class="diag-arrow-path" d="M140,65 L160,65" marker-end="url(#introArrow)"/>
-          <g>
+          <g data-tip="Back-of-envelope QPS, storage, and bandwidth — these numbers justify every component choice that follows">
             <rect class="diag-box" x="160" y="35" width="130" height="60"/>
             <text class="diag-label" x="225" y="60">Estimate</text>
             <text class="diag-sublabel" x="225" y="76">3 min</text>
           </g>
           <path class="diag-arrow-path" d="M290,65 L310,65" marker-end="url(#introArrow)"/>
-          <g>
+          <g data-tip="Sketch the core components, APIs, and data flow at a level everyone in the room can follow">
             <rect class="diag-box" x="310" y="20" width="150" height="90"/>
             <text class="diag-label" x="385" y="58">High-level</text>
             <text class="diag-label" x="385" y="74">design</text>
             <text class="diag-sublabel" x="385" y="92">15 min</text>
           </g>
           <path class="diag-arrow-path" d="M460,65 L480,65" marker-end="url(#introArrow)"/>
-          <g>
+          <g data-tip="Interviewer steers you into the hardest part — this is where signal is actually collected">
             <rect class="diag-box role-cache" x="480" y="20" width="150" height="90"/>
             <text class="diag-label" x="555" y="58">Deep dive</text>
             <text class="diag-sublabel" x="555" y="76">bottlenecks</text>
             <text class="diag-sublabel" x="555" y="92">15 min</text>
           </g>
           <path class="diag-arrow-path" d="M630,65 L650,65" marker-end="url(#introArrow)"/>
-          <g>
+          <g data-tip="Summarize tradeoffs made and what you'd improve with more time — leaves a strong last impression">
             <rect class="diag-box" x="650" y="35" width="100" height="60"/>
             <text class="diag-label" x="700" y="60">Wrap-up</text>
             <text class="diag-sublabel" x="700" y="76">5 min</text>

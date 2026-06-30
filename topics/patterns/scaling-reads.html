@@ -1,0 +1,178 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Scaling Reads — SD Prep</title>
+  <link rel="stylesheet" href="../../assets/style.css">
+</head>
+<body>
+  <aside id="sidebar"></aside>
+  <main>
+
+    <header class="page-head">
+      <div class="pill">Patterns</div>
+      <h1>Scaling Reads</h1>
+      <p class="sub">Read replicas, caching strategies, and CDNs — the standard toolkit for read-heavy systems.</p>
+      <div class="meta-row">
+        <span class="badge green">15-20 min</span>
+        <span class="badge blue">Medium</span>
+      </div>
+    </header>
+
+    <div class="flash-card">
+      <div class="flash-label">Say this in the first 2 minutes</div>
+      <ul>
+        <li>Most systems are read-heavy — solve reads before you ever think about sharding writes</li>
+        <li>Layer the levers: cache first (cheapest, fastest), then read replicas, then CDN for static/edge content</li>
+        <li>Cache-aside is the default caching pattern — check cache, miss falls to DB, populate cache, return</li>
+        <li>Read replicas introduce replication lag — call out the read-your-writes problem explicitly</li>
+        <li>Cache invalidation is the hard part, not the cache itself — say this and you sound experienced</li>
+      </ul>
+    </div>
+
+    <section id="mental-model">
+      <h2>Mental model</h2>
+      <div class="analogy-block">
+        Scaling reads is like serving customers at a bakery: a sticky note on the counter (cache) answers the common "do you have croissants" question instantly. If the note's outdated, you check the back kitchen (replica). For city-wide chains, a nearby branch (CDN edge) is faster than calling headquarters (origin) every time.
+      </div>
+    </section>
+
+    <section id="core-concepts">
+      <h2>Core concepts</h2>
+      <table class="def-table">
+        <thead><tr><th>Term</th><th>Definition</th></tr></thead>
+        <tbody>
+          <tr><td>Read replica</td><td>A copy of the primary DB that serves reads; updated via async/sync replication</td></tr>
+          <tr><td>Replication lag</td><td>Delay between a write on the primary and its visibility on a replica</td></tr>
+          <tr><td>Cache-aside</td><td>App checks cache first; on miss, reads DB and populates the cache itself</td></tr>
+          <tr><td>Write-through</td><td>Every write goes to cache and DB together, synchronously</td></tr>
+          <tr><td>Write-behind</td><td>Write hits cache immediately; DB write happens asynchronously after</td></tr>
+          <tr><td>CDN</td><td>Geographically distributed edge cache for static/semi-static content</td></tr>
+          <tr><td>Read-your-writes</td><td>Guarantee that a user always sees their own write immediately after making it</td></tr>
+        </tbody>
+      </table>
+      <div class="latency-chart">
+        <div class="latency-row"><div class="latency-name">CDN edge cache</div><div class="latency-track"><div class="latency-bar tier-fast" style="width:8%"></div></div><div class="latency-val">~5ms</div></div>
+        <div class="latency-row"><div class="latency-name">Redis cache hit</div><div class="latency-track"><div class="latency-bar tier-fast" style="width:12%"></div></div><div class="latency-val">~1ms</div></div>
+        <div class="latency-row"><div class="latency-name">Read replica (same region)</div><div class="latency-track"><div class="latency-bar tier-mid" style="width:45%"></div></div><div class="latency-val">~5-15ms</div></div>
+        <div class="latency-row"><div class="latency-name">Primary DB, cold query</div><div class="latency-track"><div class="latency-bar tier-slow" style="width:80%"></div></div><div class="latency-val">~50-100ms</div></div>
+        <div class="latency-row"><div class="latency-name">Cross-region DB read</div><div class="latency-track"><div class="latency-bar tier-slow" style="width:100%"></div></div><div class="latency-val">~150ms+</div></div>
+      </div>
+    </section>
+
+    <section id="how-it-works">
+      <h2>Read replicas + cache-aside</h2>
+      <div class="diagram-wrap">
+        <svg viewBox="0 0 700 130" xmlns="http://www.w3.org/2000/svg">
+          <defs><marker id="sr1" markerWidth="8" markerHeight="8" refX="6" refY="3" orient="auto"><path d="M0,0 L6,3 L0,6 Z" fill="var(--border2)"/></marker></defs>
+          <g data-tip="Application instances serving reads"><rect class="diag-box role-client" x="10" y="40" width="100" height="50"/><text class="diag-label" x="60" y="65" style="font-size:11px">App</text></g>
+          <path class="diag-arrow-path" d="M110,55 L155,30" marker-end="url(#sr1)"/>
+          <path class="diag-arrow-path" d="M110,75 L155,100" marker-end="url(#sr1)"/>
+          <g data-tip="All writes go to the single primary"><rect class="diag-box role-db" x="155" y="10" width="150" height="45"/><text class="diag-label" x="230" y="28" style="font-size:11px">Primary DB</text><text class="diag-sublabel" x="230" y="44">writes</text></g>
+          <g data-tip="Reads spread across replicas — lower load per node"><rect class="diag-box role-db" x="155" y="80" width="150" height="45"/><text class="diag-label" x="230" y="98" style="font-size:11px">Read Replicas</text><text class="diag-sublabel" x="230" y="114">N nodes</text></g>
+          <path class="diag-arrow-path" d="M305,32 C340,55 340,55 305,95" marker-end="url(#sr1)" stroke-dasharray="4 3"/>
+          <text class="diag-sublabel" x="345" y="58" style="font-size:9px">async replication, ~ms-100ms lag</text>
+
+          <g data-tip="App checks Redis before hitting any DB"><rect class="diag-box role-cache" x="420" y="40" width="120" height="50"/><text class="diag-label" x="480" y="60" style="font-size:11px">Redis</text><text class="diag-sublabel" x="480" y="76">cache-aside</text></g>
+          <path class="diag-arrow-path" d="M110,65 C300,65 350,65 420,65" marker-end="url(#sr1)"/>
+          <text class="diag-sublabel" x="260" y="20" style="font-size:9px">1. check cache first</text>
+          <path class="diag-arrow-path" d="M540,55 C570,55 590,40 590,30" marker-end="url(#sr1)"/>
+          <text class="diag-sublabel" x="620" y="40" style="font-size:9px">2. miss → query replica</text>
+          <path class="diag-arrow-path" d="M590,30 C620,15 620,15 540,50" marker-end="url(#sr1)" stroke-dasharray="3 3"/>
+          <text class="diag-sublabel" x="620" y="100" style="font-size:9px">3. populate cache, return</text>
+        </svg>
+        <div class="diag-legend">
+          <div class="diag-legend-item"><span class="diag-legend-dot role-cache"></span>Checked first — hot path</div>
+          <div class="diag-legend-item"><span class="diag-legend-dot role-db"></span>Source of truth — fallback on miss</div>
+        </div>
+      </div>
+      <ol class="flow-steps-list">
+        <li><span>Check cache:</span> app looks up the key in Redis first</li>
+        <li><span>Hit:</span> return immediately, ~1ms, no DB touched</li>
+        <li><span>Miss:</span> query a read replica, get the value</li>
+        <li><span>Populate:</span> write the value into the cache with a TTL, then return it</li>
+      </ol>
+    </section>
+
+    <section id="tradeoffs">
+      <h2>Tradeoffs</h2>
+      <div class="compare-grid">
+        <div class="compare-card good">
+          <div class="compare-label">Wins</div>
+          <ul>
+            <li>Cache-aside: simple, only caches what's actually requested</li>
+            <li>Read replicas: linearly scales read throughput, isolates read load from writes</li>
+            <li>CDN: removes cross-region latency entirely for cacheable content</li>
+          </ul>
+        </div>
+        <div class="compare-card bad">
+          <div class="compare-label">Costs</div>
+          <ul>
+            <li>Replication lag breaks "read your own write" without extra handling</li>
+            <li>Cache invalidation on update is easy to get wrong (stale reads)</li>
+            <li>Write-through adds write latency; write-behind risks data loss on cache crash</li>
+          </ul>
+        </div>
+      </div>
+    </section>
+
+    <section id="when-to-use">
+      <h2>When to use</h2>
+      <div class="scenario-row use">
+        <span class="scenario-icon">✓</span>
+        <div class="scenario-text"><strong>Use cache-aside + replicas</strong> as the default for read-heavy APIs — product pages, profiles, feeds — where slight staleness is acceptable.</div>
+      </div>
+      <div class="scenario-row use">
+        <span class="scenario-icon">✓</span>
+        <div class="scenario-text"><strong>Use a CDN</strong> for static assets and rarely-changing API responses (e.g. public catalog data) to cut latency for geographically distant users.</div>
+      </div>
+      <div class="scenario-row watch">
+        <span class="scenario-icon">⚠</span>
+        <div class="scenario-text"><strong>Watch for read-your-writes</strong> right after a user submits a form — route that specific read to the primary, or read from cache populated by the write itself.</div>
+      </div>
+    </section>
+
+    <section id="interview-moves">
+      <h2>Interview moves</h2>
+      <ul class="moves-list">
+        <li><span class="move-num">01</span><div><strong>"This is read-heavy, so I'll layer caching, then read replicas, then a CDN before I even consider sharding writes"</strong> — states the order of operations explicitly</div></li>
+        <li><span class="move-num">02</span><div><strong>"I'd use cache-aside as the default — populate on miss, so we only cache what's actually being read"</strong> — names the pattern and justifies it over write-through</div></li>
+        <li><span class="move-num">03</span><div><strong>"Replicas introduce lag, so right after a write I'd either read from primary or rely on the cache I just populated, to avoid the read-your-writes problem"</strong> — anticipates a classic follow-up</div></li>
+        <li><span class="move-num">04</span><div><strong>"Cache invalidation is the hard part — I'd use a short TTL plus explicit invalidation on write, rather than relying on TTL alone"</strong> — shows you know caching isn't free</div></li>
+        <li><span class="move-num">05</span><div><strong>"For static or rarely-changing data I'd push it to a CDN so cross-region users aren't paying our DB's round-trip latency"</strong> — connects CDN choice to actual latency numbers</div></li>
+      </ul>
+    </section>
+
+    <section id="follow-ups">
+      <h2>Common follow-up questions</h2>
+      <div class="qa-block">
+        <div class="qa-q">When does replication lag actually matter?</div>
+        <div class="qa-a">Right after a write, when the same user (or a dependent process) reads it back immediately and the replica hasn't caught up yet — causes a confusing "my change disappeared" bug.</div>
+      </div>
+      <div class="qa-block">
+        <div class="qa-q">How do you keep cache and DB in sync on update?</div>
+        <div class="qa-a">On write, invalidate (delete) the cache key rather than updating it in place — the next read repopulates it correctly. Updating the cache directly risks races with concurrent writers.</div>
+      </div>
+      <div class="qa-block">
+        <div class="qa-q">What's a cache stampede and how do you prevent it?</div>
+        <div class="qa-a">Many requests miss the same hot key simultaneously and all hit the DB at once. Prevent with a short-lived lock/single-flight on cache repopulation, or stagger TTLs with jitter.</div>
+      </div>
+      <div class="qa-block">
+        <div class="qa-q">Write-through vs write-behind — when would you pick write-behind?</div>
+        <div class="qa-a">Write-behind when write latency matters more than durability guarantees (e.g. view counters, analytics) — accept a small risk of losing the last few writes if the cache crashes before flushing.</div>
+      </div>
+      <div class="qa-block">
+        <div class="qa-q">How many read replicas can you add before it stops helping?</div>
+        <div class="qa-a">Each replica adds replication overhead on the primary and increases lag variance. Past 5-10 replicas, consider sharding or a dedicated read-optimized store (e.g. Elasticsearch, a CQRS read model) instead.</div>
+      </div>
+      <div class="qa-block">
+        <div class="qa-q">How does a CDN know when to refresh stale content?</div>
+        <div class="qa-a">Cache-Control headers set a TTL; on expiry the CDN revalidates with the origin (or you actively purge/invalidate specific paths on deploy/update).</div>
+      </div>
+    </section>
+
+  </main>
+  <script src="../../assets/nav.js"></script>
+</body>
+</html>

@@ -1,0 +1,205 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Vector Databases — SD Prep</title>
+  <link rel="stylesheet" href="../../assets/style.css">
+</head>
+<body>
+  <aside id="sidebar"></aside>
+  <main>
+
+    <header class="page-head">
+      <div class="pill">Advanced Topics</div>
+      <h1>Vector Databases</h1>
+      <p class="sub">Approximate nearest neighbor search over embeddings — the retrieval engine behind RAG.</p>
+      <div class="meta-row">
+        <span class="badge green">15-20 min</span>
+        <span class="badge blue">Medium</span>
+      </div>
+    </header>
+
+    <div class="flash-card">
+      <div class="flash-label">Say this in the first 2 minutes</div>
+      <ul>
+        <li>Embeddings are dense vectors (often 768-1536 dimensions) where semantic similarity becomes geometric distance — "nearby vectors mean similar meaning"</li>
+        <li>Exact nearest-neighbor search is O(n) per query and doesn't scale — ANN trades a small recall loss for orders-of-magnitude speedup</li>
+        <li>HNSW is the dominant production ANN algorithm — a multi-layer graph where search descends from sparse long-range edges to dense local edges</li>
+        <li>RAG exists because LLMs have a fixed context window and no built-in access to your private/current data — retrieval injects relevant facts at query time instead of fine-tuning</li>
+        <li>The recall/latency knob is real and interview-relevant — wider search (higher ef_search) means better recall at the cost of latency, tune per use case</li>
+      </ul>
+    </div>
+
+    <section id="mental-model">
+      <h2>Mental model</h2>
+      <div class="analogy-block">
+        A vector database is a library where books aren't sorted by title or author, but placed physically close to other books about similar topics — you don't search by exact match, you walk to the right neighborhood on the shelf and grab everything nearby.
+      </div>
+    </section>
+
+    <section id="core-concepts">
+      <h2>Core concepts</h2>
+      <table class="def-table">
+        <thead><tr><th>Term</th><th>Definition</th></tr></thead>
+        <tbody>
+          <tr><td>Embedding</td><td>Dense numeric vector from an ML model representing semantic meaning</td></tr>
+          <tr><td>Cosine similarity</td><td>Common distance metric — angle between two vectors, ignores magnitude</td></tr>
+          <tr><td>kNN</td><td>Exact k-nearest-neighbor search — brute-force compares the query to every vector</td></tr>
+          <tr><td>ANN</td><td>Approximate nearest neighbor — trades small recall loss for massive speed gains</td></tr>
+          <tr><td>HNSW</td><td>Hierarchical Navigable Small World graph — layered graph index, the dominant ANN algorithm</td></tr>
+          <tr><td>ef_search</td><td>Tunable parameter controlling how many candidates HNSW explores — higher = better recall, slower</td></tr>
+          <tr><td>RAG</td><td>Retrieval-Augmented Generation — fetch relevant context, inject into the LLM prompt before generation</td></tr>
+        </tbody>
+      </table>
+      <div class="dial-wrap">
+        <div class="dial-title">ANN/HNSW search — leans heavily toward speed over perfect exactness</div>
+        <div class="dial-track"><div class="dial-marker" style="left:78%"></div></div>
+        <div class="dial-labels"><span class="end-left">Exact (100% recall)</span><span class="end-right">Fast (95-99% recall)</span></div>
+      </div>
+    </section>
+
+    <section id="how-it-works">
+      <h2>RAG pipeline with HNSW retrieval</h2>
+      <div class="diagram-wrap">
+        <svg viewBox="0 0 720 320" xmlns="http://www.w3.org/2000/svg">
+          <defs>
+            <marker id="vdArrow" markerWidth="8" markerHeight="8" refX="6" refY="3" orient="auto"><path d="M0,0 L6,3 L0,6 Z" fill="var(--border2)"/></marker>
+            <marker id="vdArrowG" markerWidth="8" markerHeight="8" refX="6" refY="3" orient="auto"><path d="M0,0 L6,3 L0,6 Z" fill="var(--accent)"/></marker>
+          </defs>
+
+          <text class="diag-sublabel" x="160" y="16" style="font-size:10px;fill:var(--accent)">INDEX BUILD (offline)</text>
+          <g data-tip="Source documents — PDFs, docs, support tickets, internal wiki pages"><rect class="diag-box role-db" x="20" y="26" width="120" height="50"/><text class="diag-label" x="80" y="48" style="font-size:11px">Knowledge</text><text class="diag-sublabel" x="80" y="64">base docs</text></g>
+          <path class="diag-arrow-path" d="M140,51 L175,51" marker-end="url(#vdArrow)"/>
+          <g data-tip="Embedding model (e.g. OpenAI ada, Cohere) converts each chunk of text into a dense vector"><rect class="diag-box role-async" x="175" y="26" width="130" height="50"/><text class="diag-label" x="240" y="48" style="font-size:11px">Embedding</text><text class="diag-sublabel" x="240" y="64">model</text></g>
+          <path class="diag-arrow-path" d="M305,51 L340,51" marker-end="url(#vdArrow)"/>
+          <g data-tip="Vectors inserted into an HNSW graph — multi-layer structure built once, queried many times"><rect class="diag-box role-cache" x="340" y="26" width="150" height="50"/><text class="diag-label" x="415" y="48" style="font-size:11px">HNSW index</text><text class="diag-sublabel" x="415" y="64">Pinecone/pgvector</text></g>
+
+          <text class="diag-sublabel" x="160" y="116" style="font-size:10px;fill:var(--blue)">QUERY TIME (online)</text>
+          <g data-tip="User asks a natural-language question"><rect class="diag-box role-client" x="20" y="126" width="120" height="50"/><text class="diag-label" x="80" y="148" style="font-size:11px">User query</text><text class="diag-sublabel" x="80" y="164">text</text></g>
+          <path class="diag-arrow-path" d="M140,151 L175,151" marker-end="url(#vdArrow)"/>
+          <g data-tip="Same embedding model encodes the query into the identical vector space as the indexed documents"><rect class="diag-box role-async" x="175" y="126" width="130" height="50"/><text class="diag-label" x="240" y="148" style="font-size:11px">Embedding</text><text class="diag-sublabel" x="240" y="164">model</text></g>
+          <path class="diag-arrow-path" d="M305,151 L340,151" marker-end="url(#vdArrow)"/>
+          <g data-tip="HNSW descends from sparse top layer to dense bottom layer, returning the top-K nearest vectors approximately, not exactly"><rect class="diag-box role-cache" x="340" y="126" width="150" height="50"/><text class="diag-label" x="415" y="148" style="font-size:11px">HNSW search</text><text class="diag-sublabel" x="415" y="164">top-K ANN</text></g>
+          <path class="diag-arrow-path" d="M490,151 L525,151" marker-end="url(#vdArrow)"/>
+          <g data-tip="The K nearest document chunks, retrieved as raw text to ground the LLM's answer in real source material"><rect class="diag-box role-db" x="525" y="126" width="170" height="50"/><text class="diag-label" x="610" y="148" style="font-size:11px">Top-K chunks</text><text class="diag-sublabel" x="610" y="164">retrieved context</text></g>
+          <path class="diag-arrow-path" d="M610,176 C610,210 415,210 415,236" marker-end="url(#vdArrowG)"/>
+          <g data-tip="Query + retrieved chunks assembled into a single prompt — grounds the model in real, current data instead of relying on parametric memory"><rect class="diag-box role-async" x="280" y="241" width="270" height="50"/><text class="diag-label" x="415" y="263" style="font-size:11px">Prompt assembly</text><text class="diag-sublabel" x="415" y="279">query + context → LLM</text></g>
+          <path class="diag-arrow-path" d="M550,266 L585,266" marker-end="url(#vdArrowG)"/>
+          <g data-tip="LLM generates an answer grounded in the retrieved context, reducing hallucination vs. answering from memory alone"><rect class="diag-box" x="585" y="241" width="115" height="50"/><text class="diag-label" x="642" y="263" style="font-size:11px">LLM</text><text class="diag-sublabel" x="642" y="279">answer</text></g>
+
+          <text class="diag-sublabel" x="415" y="106" style="font-size:9px;fill:var(--muted)">HNSW: top layer = sparse, long jumps. bottom layer = dense, local refine.</text>
+        </svg>
+        <div class="diag-legend">
+          <div class="diag-legend-item"><span class="diag-legend-dot role-async"></span>Same embedding model must encode both docs and queries into one shared vector space</div>
+          <div class="diag-legend-item"><span class="diag-legend-dot role-cache"></span>HNSW index — built once offline, queried with low latency online</div>
+          <div class="diag-legend-item"><span class="diag-legend-dot role-db"></span>Retrieved chunks ground the LLM in real data instead of pure model memory</div>
+        </div>
+      </div>
+      <ol class="flow-steps-list">
+        <li>Offline: chunk source documents, embed each chunk, and insert vectors into an HNSW index (built incrementally, layer by layer).</li>
+        <li>Online: embed the incoming user query with the same model so it lands in the same vector space as the indexed documents.</li>
+        <li>HNSW search starts at the sparse top layer, takes long greedy hops toward the query vector, then drops down a layer and refines — like coarse-to-fine search.</li>
+        <li>The bottom layer is dense and local — final hops here produce the approximate top-K nearest neighbors.</li>
+        <li>Retrieved chunks are concatenated with the user's question into a single prompt, handed to the LLM to generate a grounded answer.</li>
+      </ol>
+    </section>
+
+    <section id="comparison">
+      <h2>Exact kNN vs ANN/HNSW</h2>
+      <table class="def-table">
+        <thead><tr><th>Property</th><th>Exact kNN (brute force)</th><th>ANN / HNSW</th></tr></thead>
+        <tbody>
+          <tr><td>Recall</td><td>100% — always correct top-K</td><td>~95-99%, tunable via ef_search</td></tr>
+          <tr><td>Query latency</td><td>O(n) — scans every vector</td><td>O(log n)-ish — graph traversal, sub-millisecond to low-ms at scale</td></tr>
+          <tr><td>Memory</td><td>Just the raw vectors</td><td>Vectors + graph edges — typically 1.5-2x raw vector size</td></tr>
+          <tr><td>Index build cost</td><td>None — no index to build</td><td>Nontrivial — insertion builds graph layers, slower writes</td></tr>
+          <tr><td>Scales to</td><td>Thousands to low millions before too slow</td><td>Billions of vectors in production</td></tr>
+        </tbody>
+      </table>
+    </section>
+
+    <section id="tradeoffs">
+      <h2>Tradeoffs</h2>
+      <div class="compare-grid">
+        <div class="compare-card good">
+          <h3>Wins</h3>
+          <ul>
+            <li>Sub-linear query time at massive scale — the only way ANN search stays fast past millions of vectors</li>
+            <li>ef_search gives a tunable recall/latency knob per query without rebuilding the index</li>
+            <li>Purpose-built vector DBs (Pinecone, Weaviate, Qdrant) handle sharding, filtering, and hybrid search out of the box</li>
+            <li>pgvector lets you keep vectors next to relational data when you don't need dedicated-DB scale</li>
+          </ul>
+        </div>
+        <div class="compare-card bad">
+          <h3>Costs</h3>
+          <ul>
+            <li>Approximate by design — a small fraction of true nearest neighbors can be missed</li>
+            <li>HNSW graph memory overhead on top of raw vectors adds real infra cost at billions of vectors</li>
+            <li>Index build/insert is slower than a flat array — not ideal for extremely high-churn data</li>
+            <li>A dedicated vector DB is one more system to operate, secure, and keep in sync with the source of truth</li>
+          </ul>
+        </div>
+      </div>
+    </section>
+
+    <section id="when-to-use">
+      <h2>When to use</h2>
+      <div class="scenario-row use">
+        <span class="scenario-icon">✓</span>
+        <div class="scenario-text"><strong>Use a dedicated vector DB</strong> when you're doing RAG, semantic search, or recommendation at scale (millions+ of vectors) and need fast, tunable ANN with metadata filtering.</div>
+      </div>
+      <div class="scenario-row watch">
+        <span class="scenario-icon">⚠</span>
+        <div class="scenario-text"><strong>Watch out for</strong> stale embeddings — if source documents change, you must re-embed and re-index, or RAG answers will be grounded in outdated context.</div>
+      </div>
+      <div class="scenario-row avoid">
+        <span class="scenario-icon">✗</span>
+        <div class="scenario-text"><strong>Avoid a dedicated vector DB</strong> for small datasets (tens of thousands of vectors) — pgvector inside your existing Postgres, or even brute-force exact kNN, is simpler and fast enough.</div>
+      </div>
+    </section>
+
+    <section id="interview-moves">
+      <h2>Interview moves</h2>
+      <ul class="moves-list">
+        <li><span class="move-num">01</span><div><strong>"Exact nearest-neighbor search is O(n) per query — at millions of vectors that's too slow, so I'd reach for ANN via HNSW"</strong> — justifies the approximation upfront</div></li>
+        <li><span class="move-num">02</span><div><strong>"HNSW is a layered graph — sparse long-range edges at the top for fast coarse jumps, dense local edges at the bottom for fine refinement"</strong> — shows you understand the mechanism, not just the name</div></li>
+        <li><span class="move-num">03</span><div><strong>"ef_search is my recall/latency knob — I'd tune it per use case, wider for accuracy-critical paths, narrower for low-latency autocomplete-style search"</strong> — names the actual tunable parameter</div></li>
+        <li><span class="move-num">04</span><div><strong>"RAG exists because the LLM's context window is finite and its training data goes stale — retrieval grounds answers in current, real data instead of hallucinated memory"</strong> — explains the why, not just the what</div></li>
+        <li><span class="move-num">05</span><div><strong>"At our scale I'd justify a dedicated vector DB over pgvector — once we're past low millions of vectors, purpose-built sharding and ANN tuning start to matter"</strong> — ties infra choice to scale, not default preference</div></li>
+        <li><span class="move-num">06</span><div><strong>"Query and document embeddings must come from the same model version — I'd version-pin it and re-embed on model upgrades"</strong> — anticipates a real production gotcha</div></li>
+      </ul>
+    </section>
+
+    <section id="follow-ups">
+      <h2>Common follow-up questions</h2>
+      <div class="qa-block">
+        <div class="qa-q">What happens if you increase ef_search?</div>
+        <div class="qa-a">HNSW explores more candidates per layer, increasing recall toward exact kNN at the cost of higher query latency — it's a runtime knob, no reindex needed.</div>
+      </div>
+      <div class="qa-block">
+        <div class="qa-q">How do you keep a RAG index fresh when source documents change?</div>
+        <div class="qa-a">Re-embed changed documents and upsert into the index; for high-churn data, batch updates on a schedule rather than per-write to avoid index thrashing.</div>
+      </div>
+      <div class="qa-block">
+        <div class="qa-q">Why not just fine-tune the LLM on your data instead of RAG?</div>
+        <div class="qa-a">Fine-tuning is expensive, slow to update, and doesn't cite sources. RAG updates instantly by re-indexing and lets you point to the exact retrieved source for grounding.</div>
+      </div>
+      <div class="qa-block">
+        <div class="qa-q">How do you combine vector search with traditional filters (e.g. "only docs from 2024")?</div>
+        <div class="qa-a">Hybrid search — most vector DBs support metadata filtering alongside ANN search, pruning the candidate graph traversal to only matching metadata.</div>
+      </div>
+      <div class="qa-block">
+        <div class="qa-q">What's the failure mode when embeddings are low quality?</div>
+        <div class="qa-a">Semantically similar text won't cluster correctly, so retrieval returns irrelevant chunks — garbage in, garbage out; embedding model choice matters as much as the index.</div>
+      </div>
+      <div class="qa-block">
+        <div class="qa-q">pgvector vs Pinecone — how do you decide?</div>
+        <div class="qa-a">pgvector for smaller scale or when you want vectors colocated with relational data and one less system to operate. Pinecone/Weaviate/Qdrant once you need dedicated ANN performance at large scale with built-in sharding.</div>
+      </div>
+    </section>
+
+  </main>
+  <script src="../../assets/nav.js"></script>
+</body>
+</html>

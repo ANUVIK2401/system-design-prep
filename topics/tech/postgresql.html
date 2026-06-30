@@ -1,0 +1,214 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>PostgreSQL — SD Prep</title>
+  <link rel="stylesheet" href="../../assets/style.css">
+</head>
+<body>
+  <aside id="sidebar"></aside>
+  <main>
+
+    <header class="page-head">
+      <div class="pill">Key Technologies</div>
+      <h1>PostgreSQL</h1>
+      <p class="sub">The default choice until a specific requirement forces a distributed store — vertical scaling, read replicas, and partitioning carry it further than most interviews assume.</p>
+      <div class="meta-row">
+        <span class="badge green">15-20 min read</span>
+        <span class="badge blue">Medium</span>
+      </div>
+    </header>
+
+    <div class="flash-card">
+      <div class="flash-label">Say this in the first 2 minutes</div>
+      <ul>
+        <li>Default to Postgres unless a specific requirement forces a distributed DB — most systems never hit its ceiling</li>
+        <li>B-tree is the default index; GIN is for full-text search and JSONB containment queries</li>
+        <li>Streaming replication (physical, byte-for-byte) for read replicas; logical replication for selective, cross-version replication</li>
+        <li>Sync replication guarantees zero data loss on failover at a latency cost; async is faster but risks losing the last unreplicated writes</li>
+        <li>Don't reach for sharding until vertical scaling + read replicas + partitioning are exhausted — that ceiling is much higher than people assume</li>
+      </ul>
+    </div>
+
+    <section id="mental-model">
+      <h2>Mental model</h2>
+      <div class="analogy-block">
+        Postgres is a single very capable office that you can keep expanding — more staff (read replicas), better filing (indexes), bigger filing cabinets (partitioning) — before you ever need to open a second office (sharding) with all the coordination overhead that implies.
+      </div>
+    </section>
+
+    <section id="core-concepts">
+      <h2>Indexing strategies</h2>
+      <table class="def-table">
+        <thead><tr><th>Index type</th><th>Use case</th></tr></thead>
+        <tbody>
+          <tr><td>B-tree (default)</td><td>Equality and range queries on ordered data — the default for almost every column you index</td></tr>
+          <tr><td>GIN</td><td>Full-text search (tsvector), JSONB containment queries (<code>@></code>), array membership</td></tr>
+          <tr><td>GiST</td><td>Geometric data, range types, nearest-neighbor search</td></tr>
+          <tr><td>Partial index</td><td>Indexes only rows matching a WHERE clause (e.g. <code>WHERE deleted_at IS NULL</code>) — smaller, faster for that subset</td></tr>
+          <tr><td>Covering index</td><td>Includes extra columns via <code>INCLUDE</code> so the query is answered from the index alone — avoids a heap fetch</td></tr>
+        </tbody>
+      </table>
+      <div class="callout info">A partial index on <code>WHERE status = 'pending'</code> on a table where 95% of rows are 'completed' can be 20x smaller than a full index — and faster for the queries that actually filter on that condition.</div>
+    </section>
+
+    <section id="how-it-works">
+      <h2>Replication: write path vs read path</h2>
+      <div class="diagram-wrap">
+        <svg viewBox="0 0 720 230" xmlns="http://www.w3.org/2000/svg">
+          <defs>
+            <marker id="pgArrow" markerWidth="8" markerHeight="8" refX="6" refY="3" orient="auto"><path d="M0,0 L6,3 L0,6 Z" fill="var(--border2)"/></marker>
+            <marker id="pgArrowB" markerWidth="8" markerHeight="8" refX="6" refY="3" orient="auto"><path d="M0,0 L6,3 L0,6 Z" fill="var(--blue)"/></marker>
+          </defs>
+
+          <text class="diag-sublabel" x="120" y="14" style="font-size:10px;fill:var(--blue)">WRITE PATH</text>
+          <g data-tip="All writes go to the primary — single writer">
+            <rect class="diag-box role-client" x="15" y="25" width="100" height="50"/>
+            <text class="diag-label" x="65" y="45" style="font-size:11px">App (write)</text>
+          </g>
+          <path class="diag-arrow-path" d="M115,50 L185,50" marker-end="url(#pgArrowB)"/>
+          <g data-tip="Single source of truth — all writes serialize here">
+            <rect class="diag-box role-db" x="185" y="20" width="140" height="60"/>
+            <text class="diag-label" x="255" y="44" style="font-size:11px">Primary</text>
+            <text class="diag-sublabel" x="255" y="60" style="font-size:9px">WAL streamed out</text>
+          </g>
+
+          <path class="diag-arrow-path" d="M325,38 L470,25" marker-end="url(#pgArrow)" stroke-dasharray="3 3"/>
+          <path class="diag-arrow-path" d="M325,62 L470,75" marker-end="url(#pgArrow)" stroke-dasharray="3 3"/>
+          <text x="390" y="20" font-size="9" fill="var(--muted)" font-family="Inter,sans-serif">streaming replication</text>
+
+          <g data-tip="Replays the WAL — typically tens of ms behind primary with async replication">
+            <rect class="diag-box role-async" x="470" y="0" width="150" height="50"/>
+            <text class="diag-label" x="545" y="20" style="font-size:11px">Read replica 1</text>
+            <text class="diag-sublabel" x="545" y="36" style="font-size:9px">async, ~10-50ms lag</text>
+          </g>
+          <g data-tip="Synchronous replica — primary waits for ack before committing, zero data loss on failover">
+            <rect class="diag-box role-async" x="470" y="55" width="150" height="50"/>
+            <text class="diag-label" x="545" y="75" style="font-size:11px">Read replica 2</text>
+            <text class="diag-sublabel" x="545" y="91" style="font-size:9px">sync, zero data loss</text>
+          </g>
+
+          <text class="diag-sublabel" x="120" y="135" style="font-size:10px;fill:var(--accent)">READ PATH</text>
+          <g data-tip="Reads can be routed to any replica for horizontal read scale">
+            <rect class="diag-box role-client" x="15" y="145" width="100" height="50"/>
+            <text class="diag-label" x="65" y="165" style="font-size:11px">App (read)</text>
+          </g>
+          <path class="diag-arrow-path" d="M115,170 L470,30" marker-end="url(#pgArrow)"/>
+          <path class="diag-arrow-path" d="M115,170 L470,80" marker-end="url(#pgArrow)"/>
+          <text x="280" y="200" font-size="10" fill="var(--accent)" font-family="Inter,sans-serif">reads routed to replicas — primary handles writes only</text>
+        </svg>
+        <div class="diag-legend">
+          <div class="diag-legend-item"><span class="diag-legend-dot role-db"></span>Primary — single writer, source of truth</div>
+          <div class="diag-legend-item"><span class="diag-legend-dot role-async"></span>Replicas — scale reads, replay the write-ahead log (WAL)</div>
+        </div>
+      </div>
+      <table class="def-table" style="margin-top:1rem">
+        <thead><tr><th>Replication type</th><th>Behavior</th></tr></thead>
+        <tbody>
+          <tr><td>Streaming (physical)</td><td>Byte-for-byte WAL replay — replica is an exact copy, must match Postgres major version</td></tr>
+          <tr><td>Logical</td><td>Replicates at the row/table level — supports selective replication and cross-version upgrades</td></tr>
+          <tr><td>Synchronous</td><td>Primary waits for replica ack before committing — zero data loss, higher write latency</td></tr>
+          <tr><td>Asynchronous</td><td>Primary commits immediately, replica catches up — lower latency, risks losing last writes on failover</td></tr>
+        </tbody>
+      </table>
+    </section>
+
+    <section id="scaling-ceiling">
+      <h2>When Postgres scales "enough"</h2>
+      <div class="dial-wrap">
+        <div class="dial-title">Default bias — stay on Postgres vs reach for a distributed DB</div>
+        <div class="dial-track"><div class="dial-marker" style="left:18%"></div></div>
+        <div class="dial-labels"><span class="end-left">Stick with Postgres</span><span class="end-right">Go distributed</span></div>
+      </div>
+      <ol class="flow-steps-list">
+        <li><span>Vertical scaling first:</span> modern hardware (64+ cores, TBs of RAM, NVMe) carries a single Postgres instance through tens of thousands of writes/sec for many workloads</li>
+        <li><span>Read replicas next:</span> offload read traffic horizontally — most systems are read-heavy, so this alone buys huge headroom</li>
+        <li><span>Partitioning next:</span> split a huge table by range (date) or hash on a single instance — keeps indexes small and vacuum fast without distributing anything</li>
+        <li><span>Only then, sharding/distributed DB:</span> reach for Citus, CockroachDB, or a NoSQL store when write volume genuinely exceeds one primary, or you need true multi-region active-active writes</li>
+      </ol>
+      <div class="callout warn">Common interview trap: jumping straight to "we'll shard the database" for a system that would comfortably run on a single well-tuned Postgres instance with replicas. Justify the jump with a specific number, not a vibe.</div>
+    </section>
+
+    <section id="tradeoffs">
+      <h2>Tradeoffs</h2>
+      <div class="compare-grid">
+        <div class="compare-card good">
+          <div class="compare-label">Wins</div>
+          <ul>
+            <li>Full ACID transactions, mature query planner, joins that actually work</li>
+            <li>JSONB gives semi-structured flexibility without leaving SQL</li>
+            <li>Enormous ecosystem — extensions, tooling, managed offerings everywhere</li>
+            <li>Vertical + replica + partition scaling goes further than most systems need</li>
+          </ul>
+        </div>
+        <div class="compare-card bad">
+          <div class="compare-label">Costs</div>
+          <ul>
+            <li>Single-writer architecture — write throughput ultimately caps on one primary</li>
+            <li>Multi-region active-active writes aren't native — needs an external solution</li>
+            <li>Vacuum/bloat management requires ongoing operational attention</li>
+            <li>Horizontal write scaling (sharding) isn't built-in — needs Citus or app-level sharding</li>
+          </ul>
+        </div>
+      </div>
+    </section>
+
+    <section id="when-to-use">
+      <h2>When to use</h2>
+      <div class="scenario-row use">
+        <span class="scenario-icon">✓</span>
+        <div class="scenario-text"><strong>USE:</strong> the default starting point for almost any system — relational data, need for transactions, unclear future access patterns.</div>
+      </div>
+      <div class="scenario-row avoid">
+        <span class="scenario-icon">✗</span>
+        <div class="scenario-text"><strong>AVOID (alone):</strong> when you have a confirmed requirement for multi-region active-active writes or write volume that demonstrably exceeds single-primary capacity even after partitioning.</div>
+      </div>
+      <div class="scenario-row watch">
+        <span class="scenario-icon">⚠</span>
+        <div class="scenario-text"><strong>WATCH OUT:</strong> async replication means failover can lose the last few writes — if that's unacceptable, you need at least one synchronous replica, accepting the latency cost.</div>
+      </div>
+    </section>
+
+    <section id="interview-moves">
+      <h2>Interview moves</h2>
+      <ul class="moves-list">
+        <li><span class="move-num">01</span><div><strong>"I'd default to Postgres here and only introduce a distributed store if a specific requirement — write volume or multi-region — forces it"</strong> — the single highest-signal sentence in this whole topic</div></li>
+        <li><span class="move-num">02</span><div><strong>"Before sharding, I'd exhaust read replicas and partitioning — those alone often carry a system another order of magnitude in scale"</strong> — shows the scaling ladder, not a binary choice</div></li>
+        <li><span class="move-num">03</span><div><strong>"For this JSONB column with containment queries, I'd add a GIN index rather than a B-tree, since B-tree can't efficiently support @> lookups"</strong> — concrete indexing knowledge</div></li>
+        <li><span class="move-num">04</span><div><strong>"Given we can't lose a single committed write here, I'd make at least one replica synchronous, accepting the added write latency"</strong> — explicit tradeoff reasoning, not just a feature list</div></li>
+      </ul>
+    </section>
+
+    <section id="follow-ups">
+      <h2>Common follow-up questions</h2>
+      <div class="qa-block">
+        <div class="qa-q">When would you actually need to shard Postgres?</div>
+        <div class="qa-a">When sustained write throughput exceeds what a single well-tuned primary can handle even after partitioning — typically tens of thousands of writes/sec sustained, or a hard multi-region active-active write requirement.</div>
+      </div>
+      <div class="qa-block">
+        <div class="qa-q">What's the difference between partitioning and sharding?</div>
+        <div class="qa-a">Partitioning splits a table across multiple physical segments on the same instance (still one writer). Sharding splits data across multiple independent database instances/nodes.</div>
+      </div>
+      <div class="qa-block">
+        <div class="qa-q">How do you decide between synchronous and asynchronous replication?</div>
+        <div class="qa-a">Synchronous when zero data loss on failover is a hard requirement (financial transactions) — accept the latency cost. Asynchronous when slightly stale failover is acceptable for lower write latency.</div>
+      </div>
+      <div class="qa-block">
+        <div class="qa-q">What is replication lag and how do you handle it?</div>
+        <div class="qa-a">The delay between a write on the primary and its visibility on a replica. For read-your-writes needs, route that specific read to the primary or track a "read after write" hint to wait for replica catch-up.</div>
+      </div>
+      <div class="qa-block">
+        <div class="qa-q">What's the difference between streaming and logical replication?</div>
+        <div class="qa-a">Streaming replicates the entire WAL byte-for-byte (must match major version, used for HA/read replicas). Logical replicates row changes selectively, enabling cross-version replication and use with CDC tools like Debezium.</div>
+      </div>
+      <div class="qa-block">
+        <div class="qa-q">How would you handle a table that's grown to hundreds of millions of rows?</div>
+        <div class="qa-a">Range or hash partition it (e.g. by month for time-series data) to keep individual indexes and vacuum operations fast, before considering sharding across instances.</div>
+      </div>
+    </section>
+
+  </main>
+  <script src="../../assets/nav.js"></script>
+</body>
+</html>

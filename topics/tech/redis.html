@@ -1,0 +1,251 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Redis — SD Prep</title>
+  <link rel="stylesheet" href="../../assets/style.css">
+</head>
+<body>
+  <aside id="sidebar"></aside>
+  <main>
+
+    <header class="page-head">
+      <div class="pill">Key Technologies</div>
+      <h1>Redis</h1>
+      <p class="sub">An in-memory data structure server — not just a cache. Strings, hashes, sorted sets, streams, persistence, and cluster sharding.</p>
+      <div class="meta-row">
+        <span class="badge green">15-20 min read</span>
+        <span class="badge blue">Medium</span>
+      </div>
+    </header>
+
+    <div class="flash-card">
+      <div class="flash-label">Say this in the first 2 minutes</div>
+      <ul>
+        <li>Redis is a data structure server, not a generic cache — the structure you pick (ZSET, Hash, Stream) often eliminates app-side logic</li>
+        <li>Single-threaded event loop means every command is atomic — no locking needed for single-key ops</li>
+        <li>Persistence is opt-in and tunable: RDB for fast restarts, AOF for durability, or both</li>
+        <li>Cluster mode shards via 16384 hash slots, not consistent hashing — rebalancing moves whole slots</li>
+        <li>Cache stampede on a hot key expiring is a real failure mode — mitigate with jitter or locking, not just TTL</li>
+      </ul>
+    </div>
+
+    <section id="mental-model">
+      <h2>Mental model</h2>
+      <div class="analogy-block">
+        Redis is RAM with a vocabulary. A plain key-value cache only knows GET and SET; Redis adds verbs — push, increment, intersect, rank — so the data itself carries structure instead of your application re-deriving it from a blob on every read.
+      </div>
+    </section>
+
+    <section id="core-concepts">
+      <h2>Data structures</h2>
+      <table class="def-table">
+        <thead><tr><th>Structure</th><th>Interview use case</th></tr></thead>
+        <tbody>
+          <tr><td>String</td><td>Session token → user_id, short_code → long_url, simple counters via INCR</td></tr>
+          <tr><td>Hash</td><td>User profile object — set/get individual fields without serializing the whole blob</td></tr>
+          <tr><td>List</td><td>Recent activity feed, simple FIFO/LIFO task queue (LPUSH/RPOP)</td></tr>
+          <tr><td>Set</td><td>Unique visitor IDs, tag membership, blocked-user lookups (O(1) SISMEMBER)</td></tr>
+          <tr><td>Sorted Set (ZSET)</td><td>Leaderboards (score = points), rate limiters (score = timestamp), priority queues</td></tr>
+          <tr><td>HyperLogLog</td><td>Approximate unique counts (DAU, unique page views) in ~12KB regardless of cardinality</td></tr>
+          <tr><td>Stream</td><td>Append-only event log with consumer groups — lightweight Kafka alternative for smaller scale</td></tr>
+        </tbody>
+      </table>
+
+      <h3 style="font-size:13px;color:var(--text);margin:1.5rem 0 0.75rem;font-weight:600">Eviction policies</h3>
+      <p style="font-size:13px;color:#999;margin-bottom:0.75rem">When Redis hits <code>maxmemory</code>, the eviction policy decides what gets dropped.</p>
+      <table class="def-table">
+        <thead><tr><th>Policy</th><th>Behavior</th></tr></thead>
+        <tbody>
+          <tr><td>noeviction</td><td>Reject writes with an error once memory is full — reads still work. Default; safest for data you can't lose.</td></tr>
+          <tr><td>allkeys-lru</td><td>Evict the least-recently-used key across the entire keyspace, regardless of TTL</td></tr>
+          <tr><td>volatile-lru</td><td>Evict least-recently-used key, but only among keys with a TTL set — keys without expiry are protected</td></tr>
+          <tr><td>allkeys-lfu</td><td>Evict least-frequently-used key — better than LRU for workloads with stable hot keys and occasional scans</td></tr>
+          <tr><td>volatile-ttl</td><td>Evict the key with the nearest expiration time first</td></tr>
+        </tbody>
+      </table>
+      <div class="callout info"><code>volatile-lru</code> is the common production default: it protects keys you intentionally made permanent (e.g. config) while still reclaiming space from expiring cache entries.</div>
+    </section>
+
+    <section id="persistence">
+      <h2>Persistence: RDB vs AOF</h2>
+      <div class="compare-grid">
+        <div class="compare-card good">
+          <div class="compare-label">RDB — point-in-time snapshot</div>
+          <ul>
+            <li>Compact single binary file, fast to load on restart</li>
+            <li>Low runtime overhead — forks a child process to write</li>
+            <li>Great for backups and fast cluster node recovery</li>
+            <li>Data loss window: everything since the last snapshot (e.g. 5 min)</li>
+          </ul>
+        </div>
+        <div class="compare-card bad">
+          <div class="compare-label">AOF — append-only command log</div>
+          <ul>
+            <li>Logs every write command — replay on restart rebuilds exact state</li>
+            <li>Configurable fsync: <code>always</code> (durable, slow), <code>everysec</code> (default, ~1s loss window), <code>no</code></li>
+            <li>Larger file, slower restart — needs periodic rewrite/compaction</li>
+            <li>Much smaller data-loss window than RDB alone</li>
+          </ul>
+        </div>
+      </div>
+      <div class="callout warn">Production default is usually both: AOF for durability, RDB snapshots for fast full-cluster bootstrap and backups. Pure in-memory with no persistence is fine only if Redis is a pure cache backed by a real source of truth.</div>
+    </section>
+
+    <section id="how-it-works">
+      <h2>Cluster mode — hash slot sharding</h2>
+      <div class="diagram-wrap">
+        <svg viewBox="0 0 740 320" xmlns="http://www.w3.org/2000/svg">
+          <defs>
+            <marker id="rcArrow" markerWidth="8" markerHeight="8" refX="6" refY="3" orient="auto"><path d="M0,0 L6,3 L0,6 Z" fill="var(--border2)"/></marker>
+            <marker id="rcArrowAmber" markerWidth="8" markerHeight="8" refX="6" refY="3" orient="auto"><path d="M0,0 L6,3 L0,6 Z" fill="var(--amber)"/></marker>
+          </defs>
+
+          <text class="diag-sublabel" x="370" y="14" style="font-size:10px;fill:var(--accent)">CLIENT REQUEST — CRC16(key) mod 16384 picks the slot</text>
+          <g data-tip="Client computes the slot for the key and routes directly to the owning master">
+            <rect class="diag-box role-client" x="320" y="25" width="100" height="44"/>
+            <text class="diag-label" x="370" y="50" style="font-size:11px">Client</text>
+          </g>
+          <path class="diag-arrow-path" d="M370,69 L160,118" marker-end="url(#rcArrow)"/>
+          <path class="diag-arrow-path" d="M370,69 L370,118" marker-end="url(#rcArrow)"/>
+          <path class="diag-arrow-path" d="M370,69 L580,118" marker-end="url(#rcArrow)"/>
+
+          <g data-tip="Owns hash slots 0-5460. Handles all reads/writes for keys in this range.">
+            <rect class="diag-box role-cache" x="60" y="118" width="200" height="56"/>
+            <text class="diag-label" x="160" y="138" style="font-size:11px">Master A</text>
+            <text class="diag-sublabel" x="160" y="155">slots 0 – 5460</text>
+          </g>
+          <g data-tip="Owns hash slots 5461-10922.">
+            <rect class="diag-box role-cache" x="270" y="118" width="200" height="56"/>
+            <text class="diag-label" x="370" y="138" style="font-size:11px">Master B</text>
+            <text class="diag-sublabel" x="370" y="155">slots 5461 – 10922</text>
+          </g>
+          <g data-tip="Owns hash slots 10923-16383.">
+            <rect class="diag-box role-cache" x="480" y="118" width="200" height="56"/>
+            <text class="diag-label" x="580" y="138" style="font-size:11px">Master C</text>
+            <text class="diag-sublabel" x="580" y="155">slots 10923 – 16383</text>
+          </g>
+
+          <path class="diag-arrow-path" d="M160,174 L160,222" marker-end="url(#rcArrowAmber)"/>
+          <path class="diag-arrow-path" d="M370,174 L370,222" marker-end="url(#rcArrowAmber)"/>
+          <path class="diag-arrow-path" d="M580,174 L580,222" marker-end="url(#rcArrowAmber)"/>
+          <text class="diag-sublabel" x="200" y="200" style="font-size:9px;fill:var(--amber)">async replication</text>
+
+          <g data-tip="Replicates Master A. Gossip protocol detects A's failure and promotes this replica.">
+            <rect class="diag-box role-async" x="60" y="222" width="200" height="56"/>
+            <text class="diag-label" x="160" y="242" style="font-size:11px">Replica A'</text>
+            <text class="diag-sublabel" x="160" y="259">standby</text>
+          </g>
+          <g data-tip="Replicates Master B.">
+            <rect class="diag-box role-async" x="270" y="222" width="200" height="56"/>
+            <text class="diag-label" x="370" y="242" style="font-size:11px">Replica B'</text>
+            <text class="diag-sublabel" x="370" y="259">standby</text>
+          </g>
+          <g data-tip="Replicates Master C.">
+            <rect class="diag-box role-async" x="480" y="222" width="200" height="56"/>
+            <text class="diag-label" x="580" y="242" style="font-size:11px">Replica C'</text>
+            <text class="diag-sublabel" x="580" y="259">standby</text>
+          </g>
+
+          <text class="diag-sublabel" x="370" y="300" style="font-size:9.5px">Nodes gossip cluster state over a separate bus port — each node knows every slot owner without a central coordinator</text>
+        </svg>
+        <div class="diag-legend">
+          <div class="diag-legend-item"><span class="diag-legend-dot role-cache"></span>Masters — own a slot range, serve reads/writes</div>
+          <div class="diag-legend-item"><span class="diag-legend-dot role-async"></span>Replicas — async copy, promoted on master failure</div>
+        </div>
+      </div>
+      <ol class="flow-steps-list">
+        <li><span>Slot assignment:</span> 16384 total hash slots are statically divided across master nodes at cluster setup</li>
+        <li><span>Routing:</span> client hashes the key (CRC16 mod 16384), connects to the master owning that slot directly — no proxy hop</li>
+        <li><span>Replication:</span> each master streams writes asynchronously to 1+ replicas for failover, not for read scaling by default</li>
+        <li><span>Gossip + failover:</span> nodes exchange heartbeats; if a master misses enough pings, the cluster votes and promotes its replica</li>
+        <li><span>Resharding:</span> adding/removing a node moves whole slot ranges, not individual keys — predictable but can be a multi-minute operation at scale</li>
+      </ol>
+    </section>
+
+    <section id="tradeoffs">
+      <h2>Tradeoffs</h2>
+      <div class="compare-grid">
+        <div class="compare-card good">
+          <div class="compare-label">Wins</div>
+          <ul>
+            <li>Sub-millisecond latency — everything is in RAM</li>
+            <li>Rich data structures eliminate app-side aggregation logic</li>
+            <li>Atomic single-key operations with no external locking</li>
+            <li>Pub/sub and Streams give you messaging for free</li>
+            <li>Cluster mode scales horizontally with predictable sharding</li>
+          </ul>
+        </div>
+        <div class="compare-card bad">
+          <div class="compare-label">Costs</div>
+          <ul>
+            <li>Dataset must fit in RAM — expensive at large scale vs disk-based stores</li>
+            <li>Single-threaded command execution — one slow command (e.g. KEYS *) blocks everything</li>
+            <li>Without persistence, a crash loses all data</li>
+            <li>Cluster mode loses multi-key transactions across different slots</li>
+            <li>Operational overhead: failover, resharding, memory tuning</li>
+          </ul>
+        </div>
+      </div>
+    </section>
+
+    <section id="when-to-use">
+      <h2>When to use</h2>
+      <div class="scenario-row use">
+        <span class="scenario-icon">✓</span>
+        <div class="scenario-text"><strong>USE:</strong> sub-ms hot-path reads, leaderboards/ranking, rate limiting, session storage, pub/sub fan-out, or any workload that maps cleanly onto one of Redis's native structures.</div>
+      </div>
+      <div class="scenario-row avoid">
+        <span class="scenario-icon">✗</span>
+        <div class="scenario-text"><strong>AVOID:</strong> as a primary system of record for data you can't afford to lose without persistence configured, or for datasets that don't fit in available RAM cost-effectively.</div>
+      </div>
+      <div class="scenario-row watch">
+        <span class="scenario-icon">⚠</span>
+        <div class="scenario-text"><strong>WATCH OUT:</strong> a single very hot key (celebrity user, trending item) can saturate one shard even with cluster mode — needs client-side local caching or key splitting.</div>
+      </div>
+    </section>
+
+    <section id="interview-moves">
+      <h2>Interview moves</h2>
+      <ul class="moves-list">
+        <li><span class="move-num">01</span><div><strong>"I'd justify Redis over Memcached here because we need a ZSET for the leaderboard"</strong> — Memcached is pure key-value; Redis's structures often remove a whole layer of app logic</div></li>
+        <li><span class="move-num">02</span><div><strong>"I'll enable AOF with everysec fsync so we lose at most ~1 second of writes on a crash"</strong> — shows you know persistence is opt-in and tunable, not automatic</div></li>
+        <li><span class="move-num">03</span><div><strong>"To avoid a cache stampede when this key expires, I'd add jitter to the TTL or use a mutex lock so only one request repopulates it"</strong> — a senior-level failure mode most candidates miss</div></li>
+        <li><span class="move-num">04</span><div><strong>"Cluster mode shards by hash slot, not consistent hashing — resharding moves whole slot ranges, which is more predictable but coarser-grained"</strong> — shows real depth beyond "Redis can cluster"</div></li>
+        <li><span class="move-num">05</span><div><strong>"Single-threaded means I need to avoid O(N) commands like KEYS or large SMEMBERS in the hot path — I'd use SCAN instead"</strong> — operational awareness</div></li>
+      </ul>
+    </section>
+
+    <section id="follow-ups">
+      <h2>Common follow-up questions</h2>
+      <div class="qa-block">
+        <div class="qa-q">What is a cache stampede and how do you prevent it?</div>
+        <div class="qa-a">Many requests hit a DB simultaneously when a hot key expires. Prevent with a short-lived lock (only one request repopulates) or TTL jitter so keys don't all expire at the same instant.</div>
+      </div>
+      <div class="qa-block">
+        <div class="qa-q">Why is Redis single-threaded, and is that a problem?</div>
+        <div class="qa-a">Avoids locking overhead and context switches for in-memory ops, which is faster for typical small commands. It's a problem only for O(N) commands on large collections — use SCAN/pagination instead.</div>
+      </div>
+      <div class="qa-block">
+        <div class="qa-q">How does Redis Cluster differ from Redis Sentinel?</div>
+        <div class="qa-a">Sentinel provides HA/failover for a single primary-replica set with no sharding. Cluster mode adds sharding across the 16384 hash slots plus its own failover via gossip — use Cluster when data exceeds one node's RAM.</div>
+      </div>
+      <div class="qa-block">
+        <div class="qa-q">Can you do transactions in Redis?</div>
+        <div class="qa-a">MULTI/EXEC queues commands and executes them atomically, but without rollback on individual command failure. In cluster mode, all keys in a transaction must hash to the same slot (use hash tags <code>{tag}</code>).</div>
+      </div>
+      <div class="qa-block">
+        <div class="qa-q">How would you implement a rate limiter with Redis?</div>
+        <div class="qa-a">Sliding window with a ZSET: score = request timestamp, trim entries older than the window, count remaining. Or simpler token bucket via INCR + EXPIRE for fixed windows.</div>
+      </div>
+      <div class="qa-block">
+        <div class="qa-q">What happens on a Redis Cluster master failure?</div>
+        <div class="qa-a">Other masters detect missed heartbeats via gossip, reach quorum, and promote the failed master's replica. Writes to that slot range fail for the brief detection+failover window (typically a few seconds).</div>
+      </div>
+    </section>
+
+  </main>
+  <script src="../../assets/nav.js"></script>
+</body>
+</html>

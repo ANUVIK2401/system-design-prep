@@ -1,0 +1,185 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Multi-Step Processes — SD Prep</title>
+  <link rel="stylesheet" href="../../assets/style.css">
+</head>
+<body>
+  <aside id="sidebar"></aside>
+  <main>
+
+    <header class="page-head">
+      <div class="pill">Patterns</div>
+      <h1>Multi-Step Processes</h1>
+      <p class="sub">The saga pattern — chaining local transactions across services with compensating actions instead of distributed transactions.</p>
+      <div class="meta-row">
+        <span class="badge green">15-20 min</span>
+        <span class="badge blue">Medium</span>
+      </div>
+    </header>
+
+    <div class="flash-card">
+      <div class="flash-label">Say this in the first 2 minutes</div>
+      <ul>
+        <li>Distributed transactions (2PC) don't scale — they hold locks across services and fail badly on partition</li>
+        <li>Saga = sequence of local transactions, each with a compensating action to undo it</li>
+        <li>Orchestration = central coordinator calls each step; choreography = services react to each other's events</li>
+        <li>Compensating actions are business operations, not a generic rollback — "refund payment", not "undo INSERT"</li>
+        <li>Sagas give eventual consistency only — say this explicitly so the interviewer knows you're not claiming ACID</li>
+      </ul>
+    </div>
+
+    <section id="mental-model">
+      <h2>Mental model</h2>
+      <div class="analogy-block">
+        A saga is like booking a multi-leg trip yourself instead of through one travel agent: you book the flight, then the hotel, then the car. If the car rental fails, you don't get a magic global undo — you cancel the hotel and refund the flight, one call at a time.
+      </div>
+    </section>
+
+    <section id="core-concepts">
+      <h2>Core concepts</h2>
+      <table class="def-table">
+        <thead><tr><th>Term</th><th>Definition</th></tr></thead>
+        <tbody>
+          <tr><td>Saga</td><td>A sequence of local transactions across services, coordinated to act as one logical operation</td></tr>
+          <tr><td>Local transaction</td><td>A normal ACID transaction scoped to a single service's own database</td></tr>
+          <tr><td>Compensating transaction</td><td>A business-level action that semantically undoes a prior step (e.g. refund)</td></tr>
+          <tr><td>Orchestration</td><td>A central coordinator service explicitly calls each step and handles failures</td></tr>
+          <tr><td>Choreography</td><td>Each service publishes events; the next service reacts — no central coordinator</td></tr>
+          <tr><td>2PC</td><td>Two-phase commit — a distributed transaction protocol that locks all participants until all agree</td></tr>
+        </tbody>
+      </table>
+    </section>
+
+    <section id="how-it-works">
+      <h2>Orchestrated saga with compensating rollback</h2>
+      <div class="diagram-wrap" data-paths='{"happy":{"boxes":["orch","order","payment","inventory","confirm"],"arrows":["h1","h2","h3","h4"]},"failure":{"boxes":["orch","order","payment","inventory","compP","compO"],"arrows":["h1","h2","h3","f1","f2","f3"]}}'>
+        <svg viewBox="0 0 760 280" xmlns="http://www.w3.org/2000/svg">
+          <defs>
+            <marker id="sg1" markerWidth="8" markerHeight="8" refX="6" refY="3" orient="auto"><path d="M0,0 L6,3 L0,6 Z" fill="var(--border2)"/></marker>
+            <marker id="sg2" markerWidth="8" markerHeight="8" refX="6" refY="3" orient="auto"><path d="M0,0 L6,3 L0,6 Z" fill="var(--amber)"/></marker>
+          </defs>
+
+          <g data-tip="Central coordinator drives the whole saga" data-id="orch"><rect class="diag-box role-cache" x="300" y="15" width="160" height="50" data-id="orch"/><text class="diag-label" x="380" y="38" style="font-size:11px">Saga Orchestrator</text><text class="diag-sublabel" x="380" y="54">coordinator</text></g>
+
+          <path class="diag-arrow-path" data-id="h1" d="M340,65 C300,90 220,90 165,100" marker-end="url(#sg1)"/>
+          <g data-tip="Step 1: create order in PENDING state" data-id="order"><rect class="diag-box" x="20" y="100" width="145" height="50" data-id="order"/><text class="diag-label" x="92" y="123" style="font-size:11px">Order Service</text><text class="diag-sublabel" x="92" y="139">local txn 1</text></g>
+
+          <path class="diag-arrow-path" data-id="h2" d="M365,65 C365,90 320,90 300,100" marker-end="url(#sg1)"/>
+          <g data-tip="Step 2: charge the customer" data-id="payment"><rect class="diag-box" x="215" y="100" width="150" height="50" data-id="payment"/><text class="diag-label" x="290" y="123" style="font-size:11px">Payment Service</text><text class="diag-sublabel" x="290" y="139">local txn 2</text></g>
+
+          <path class="diag-arrow-path" data-id="h3" d="M400,65 C440,90 470,90 480,100" marker-end="url(#sg2)"/>
+          <g data-tip="Step 3: reserve stock — FAILS (out of stock)" data-id="inventory"><rect class="diag-box" x="415" y="100" width="150" height="50" stroke="var(--amber)" data-id="inventory"/><text class="diag-label" x="490" y="123" style="font-size:11px">Inventory Service</text><text class="diag-sublabel" x="490" y="139" style="fill:var(--amber)">FAILS — out of stock</text></g>
+
+          <path class="diag-arrow-path" data-id="h4" d="M460,40 L640,40" marker-end="url(#sg1)" stroke-dasharray="3 3"/>
+          <g data-tip="Only reached on success" data-id="confirm"><rect class="diag-box role-cache" x="640" y="15" width="105" height="50" data-id="confirm"/><text class="diag-label" x="692" y="38" style="font-size:11px">Confirm</text><text class="diag-sublabel" x="692" y="54">happy path</text></g>
+
+          <text class="diag-sublabel" x="490" y="170" style="font-size:10px;fill:var(--amber)">FAILURE → orchestrator runs compensations in reverse order</text>
+
+          <path class="diag-arrow-path" data-id="f1" d="M490,150 C490,190 350,190 290,190" marker-end="url(#sg2)"/>
+          <g data-tip="Compensating txn: refund the payment" data-id="compP"><rect class="diag-box role-async" x="215" y="190" width="150" height="45" data-id="compP"/><text class="diag-label" x="290" y="208" style="font-size:11px">Refund payment</text><text class="diag-sublabel" x="290" y="224">compensate txn 2</text></g>
+
+          <path class="diag-arrow-path" data-id="f2" d="M215,212 C150,212 100,212 92,190" marker-end="url(#sg2)"/>
+          <g data-tip="Compensating txn: cancel the order" data-id="compO"><rect class="diag-box role-async" x="20" y="190" width="145" height="45" data-id="compO"/><text class="diag-label" x="92" y="208" style="font-size:11px">Cancel order</text><text class="diag-sublabel" x="92" y="224">compensate txn 1</text></g>
+
+          <path class="diag-arrow-path" data-id="f3" d="M92,190 C92,150 200,150 340,68" marker-end="url(#sg2)" stroke-dasharray="3 3"/>
+        </svg>
+        <div class="diag-legend">
+          <div class="diag-legend-item"><span class="diag-legend-dot role-cache"></span>Orchestrator / confirm</div>
+          <div class="diag-legend-item"><span class="diag-legend-dot"></span>Forward step (local transaction)</div>
+          <div class="diag-legend-item"><span class="diag-legend-dot role-async"></span>Compensating transaction (rollback)</div>
+        </div>
+      </div>
+      <ol class="flow-steps-list">
+        <li><span>Forward path:</span> orchestrator calls order → payment → inventory in sequence, each a local ACID transaction</li>
+        <li><span>Failure detected:</span> inventory step fails (out of stock) — orchestrator stops the forward path</li>
+        <li><span>Compensate:</span> orchestrator calls compensating actions in reverse order — refund payment, then cancel order</li>
+        <li><span>End state:</span> system reaches a consistent "cancelled" state — eventually, not instantly</li>
+      </ol>
+    </section>
+
+    <section id="tradeoffs">
+      <h2>Tradeoffs</h2>
+      <div class="compare-grid">
+        <div class="compare-card good">
+          <div class="compare-label">Orchestration</div>
+          <ul>
+            <li>One place to read the whole workflow — easier to understand and debug</li>
+            <li>Centralized retry/timeout/compensation logic</li>
+            <li>Easy to add monitoring and a saga state machine</li>
+            <li>Cost: the orchestrator is a new service and a potential bottleneck</li>
+          </ul>
+        </div>
+        <div class="compare-card bad">
+          <div class="compare-label">Choreography</div>
+          <ul>
+            <li>No central coordinator — services stay fully decoupled</li>
+            <li>No single point of failure for the workflow itself</li>
+            <li>Cost: hard to see the overall flow — logic is smeared across services</li>
+            <li>Cost: harder to add a new step without touching multiple services' event handlers</li>
+          </ul>
+        </div>
+      </div>
+    </section>
+
+    <section id="when-to-use">
+      <h2>When to use</h2>
+      <div class="scenario-row use">
+        <span class="scenario-icon">✓</span>
+        <div class="scenario-text"><strong>Use orchestration</strong> for complex workflows with many steps, conditional branches, or where you need a clear audit trail (e.g. order checkout, loan approval).</div>
+      </div>
+      <div class="scenario-row use">
+        <span class="scenario-icon">✓</span>
+        <div class="scenario-text"><strong>Use choreography</strong> for simple 2-3 step flows where services are already event-driven and you want to avoid adding a new coordinator service.</div>
+      </div>
+      <div class="scenario-row avoid">
+        <span class="scenario-icon">✗</span>
+        <div class="scenario-text"><strong>Avoid 2PC across microservices</strong> — it requires all participants to hold locks until every vote is in, which kills availability and doesn't survive a partition.</div>
+      </div>
+    </section>
+
+    <section id="interview-moves">
+      <h2>Interview moves</h2>
+      <ul class="moves-list">
+        <li><span class="move-num">01</span><div><strong>"This spans three services with their own databases — I can't use one ACID transaction, so I'd use the saga pattern"</strong> — names the trigger and the pattern together</div></li>
+        <li><span class="move-num">02</span><div><strong>"I'd go with orchestration here since there are several steps and I want a single place to see the workflow state"</strong> — justifies the choice instead of defaulting blindly</div></li>
+        <li><span class="move-num">03</span><div><strong>"Each compensating action is a real business operation — refund the payment, release the inventory hold — not a generic database rollback"</strong> — shows you understand sagas aren't free</div></li>
+        <li><span class="move-num">04</span><div><strong>"Sagas only give eventual consistency — for a brief window the order exists in a partially-completed state, and I'd model that explicitly"</strong> — preempts the "what about consistency" follow-up</div></li>
+        <li><span class="move-num">05</span><div><strong>"Every step and compensation needs to be idempotent, since the orchestrator may retry after a timeout without knowing if the first call landed"</strong> — connects sagas to retry-safety</div></li>
+      </ul>
+    </section>
+
+    <section id="follow-ups">
+      <h2>Common follow-up questions</h2>
+      <div class="qa-block">
+        <div class="qa-q">Why not just use a distributed transaction (2PC)?</div>
+        <div class="qa-a">2PC holds locks on every participant until all vote commit — this blocks unrelated traffic and doesn't tolerate a coordinator or participant failure well. It doesn't scale to internet-scale microservices.</div>
+      </div>
+      <div class="qa-block">
+        <div class="qa-q">What happens if a compensating transaction itself fails?</div>
+        <div class="qa-a">Retry with backoff; if it keeps failing, push to a dead-letter queue for manual/ops intervention. Compensations must be designed to be retried safely (idempotent).</div>
+      </div>
+      <div class="qa-block">
+        <div class="qa-q">How do you give the user a consistent view during a saga in progress?</div>
+        <div class="qa-a">Show an explicit intermediate state like "processing" rather than a final state. Don't let the UI imply success until the saga's last step confirms.</div>
+      </div>
+      <div class="qa-block">
+        <div class="qa-q">Can every step be compensated?</div>
+        <div class="qa-a">No — some actions are irreversible (sending an email, an external non-refundable charge). Design those steps to be last in the sequence, after all reversible steps have succeeded.</div>
+      </div>
+      <div class="qa-block">
+        <div class="qa-q">How does choreography avoid a single point of failure?</div>
+        <div class="qa-a">Each service only knows about events it cares about and reacts independently via a message broker — there's no central process whose crash halts the whole workflow.</div>
+      </div>
+      <div class="qa-block">
+        <div class="qa-q">How do you debug a choreographed saga gone wrong?</div>
+        <div class="qa-a">Correlate all events with a single saga/trace ID and centralize logs (e.g. in a tracing system) — since there's no orchestrator state machine to inspect directly.</div>
+      </div>
+    </section>
+
+  </main>
+  <script src="../../assets/nav.js"></script>
+</body>
+</html>

@@ -1,0 +1,163 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Managing Long-Running Processes — SD Prep</title>
+  <link rel="stylesheet" href="../../assets/style.css">
+</head>
+<body>
+  <aside id="sidebar"></aside>
+  <main>
+
+    <header class="page-head">
+      <div class="pill">Patterns</div>
+      <h1>Managing Long-Running Processes</h1>
+      <p class="sub">Async job queues, status polling, webhooks, and idempotency keys — how to handle work that doesn't fit in one request.</p>
+      <div class="meta-row">
+        <span class="badge green">15-20 min</span>
+        <span class="badge blue">Medium</span>
+      </div>
+    </header>
+
+    <div class="flash-card">
+      <div class="flash-label">Say this in the first 2 minutes</div>
+      <ul>
+        <li>If work takes longer than a request timeout, don't block — accept the job, return immediately, process async</li>
+        <li>Queue (SQS/Kafka) + worker pool decouples request latency from actual processing time</li>
+        <li>Client either polls a status endpoint or registers a webhook for completion — name both and pick one with a reason</li>
+        <li>Idempotency keys are mandatory the moment you have retries — a duplicate submission must not double-process</li>
+        <li>Webhooks push complexity (retries, security, ordering) onto you; polling pushes latency and waste onto the client</li>
+      </ul>
+    </div>
+
+    <section id="mental-model">
+      <h2>Mental model</h2>
+      <div class="analogy-block">
+        A long-running job is a dry cleaner ticket. You drop off your clothes (submit the job), get a ticket number (job ID), and don't stand in the shop waiting. You either call to check ("is it ready?" — polling) or they call you when it's done (webhook).
+      </div>
+    </section>
+
+    <section id="core-concepts">
+      <h2>Core concepts</h2>
+      <table class="def-table">
+        <thead><tr><th>Term</th><th>Definition</th></tr></thead>
+        <tbody>
+          <tr><td>Job queue</td><td>Durable buffer (SQS/Kafka) holding submitted work until a worker picks it up</td></tr>
+          <tr><td>Worker pool</td><td>A fleet of processes that pull jobs off the queue and execute them</td></tr>
+          <tr><td>Status store</td><td>A DB/cache tracking each job's state: queued, running, done, failed</td></tr>
+          <tr><td>Polling</td><td>Client repeatedly calls a status endpoint until the job completes</td></tr>
+          <tr><td>Webhook</td><td>Your server calls a client-provided URL when the job finishes</td></tr>
+          <tr><td>Idempotency key</td><td>A client-supplied unique ID ensuring a retried submission isn't processed twice</td></tr>
+        </tbody>
+      </table>
+    </section>
+
+    <section id="how-it-works">
+      <h2>Submit, process, and check status</h2>
+      <div class="diagram-wrap">
+        <svg viewBox="0 0 700 130" xmlns="http://www.w3.org/2000/svg">
+          <defs><marker id="lr1" markerWidth="8" markerHeight="8" refX="6" refY="3" orient="auto"><path d="M0,0 L6,3 L0,6 Z" fill="var(--border2)"/></marker></defs>
+          <g data-tip="Client submits a job with an idempotency key, gets a job_id back immediately"><rect class="diag-box role-client" x="10" y="35" width="110" height="55"/><text class="diag-label" x="65" y="58">Client</text><text class="diag-sublabel" x="65" y="74">submits job</text></g>
+          <path class="diag-arrow-path" d="M120,62 L160,62" marker-end="url(#lr1)"/>
+          <g data-tip="Returns 202 Accepted + job_id, does not wait for completion"><rect class="diag-box" x="160" y="35" width="120" height="55"/><text class="diag-label" x="220" y="58" style="font-size:11px">API</text><text class="diag-sublabel" x="220" y="74">202 + job_id</text></g>
+          <path class="diag-arrow-path" d="M280,55 L320,40" marker-end="url(#lr1)"/>
+          <g data-tip="Durable buffer holds the job until a worker is free"><rect class="diag-box role-async" x="320" y="10" width="120" height="50"/><text class="diag-label" x="380" y="30">Queue</text><text class="diag-sublabel" x="380" y="46">SQS / Kafka</text></g>
+          <path class="diag-arrow-path" d="M440,35 L480,35" marker-end="url(#lr1)"/>
+          <g data-tip="Pool of workers pulls jobs and executes them, keyed by idempotency key"><rect class="diag-box role-async" x="480" y="10" width="130" height="50"/><text class="diag-label" x="545" y="30">Worker Pool</text><text class="diag-sublabel" x="545" y="46">idempotent exec</text></g>
+          <path class="diag-arrow-path" d="M545,60 L545,90 L280,90 L280,72" marker-end="url(#lr1)"/>
+          <text class="diag-sublabel" x="410" y="105" style="font-size:9px">writes status: running → done</text>
+          <g data-tip="Status record the client polls, or that triggers a webhook on completion"><rect class="diag-box role-db" x="160" y="95" width="120" height="0" style="display:none"/></g>
+          <path class="diag-arrow-path" d="M280,55 L320,75" marker-end="url(#lr1)" stroke-dasharray="4 3"/>
+          <g data-tip="Status store — client polls this, or it triggers the webhook"><rect class="diag-box role-db" x="320" y="70" width="130" height="50"/><text class="diag-label" x="385" y="92">Status Store</text><text class="diag-sublabel" x="385" y="108">queued/running/done</text></g>
+        </svg>
+      </div>
+      <ol class="flow-steps-list">
+        <li><span>Submit:</span> client sends the job with an idempotency key, gets back <code>202 Accepted</code> + job_id instantly</li>
+        <li><span>Queue:</span> job sits in a durable queue until a worker is free</li>
+        <li><span>Process:</span> worker executes the job, updating status as it progresses</li>
+        <li><span>Notify:</span> client either polls <code>GET /jobs/{id}</code> or receives a webhook callback on completion</li>
+      </ol>
+    </section>
+
+    <section id="tradeoffs">
+      <h2>Tradeoffs</h2>
+      <div class="compare-grid">
+        <div class="compare-card good">
+          <div class="compare-label">Polling</div>
+          <ul>
+            <li>Simple to implement on both client and server — just a GET endpoint</li>
+            <li>No need to expose a public callback URL or verify inbound webhook auth</li>
+            <li>Cost: wasted requests and added latency between actual completion and detection</li>
+          </ul>
+        </div>
+        <div class="compare-card bad">
+          <div class="compare-label">Webhooks</div>
+          <ul>
+            <li>Near-instant notification, no wasted polling traffic</li>
+            <li>Cost: you must handle retries, ordering, and signature verification for security</li>
+            <li>Cost: client's callback endpoint must be reachable and reliable — added operational burden on them</li>
+          </ul>
+        </div>
+      </div>
+    </section>
+
+    <section id="when-to-use">
+      <h2>When to use</h2>
+      <div class="scenario-row use">
+        <span class="scenario-icon">✓</span>
+        <div class="scenario-text"><strong>Use polling</strong> for short-lived jobs (seconds to a couple minutes) or when the client is a browser that can't easily expose a webhook endpoint.</div>
+      </div>
+      <div class="scenario-row use">
+        <span class="scenario-icon">✓</span>
+        <div class="scenario-text"><strong>Use webhooks</strong> for server-to-server integrations with long jobs (video processing, large exports) where polling would waste significant resources.</div>
+      </div>
+      <div class="scenario-row watch">
+        <span class="scenario-icon">⚠</span>
+        <div class="scenario-text"><strong>Watch for duplicate processing on retry</strong> — if the client times out and resubmits, an idempotency key must make the second submission a no-op, not a second job.</div>
+      </div>
+    </section>
+
+    <section id="interview-moves">
+      <h2>Interview moves</h2>
+      <ul class="moves-list">
+        <li><span class="move-num">01</span><div><strong>"This work exceeds a normal request timeout, so I'd accept it async — return 202 and a job_id immediately, process in the background"</strong> — names the trigger and the pattern together</div></li>
+        <li><span class="move-num">02</span><div><strong>"I'd require an idempotency key on submission, so a client retry after a timeout doesn't create a duplicate job"</strong> — the single most important correctness detail in this pattern</div></li>
+        <li><span class="move-num">03</span><div><strong>"For this audience I'd offer a webhook, since these are server clients that can expose a callback — polling would just waste resources on both sides"</strong> — justifies the choice instead of picking one by default</div></li>
+        <li><span class="move-num">04</span><div><strong>"Webhook deliveries can fail, so I'd add retry with backoff and let the client fall back to polling the status endpoint if delivery fails repeatedly"</strong> — shows you've thought about webhook failure modes</div></li>
+        <li><span class="move-num">05</span><div><strong>"I'd sign webhook payloads so the receiver can verify the callback actually came from us"</strong> — addresses webhook security before it's asked</div></li>
+      </ul>
+    </section>
+
+    <section id="follow-ups">
+      <h2>Common follow-up questions</h2>
+      <div class="qa-block">
+        <div class="qa-q">Why are idempotency keys mandatory here?</div>
+        <div class="qa-a">Any async system has retries — network blips cause clients to resubmit. Without a dedup key, that resubmission becomes a second, redundant (or harmful) job execution.</div>
+      </div>
+      <div class="qa-block">
+        <div class="qa-q">How do you implement an idempotency key server-side?</div>
+        <div class="qa-a">Store submitted keys with a TTL in a fast store (Redis/DB unique constraint). On a new submission, check if the key exists — if so, return the original job's result instead of enqueueing again.</div>
+      </div>
+      <div class="qa-block">
+        <div class="qa-q">How do you handle a worker crashing mid-job?</div>
+        <div class="qa-a">Use visibility timeouts (SQS) so the message becomes available again if not acknowledged within a window — another worker picks it up. Design job execution to be safely re-runnable (idempotent).</div>
+      </div>
+      <div class="qa-block">
+        <div class="qa-q">How do you avoid polling becoming a load problem?</div>
+        <div class="qa-a">Use exponential backoff on the client (start at 1s, cap at 30s), and serve status reads from a cache, not the primary job DB, since they're high-volume reads of low-churn data.</div>
+      </div>
+      <div class="qa-block">
+        <div class="qa-q">How do you guarantee webhook delivery ordering?</div>
+        <div class="qa-a">Generally you don't — include a sequence number or timestamp in the payload and let the receiver reorder/dedupe, rather than relying on delivery order.</div>
+      </div>
+      <div class="qa-block">
+        <div class="qa-q">What if the client never polls and never receives a webhook successfully?</div>
+        <div class="qa-a">Keep job results in the status store for a retention window (e.g. 7-30 days) so a late client request can still retrieve the outcome instead of losing it.</div>
+      </div>
+    </section>
+
+  </main>
+  <script src="../../assets/nav.js"></script>
+</body>
+</html>

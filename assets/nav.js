@@ -1,27 +1,54 @@
 (function () {
   const TOPICS = [
-    { slug: 'sd-introduction',    name: 'Introduction',        cat: 'Foundations' },
-    { slug: 'how-to-prepare',     name: 'How to Prepare',      cat: 'Foundations' },
-    { slug: 'delivery-framework', name: 'Delivery Framework',  cat: 'Foundations' },
-    { slug: 'core-concepts',      name: 'Core Concepts',       cat: 'Foundations' },
-    { slug: 'key-technologies',   name: 'Key Technologies',    cat: 'Foundations' },
-    { slug: 'common-patterns',    name: 'Common Patterns',     cat: 'Foundations' },
-    { slug: 'question-breakdowns',name: 'Question Breakdowns', cat: 'Questions'   },
-    { slug: 'url-shortener',      name: 'URL Shortener',       cat: 'Questions'   },
+    { slug: 'sd-introduction',    name: 'Introduction',        cat: 'Foundations', dir: '' },
+    { slug: 'how-to-prepare',     name: 'How to Prepare',      cat: 'Foundations', dir: '' },
+    { slug: 'delivery-framework', name: 'Delivery Framework',  cat: 'Foundations', dir: '' },
+    { slug: 'core-concepts',      name: 'Core Concepts',       cat: 'Foundations', dir: '' },
+    { slug: 'key-technologies',   name: 'Key Technologies',    cat: 'Foundations', dir: '' },
+    { slug: 'common-patterns',    name: 'Common Patterns',     cat: 'Foundations', dir: '' },
+
+    { slug: 'real-time-updates',             name: 'Real-Time Updates',       cat: 'Patterns', dir: 'patterns/' },
+    { slug: 'dealing-with-contention',       name: 'Dealing with Contention', cat: 'Patterns', dir: 'patterns/' },
+    { slug: 'multi-step-processes',          name: 'Multi-Step Processes',    cat: 'Patterns', dir: 'patterns/' },
+    { slug: 'scaling-reads',                 name: 'Scaling Reads',           cat: 'Patterns', dir: 'patterns/' },
+    { slug: 'scaling-writes',                name: 'Scaling Writes',          cat: 'Patterns', dir: 'patterns/' },
+    { slug: 'handling-large-blobs',          name: 'Handling Large Blobs',    cat: 'Patterns', dir: 'patterns/' },
+    { slug: 'managing-long-running-processes', name: 'Long-Running Processes', cat: 'Patterns', dir: 'patterns/' },
+
+    { slug: 'redis',         name: 'Redis',         cat: 'Key Technologies', dir: 'tech/' },
+    { slug: 'elasticsearch', name: 'Elasticsearch', cat: 'Key Technologies', dir: 'tech/' },
+    { slug: 'kafka',         name: 'Kafka',         cat: 'Key Technologies', dir: 'tech/' },
+    { slug: 'api-gateway',   name: 'API Gateway',   cat: 'Key Technologies', dir: 'tech/' },
+    { slug: 'cassandra',     name: 'Cassandra',     cat: 'Key Technologies', dir: 'tech/' },
+    { slug: 'dynamodb',      name: 'DynamoDB',      cat: 'Key Technologies', dir: 'tech/' },
+    { slug: 'postgresql',    name: 'PostgreSQL',    cat: 'Key Technologies', dir: 'tech/' },
+    { slug: 'flink',         name: 'Flink',         cat: 'Key Technologies', dir: 'tech/' },
+    { slug: 'zookeeper',     name: 'ZooKeeper',     cat: 'Key Technologies', dir: 'tech/' },
+
+    { slug: 'proximity-search',          name: 'Proximity Search',         cat: 'Advanced Topics', dir: 'advanced/' },
+    { slug: 'data-structures-big-data',  name: 'Big Data Structures',      cat: 'Advanced Topics', dir: 'advanced/' },
+    { slug: 'vector-databases',          name: 'Vector Databases',         cat: 'Advanced Topics', dir: 'advanced/' },
+    { slug: 'time-series-databases',     name: 'Time-Series Databases',    cat: 'Advanced Topics', dir: 'advanced/' },
+
+    { slug: 'question-breakdowns',name: 'Question Breakdowns', cat: 'Questions', dir: '' },
+    { slug: 'url-shortener',      name: 'URL Shortener',       cat: 'Questions', dir: '' },
   ];
 
   const sidebar  = document.getElementById('sidebar');
   if (!sidebar) return;
 
-  const parts    = location.pathname.split('/').filter(Boolean);
-  const fileName = parts[parts.length - 1] || '';
-  const curSlug  = fileName.replace('.html', '');
-  const inTopics = parts[parts.length - 2] === 'topics';
+  const parts      = location.pathname.split('/').filter(Boolean);
+  const fileName   = parts[parts.length - 1] || '';
+  const curSlug    = fileName.replace('.html', '');
+  const parentDir  = parts[parts.length - 2] || '';
+  const grandDir   = parts[parts.length - 3] || '';
+  const inTopicsRoot = parentDir === 'topics';
+  const inTopicsSub  = grandDir === 'topics'; // topics/patterns/x.html, topics/tech/x.html, topics/advanced/x.html
+  const inTopics      = inTopicsRoot || inTopicsSub;
 
-  // Determine prefix: from root index → topics are at topics/[slug].html
-  // From a topics/* page → topics are at [slug].html (same dir)
-  const topicPre = inTopics ? '' : 'topics/';
-  const homePath = inTopics ? '../index.html' : 'index.html';
+  // Path from the current page back to the site root's topics/ dir
+  const rootToTopics = inTopicsSub ? '../../topics/' : (inTopicsRoot ? '../topics/' : 'topics/');
+  const homePath      = inTopicsSub ? '../../index.html' : (inTopicsRoot ? '../index.html' : 'index.html');
 
   const sections = Array.from(document.querySelectorAll('section[id]')).map(el => ({
     id: el.id,
@@ -68,7 +95,7 @@
       const marker = isDone
         ? `<span class="sb-step-mark sb-step-check">✓</span>`
         : `<span class="sb-step-mark">${num}</span>`;
-      html += `<a class="sb-link sb-topic-link${active}${stateClass}" href="${topicPre}${t.slug}.html">${marker}<span class="sb-topic-name">${t.name}</span></a>`;
+      html += `<a class="sb-link sb-topic-link${active}${stateClass}" href="${rootToTopics}${t.dir}${t.slug}.html">${marker}<span class="sb-topic-name">${t.name}</span></a>`;
     });
   });
 
@@ -213,4 +240,149 @@
       });
     });
   });
+
+  // ── Generic hover tooltip for any [data-tip] inside a .diagram-wrap ──
+  document.querySelectorAll('.diagram-wrap').forEach(wrap => {
+    const tip = document.createElement('div');
+    tip.className = 'diag-tip';
+    wrap.appendChild(tip);
+    wrap.querySelectorAll('[data-tip]').forEach(el => {
+      el.addEventListener('mouseenter', (e) => {
+        tip.textContent = el.dataset.tip;
+        const wrapRect = wrap.getBoundingClientRect();
+        const elRect = (el.querySelector('rect,circle') || el).getBoundingClientRect();
+        tip.style.left = (elRect.left - wrapRect.left + elRect.width / 2) + 'px';
+        tip.style.top = (elRect.top - wrapRect.top) + 'px';
+        tip.classList.add('show');
+      });
+      el.addEventListener('mouseleave', () => tip.classList.remove('show'));
+    });
+  });
+
+  // ── CAP theorem interactive corners ──
+  const capDetail = document.getElementById('cap-detail');
+  if (capDetail) {
+    const CAP_INFO = {
+      C: { guarantees: 'CP — Consistency + Partition Tolerance', sacrifice: 'Availability: during a partition, nodes that can\'t confirm the latest write return an error instead of stale data.', example: 'MongoDB (default), HBase, Zookeeper — chosen when correctness beats uptime.' },
+      A: { guarantees: 'AP — Availability + Partition Tolerance', sacrifice: 'Consistency: during a partition, every node keeps responding, even with possibly stale data.', example: 'DynamoDB, Cassandra, CouchDB — chosen for high availability at internet scale.' },
+      P: { guarantees: 'Partition tolerance is non-negotiable', sacrifice: 'Networks always partition eventually — P is never the thing you give up. The real choice is C vs A when a partition happens.', example: 'Every distributed system must handle P; CAP is really just "CP or AP?"' },
+    };
+    document.querySelectorAll('.cap-node').forEach(node => {
+      const key = node.dataset.cap;
+      const activate = () => {
+        document.querySelectorAll('.cap-node').forEach(n => n.classList.remove('cap-active', 'cap-c', 'cap-a', 'cap-p'));
+        node.classList.add('cap-active', 'cap-' + key.toLowerCase());
+        const info = CAP_INFO[key];
+        capDetail.querySelector('.cap-detail-title').textContent = info.guarantees;
+        capDetail.querySelector('.cap-detail-body').innerHTML = `${info.sacrifice}<br><span class="cap-example">${info.example}</span>`;
+      };
+      node.addEventListener('click', activate);
+      node.addEventListener('keypress', (e) => { if (e.key === 'Enter') activate(); });
+    });
+  }
+
+  // ── Reusable: Consistent hash ring SVG generator ──
+  // container: element to render into. opts: { nodes:[{id,label}], keys:[{id,label}], size }
+  window.renderHashRing = function (container, opts) {
+    const size = opts.size || 320;
+    const cx = size / 2, cy = size / 2, r = size * 0.36;
+    let nodes = opts.nodes.slice();
+    const keys = opts.keys || [];
+
+    function angleFor(hash) { return (hash / 360) * Math.PI * 2 - Math.PI / 2; }
+    function posFor(hash) {
+      const a = angleFor(hash);
+      return { x: cx + r * Math.cos(a), y: cy + r * Math.sin(a) };
+    }
+    function nearestNode(hash, nodeList) {
+      const sorted = nodeList.slice().sort((a, b) => a.hash - b.hash);
+      for (const n of sorted) if (hash <= n.hash) return n.id;
+      return sorted[0].id;
+    }
+
+    function draw() {
+      const sorted = nodes.slice().sort((a, b) => a.hash - b.hash);
+      let svg = `<svg viewBox="0 0 ${size} ${size}" xmlns="http://www.w3.org/2000/svg">`;
+      svg += `<circle cx="${cx}" cy="${cy}" r="${r}" fill="none" stroke="var(--border2)" stroke-width="1.5"/>`;
+
+      keys.forEach(k => {
+        const owner = nearestNode(k.hash, sorted);
+        const p = posFor(k.hash);
+        const kr = r - 26;
+        const a = angleFor(k.hash);
+        const kp = { x: cx + kr * Math.cos(a), y: cy + kr * Math.sin(a) };
+        const cls = k._remap ? 'key-remapped' : (k._settled ? 'key-stable' : '');
+        svg += `<g class="hash-key ${cls}" data-tip="${k.label} → ${owner}">
+          <circle cx="${kp.x}" cy="${kp.y}" r="4"/>
+        </g>`;
+      });
+
+      sorted.forEach(n => {
+        const p = posFor(n.hash);
+        const labelR = r + 26;
+        const a = angleFor(n.hash);
+        const lp = { x: cx + labelR * Math.cos(a), y: cy + labelR * Math.sin(a) };
+        const newCls = n._new ? ' hash-node-new' : '';
+        svg += `<g class="hash-node${newCls}" data-tip="${n.label} owns this arc">
+          <circle class="diag-box role-cache" cx="${p.x}" cy="${p.y}" r="9"/>
+          <text class="diag-sublabel" x="${lp.x}" y="${lp.y}" style="font-size:10px">${n.label}</text>
+        </g>`;
+      });
+
+      svg += `</svg>`;
+      container.innerHTML = svg;
+    }
+
+    draw();
+
+    return {
+      addNode(newNode) {
+        const sorted = nodes.slice().sort((a, b) => a.hash - b.hash);
+        let successor = sorted.find(n => n.hash >= newNode.hash) || sorted[0];
+        keys.forEach(k => {
+          const wasOwner = nearestNode(k.hash, sorted);
+          k._settled = true;
+          k._remap = false;
+        });
+        nodes.push(Object.assign({}, newNode, { _new: true }));
+        const afterSorted = nodes.slice().sort((a, b) => a.hash - b.hash);
+        keys.forEach(k => {
+          const newOwner = nearestNode(k.hash, afterSorted);
+          if (newOwner === newNode.id) { k._remap = true; k._settled = false; }
+        });
+        draw();
+        setTimeout(() => { nodes.forEach(n => n._new = false); }, 600);
+      },
+      reset(originalNodes) {
+        nodes = originalNodes.slice();
+        keys.forEach(k => { k._remap = false; k._settled = false; });
+        draw();
+      }
+    };
+  };
+
+  // ── Reusable: Sharding write-path animator ──
+  // container: element with an existing SVG containing .shard-box[data-shard] and a path for the dot to travel
+  window.animateShardWrite = function (svgEl, shardId, pathD) {
+    svgEl.querySelectorAll('.shard-box').forEach(b => b.classList.remove('shard-lit'));
+    const target = svgEl.querySelector(`.shard-box[data-shard="${shardId}"]`);
+    if (target) target.classList.add('shard-lit');
+    const existingDot = svgEl.querySelector('.shard-write-dot');
+    if (existingDot) existingDot.remove();
+    if (!pathD) return;
+    const ns = 'http://www.w3.org/2000/svg';
+    const dot = document.createElementNS(ns, 'circle');
+    dot.setAttribute('r', '4');
+    dot.classList.add('shard-write-dot');
+    const animMotion = document.createElementNS(ns, 'animateMotion');
+    animMotion.setAttribute('dur', '1.1s');
+    animMotion.setAttribute('path', pathD);
+    animMotion.setAttribute('fill', 'freeze');
+    dot.appendChild(animMotion);
+    svgEl.appendChild(dot);
+    requestAnimationFrame(() => {
+      dot.classList.add('shard-dot-active');
+      animMotion.beginElement && animMotion.beginElement();
+    });
+  };
 })();

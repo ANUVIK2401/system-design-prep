@@ -43,31 +43,31 @@
       <div class="diagram-wrap">
         <svg viewBox="0 0 760 150" xmlns="http://www.w3.org/2000/svg">
           <line x1="40" y1="30" x2="720" y2="30" stroke="var(--border2)" stroke-width="2"/>
-          <g>
+          <g data-tip="Learn the 5-phase structure first — every later study phase hangs off this skeleton">
             <circle class="diag-dot" cx="70" cy="30" r="6"/>
             <text class="diag-label" x="70" y="55" style="font-size:11px">Wk 1</text>
             <text class="diag-sublabel" x="70" y="80">Delivery</text>
             <text class="diag-sublabel" x="70" y="94">framework</text>
           </g>
-          <g>
+          <g data-tip="CAP, consistency models, latency numbers — the vocabulary you'll reuse in every deep dive">
             <circle class="diag-dot" cx="230" cy="30" r="6"/>
             <text class="diag-label" x="230" y="55" style="font-size:11px">Wk 1-2</text>
             <text class="diag-sublabel" x="230" y="80">Core</text>
             <text class="diag-sublabel" x="230" y="94">concepts</text>
           </g>
-          <g>
+          <g data-tip="When to reach for Redis, Kafka, S3, a CDN, a load balancer — and what each one costs you">
             <circle class="diag-dot" cx="390" cy="30" r="6"/>
             <text class="diag-label" x="390" y="55" style="font-size:11px">Wk 2</text>
             <text class="diag-sublabel" x="390" y="80">Key</text>
             <text class="diag-sublabel" x="390" y="94">technologies</text>
           </g>
-          <g>
+          <g data-tip="Work through canonical questions end-to-end — this is where the framework and concepts actually click together">
             <circle class="diag-dot" cx="550" cy="30" r="6"/>
             <text class="diag-label" x="550" y="55" style="font-size:11px">Wk 3-4</text>
             <text class="diag-sublabel" x="550" y="80">Question</text>
             <text class="diag-sublabel" x="550" y="94">deep-dives</text>
           </g>
-          <g>
+          <g data-tip="Practice under real interview pressure with feedback — surfaces gaps that solo study can't">
             <circle class="diag-dot" cx="700" cy="30" r="6"/>
             <text class="diag-label" x="700" y="55" style="font-size:11px">Wk 4+</text>
             <text class="diag-sublabel" x="700" y="80">Mock</text>
@@ -84,27 +84,27 @@
           <defs>
             <marker id="loopArrow" markerWidth="8" markerHeight="8" refX="6" refY="3" orient="auto"><path d="M0,0 L6,3 L0,6 Z" fill="var(--border2)"/></marker>
           </defs>
-          <g>
+          <g data-tip="Start with Tier 1 questions — well-scoped problems that exercise the full framework">
             <rect class="diag-box role-cache" x="10" y="25" width="135" height="55"/>
             <text class="diag-label" x="77" y="55">Pick a question</text>
           </g>
           <path class="diag-arrow-path" d="M145,52 L165,52" marker-end="url(#loopArrow)"/>
-          <g>
+          <g data-tip="Hard constraint — forces you to budget time across phases the same way a real interview does">
             <rect class="diag-box" x="165" y="25" width="135" height="55"/>
             <text class="diag-label" x="232" y="55">45 min timer</text>
           </g>
           <path class="diag-arrow-path" d="M300,52 L320,52" marker-end="url(#loopArrow)"/>
-          <g>
+          <g data-tip="Narrate every decision as if an interviewer is listening — silence reads as a red flag in the real thing">
             <rect class="diag-box" x="320" y="25" width="135" height="55"/>
             <text class="diag-label" x="387" y="55">Deliver out loud</text>
           </g>
           <path class="diag-arrow-path" d="M455,52 L475,52" marker-end="url(#loopArrow)"/>
-          <g>
+          <g data-tip="Identify exactly what you couldn't justify or didn't know — this is where the actual learning happens">
             <rect class="diag-box role-cache" x="475" y="25" width="135" height="55"/>
             <text class="diag-label" x="542" y="55">Review gaps</text>
           </g>
           <path class="diag-arrow-path" d="M610,52 L630,52" marker-end="url(#loopArrow)"/>
-          <g>
+          <g data-tip="Same question again until delivery is smooth, then move on — repetition builds the muscle memory">
             <rect class="diag-box" x="630" y="25" width="120" height="55"/>
             <text class="diag-label" x="690" y="48">Repeat</text>
             <text class="diag-sublabel" x="690" y="64">until smooth</text>
