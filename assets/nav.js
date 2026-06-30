@@ -77,17 +77,6 @@
     <div class="sb-progress-track"><div class="sb-progress-fill" style="width:${(doneCount / TOPICS.length) * 100}%"></div></div>
   </div>`;
 
-  // ── "On this page" — mini TOC for the current page (scroll-spy target) ──
-  if (sections.length) {
-    html += `<div class="sb-toc">
-      <div class="sb-label sb-toc-label">On this page</div>
-      <div class="sb-toc-list">`;
-    sections.forEach(s => {
-      html += `<a class="sb-link sb-sublink" href="#${s.id}" data-sec="${s.id}">${s.label}</a>`;
-    });
-    html += `</div></div>`;
-  }
-
   // ── Site map — collapsible category accordion ──
   html += `<div class="sb-sitemap">`;
   const cats = [...new Set(TOPICS.map(t => t.cat))];
@@ -126,20 +115,6 @@
   });
 
   // Scroll-spy
-  if (sections.length) {
-    const links = sidebar.querySelectorAll('[data-sec]');
-    const obs = new IntersectionObserver(entries => {
-      entries.forEach(e => {
-        if (e.isIntersecting) {
-          links.forEach(l => l.classList.remove('active'));
-          const a = sidebar.querySelector(`[data-sec="${e.target.id}"]`);
-          if (a) a.classList.add('active');
-        }
-      });
-    }, { rootMargin: '-15% 0px -70% 0px' });
-    document.querySelectorAll('section[id]').forEach(el => obs.observe(el));
-  }
-
   // Mobile hamburger
   const burger = document.createElement('button');
   burger.id    = 'hamburger';

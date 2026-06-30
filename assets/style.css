@@ -107,36 +107,6 @@ body {
   transition: width 0.4s cubic-bezier(0.16, 1, 0.3, 1);
 }
 
-/* ── Sidebar: "On this page" mini TOC (scoped, scroll-spy target) ──
-   Visually distinct block, separate question from the topic site map below. */
-.sb-toc {
-  background: #0d0f0e;
-  border-bottom: 1px solid var(--border);
-  padding-bottom: 0.6rem;
-  margin-bottom: 0.6rem;
-}
-.sb-toc-label { padding-top: 0.7rem; }
-.sb-toc-list {
-  display: block;
-  min-height: fit-content;
-}
-#sidebar a.sb-sublink {
-  position: relative;
-  padding: 4px 1.25rem 4px 1.6rem;
-  font-size: 12.5px;
-  color: var(--faint);
-  line-height: 1.4;
-  white-space: normal;
-}
-#sidebar a.sb-sublink:hover { color: var(--muted); }
-#sidebar a.sb-sublink.active {
-  color: var(--accent);
-  font-weight: 600;
-  background: #0d1f17;
-  border-left-color: var(--accent);
-  border-left-width: 3px;
-}
-
 /* ── Sidebar: site map — collapsible category accordion ── */
 .sb-sitemap { padding-top: 0.2rem; }
 .sb-cat { border-bottom: 1px solid var(--border); }
@@ -146,13 +116,14 @@ body {
   align-items: center;
   width: 100%;
   gap: 8px;
-  padding: 0.7rem 1.25rem;
+  padding: 0.55rem 1.25rem;
   background: none;
   border: none;
   font-family: inherit;
   cursor: pointer;
   text-align: left;
   color: var(--faint);
+  transition: color 0.12s;
 }
 .sb-cat-head:hover { color: var(--text); }
 .sb-cat-name {
