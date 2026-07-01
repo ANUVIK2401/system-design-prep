@@ -1,0 +1,421 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Design a URL Shortener — SD Prep</title>
+  <link rel="stylesheet" href="../../assets/style.css">
+</head>
+<body>
+  <aside id="sidebar"></aside>
+  <main>
+
+    <header class="page-head">
+      <div class="pill">Questions</div>
+      <h1>Design a URL Shortener</h1>
+      <p class="sub">Tests whether you can identify the real hard problem — ID generation, not redirect logic — and build a read-heavy system around it.</p>
+      <div class="meta-row">
+        <span class="badge green">30-40 min interview</span>
+        <span class="badge blue">Easy</span>
+      </div>
+    </header>
+
+    <div class="flash-card">
+      <div class="flash-label">Say this in the first 2 minutes</div>
+      <ul>
+        <li>The core insight: ID generation is the hard problem here, not the redirect — the redirect is a one-line cache lookup</li>
+        <li>Key scale number to anchor on: reads outnumber writes roughly 100:1, so every decision optimizes the redirect path</li>
+        <li>Primary tradeoff: base62 counter vs hash vs Snowflake for ID generation — collision risk vs coordination cost</li>
+        <li>Component most candidates forget: a CDN in front of the redirect service, not just a Redis cache behind it</li>
+        <li>Failure mode most candidates skip: what happens to click analytics if the async pipeline backs up — it must never block the redirect</li>
+      </ul>
+    </div>
+
+    <section id="step1-requirements">
+      <div class="step-pill">Step 1 of 6 — Requirements</div>
+      <h2>Requirements</h2>
+
+      <div class="goal-arc-wrap">
+        <div class="goal-arc-row functional">
+          <div class="goal-arc-seg">1</div><div class="goal-arc-seg">2</div><div class="goal-arc-seg">3</div><div class="goal-arc-seg">4</div><div class="goal-arc-seg">5</div><div class="goal-arc-seg inactive">6</div>
+        </div>
+        <div class="goal-arc-label"><span>Arc 1 (steps 1-5) — <strong>Satisfy Functional Requirements</strong></span></div>
+        <div class="goal-arc-row nonfunctional" style="margin-top:8px">
+          <div class="goal-arc-seg">1</div><div class="goal-arc-seg">2</div><div class="goal-arc-seg">3</div><div class="goal-arc-seg">4</div><div class="goal-arc-seg">5</div><div class="goal-arc-seg">6</div>
+        </div>
+        <div class="goal-arc-label"><span>Arc 2 (all 6 steps) — <strong>Satisfy Non-Functional Requirements</strong></span></div>
+      </div>
+
+      <div class="compare-grid">
+        <div class="compare-card good">
+          <div class="compare-label">Functional</div>
+          <ul>
+            <li>Shorten a long URL into a unique short code</li>
+            <li>Redirect a short code to its original long URL</li>
+            <li>Support optional custom aliases</li>
+            <li>Support optional link expiration</li>
+          </ul>
+        </div>
+        <div class="compare-card bad">
+          <div class="compare-label">Non-Functional</div>
+          <ul>
+            <li>100M URLs created, 10M DAU</li>
+            <li>Redirect latency &lt;10ms p99 (cached)</li>
+            <li>Read:write ratio ~100:1</li>
+            <li>99.99% availability for redirects</li>
+          </ul>
+        </div>
+      </div>
+
+      <div class="callout warn"><strong>What NOT to build:</strong> real-time click analytics dashboards, link-in-bio pages, QR code generation, or team/workspace permissions. Scope this to shorten + redirect + basic expiration only.</div>
+
+      <div class="stat-grid">
+        <div class="stat-card"><div class="stat-val">~12/s</div><div class="stat-label">write QPS (shorten)</div></div>
+        <div class="stat-card"><div class="stat-val">~1,200/s</div><div class="stat-label">read QPS (redirect)</div></div>
+        <div class="stat-card"><div class="stat-val">~50GB</div><div class="stat-label">URL storage (5 yrs)</div></div>
+        <div class="stat-card"><div class="stat-val">7 chars</div><div class="stat-label">base62 short code</div></div>
+      </div>
+    </section>
+
+    <section id="step2-entities">
+      <div class="step-pill">Step 2 of 6 — Core Entities</div>
+      <h2>Core entities</h2>
+      <p style="font-size:13px;color:#999;margin-bottom:0.75rem">What are the nouns in this system? Two entities, one store — the data model comes before any API design.</p>
+
+      <div class="entity-grid">
+        <div class="entity-box">
+          <div class="entity-head"><span class="entity-name">Url</span><span class="entity-store pg">Postgres</span></div>
+          <div class="entity-fields">
+            <div class="entity-field"><span class="fname pk">id</span><span class="ftype">BIGINT</span></div>
+            <div class="entity-field"><span class="fname idx">short_code</span><span class="ftype">VARCHAR(10) UNIQUE</span></div>
+            <div class="entity-field"><span class="fname">long_url</span><span class="ftype">TEXT</span></div>
+            <div class="entity-field"><span class="fname">user_id</span><span class="ftype">BIGINT, nullable</span></div>
+            <div class="entity-field"><span class="fname">created_at</span><span class="ftype">TIMESTAMP</span></div>
+            <div class="entity-field"><span class="fname">expires_at</span><span class="ftype">TIMESTAMP, nullable</span></div>
+          </div>
+          <div class="entity-why">Because writes are low-volume (~12/s) and need a strong uniqueness constraint on short_code — a relational store with a unique index is the simplest correct fit. Tradeoff: a single primary needs read replicas once traffic grows past one node's capacity.</div>
+        </div>
+
+        <div class="entity-box">
+          <div class="entity-head"><span class="entity-name">CustomAlias</span><span class="entity-store pg">Postgres</span></div>
+          <div class="entity-fields">
+            <div class="entity-field"><span class="fname pk">alias</span><span class="ftype">VARCHAR(50)</span></div>
+            <div class="entity-field"><span class="fname idx">url_id</span><span class="ftype">BIGINT → Url.id</span></div>
+          </div>
+          <div class="entity-why">Because a separate namespace prevents a user-chosen alias from ever colliding with a generated short_code. Tradeoff: redirect lookups check two tables instead of one — negligible cost since both are indexed.</div>
+        </div>
+      </div>
+
+      <div class="callout info">Primary key: <code>Url.id</code> is the Snowflake/counter-generated integer. Critical index: <code>UNIQUE INDEX on short_code</code> — every redirect is a point lookup against this index, so it must never require a table scan.</div>
+    </section>
+
+    <section id="step3-api">
+      <div class="step-pill">Step 3 of 6 — API / Interface</div>
+      <h2>API design</h2>
+      <p style="font-size:13px;color:#999;margin-bottom:0.75rem">How do clients interact with the system? Three endpoints — this is a small surface area by design.</p>
+
+      <div class="api-card">
+        <div class="api-line"><span class="api-method post">POST</span><span class="api-path">/api/v1/shorten</span><span class="api-auth">Auth: optional (anonymous allowed)</span></div>
+        <div class="api-io">
+          <div class="api-io-block"><div class="api-io-label">Request</div><div class="api-io-body">{ long_url, custom_alias?, expires_at? }</div></div>
+          <div class="api-io-block"><div class="api-io-label">Response</div><div class="api-io-body">{ short_url, short_code, expires_at }</div></div>
+        </div>
+      </div>
+
+      <div class="api-card">
+        <div class="api-line"><span class="api-method get">GET</span><span class="api-path">/{short_code}</span><span class="api-auth">Auth: none</span></div>
+        <div class="api-io">
+          <div class="api-io-block"><div class="api-io-label">Request</div><div class="api-io-body">path param only</div></div>
+          <div class="api-io-block"><div class="api-io-label">Response</div><div class="api-io-body">HTTP 302 + Location header. 404 if not found/expired</div></div>
+        </div>
+      </div>
+
+      <div class="api-card">
+        <div class="api-line"><span class="api-method delete">DELETE</span><span class="api-path">/api/v1/urls/{short_code}</span><span class="api-auth">Auth: required (owner only)</span></div>
+        <div class="api-io">
+          <div class="api-io-block"><div class="api-io-label">Request</div><div class="api-io-body">path param only</div></div>
+          <div class="api-io-block"><div class="api-io-label">Response</div><div class="api-io-body">HTTP 204 on success</div></div>
+        </div>
+      </div>
+
+      <div class="callout good">REST fits cleanly here — no persistent connection is needed since both shorten and redirect are single-request-response operations with no ongoing state to push.</div>
+    </section>
+
+    <section id="step4-dataflow">
+      <div class="step-pill">Step 4 of 6 — Data Flow</div>
+      <h2>Data flow</h2>
+      <p style="font-size:13px;color:#999;margin-bottom:0.75rem">What happens when a user takes the primary action? Write path (blue) and read path (mint) never share infrastructure under load.</p>
+
+      <div class="diagram-wrap" data-paths='{"write":{"boxes":["w-client","w-gw","w-svc","w-db"],"arrows":["w1","w2","w3"]},"read":{"boxes":["r-client","r-cdn","r-svc","r-cache","r-db"],"arrows":["r1","r2","r3","r4"]}}'>
+        <svg viewBox="0 0 740 220" xmlns="http://www.w3.org/2000/svg">
+          <defs>
+            <marker id="usR" markerWidth="8" markerHeight="8" refX="6" refY="3" orient="auto"><path d="M0,0 L6,3 L0,6 Z" fill="var(--accent)"/></marker>
+            <marker id="usW" markerWidth="8" markerHeight="8" refX="6" refY="3" orient="auto"><path d="M0,0 L6,3 L0,6 Z" fill="var(--blue)"/></marker>
+          </defs>
+
+          <text class="diag-sublabel" x="150" y="14" style="font-size:10px;fill:var(--accent)">READ PATH — redirect</text>
+          <circle class="diag-dot diag-flow-dot" r="3.5" style="offset-path: path('M10,24 L120,24 L120,24 L250,24 L250,24 L380,24 L380,24 L510,24')"></circle>
+          <g data-target="step6-deepdive-cache" data-id="r-client" data-tip="Browser or app following a shortened link"><rect class="diag-box role-client" x="10" y="24" width="100" height="46"/><text class="diag-label" x="60" y="52" style="font-size:11px">Client</text></g>
+          <path class="diag-arrow-path" data-id="r1" d="M110,47 L145,47" marker-end="url(#usR)"/>
+          <g data-target="step6-deepdive-cache" data-id="r-cdn" data-tip="Caches the 302 response at the edge — repeat hits never reach origin"><rect class="diag-box role-cdn" x="145" y="24" width="100" height="46"/><text class="diag-label" x="195" y="52" style="font-size:11px">CDN</text></g>
+          <path class="diag-arrow-path" data-id="r2" d="M245,47 L280,47" marker-end="url(#usR)"/>
+          <g data-target="step6-deepdive-cache" data-id="r-svc" data-tip="Thin stateless lookup-and-redirect service"><rect class="diag-box" x="280" y="24" width="120" height="46"/><text class="diag-label" x="340" y="47" style="font-size:11px">Redirect Svc</text><text class="diag-sublabel" x="340" y="62" style="font-size:8.5px">stateless</text></g>
+          <path class="diag-arrow-path" data-id="r3" d="M400,47 L435,47" marker-end="url(#usR)"/>
+          <g data-target="step6-deepdive-cache" data-id="r-cache" data-tip="Cache hit avoids the Postgres round-trip — ~1ms vs ~10ms+"><rect class="diag-box role-cache" x="435" y="24" width="100" height="46"/><text class="diag-label" x="485" y="47" style="font-size:11px">Redis</text><text class="diag-sublabel" x="485" y="62" style="font-size:8.5px">hot cache</text></g>
+          <path class="diag-arrow-path" data-id="r4" d="M535,47 L570,47" marker-end="url(#usR)"/>
+          <text class="diag-sublabel" x="552" y="37" style="font-size:9px">miss</text>
+          <g data-target="step2-entities" data-id="r-db" data-tip="Source of truth — only touched on a cache miss"><rect class="diag-box role-db" x="570" y="24" width="120" height="46"/><text class="diag-label" x="630" y="47" style="font-size:11px">Postgres</text><text class="diag-sublabel" x="630" y="62" style="font-size:8.5px">source of truth</text></g>
+
+          <text class="diag-sublabel" x="150" y="105" style="font-size:10px;fill:var(--blue)">WRITE PATH — shorten</text>
+          <g data-target="step2-entities" data-id="w-client" data-tip="Submits a long URL to be shortened"><rect class="diag-box role-client" x="10" y="115" width="100" height="46"/><text class="diag-label" x="60" y="143" style="font-size:11px">Client</text></g>
+          <path class="diag-arrow-path" data-id="w1" d="M110,138 L145,138" marker-end="url(#usW)"/>
+          <g data-target="step3-api" data-id="w-gw" data-tip="Single entry point — auth, rate limiting"><rect class="diag-box role-client" x="145" y="115" width="110" height="46"/><text class="diag-label" x="200" y="143" style="font-size:11px">API Gateway</text></g>
+          <path class="diag-arrow-path" data-id="w2" d="M255,138 L290,138" marker-end="url(#usW)"/>
+          <g data-target="step6-deepdive-idgen" data-id="w-svc" data-tip="Validates URL, requests an ID, checks custom alias namespace"><rect class="diag-box" x="290" y="115" width="130" height="46"/><text class="diag-label" x="355" y="138" style="font-size:11px">Shorten Svc</text><text class="diag-sublabel" x="355" y="153" style="font-size:8.5px">stateless pods</text></g>
+          <path class="diag-arrow-path" data-id="w3" d="M420,138 L455,138" marker-end="url(#usW)"/>
+          <g data-target="step2-entities" data-id="w-db" data-tip="Persists the new short_code → long_url row"><rect class="diag-box role-db" x="455" y="115" width="120" height="46"/><text class="diag-label" x="515" y="138" style="font-size:11px">Postgres</text><text class="diag-sublabel" x="515" y="153" style="font-size:8.5px">write</text></g>
+        </svg>
+        <div class="diag-legend">
+          <div class="diag-legend-item"><span class="diag-legend-dot role-cache"></span>Read path — cache-first, CDN in front</div>
+          <div class="diag-legend-item"><span class="diag-legend-dot role-client"></span>Write path — low volume, strong uniqueness</div>
+        </div>
+      </div>
+
+      <ol class="flow-steps-list">
+        <li><span>Client requests /{short_code}</span> — hits CDN edge first</li>
+        <li><span>CDN cache hit</span> — returns cached 302 immediately, request never reaches origin</li>
+        <li><span>CDN miss → Redirect Svc → Redis</span> — checks in-memory cache for short_code</li>
+        <li><span>Redis miss → Postgres</span> — indexed lookup on short_code, result written back to Redis</li>
+        <li><span>302 returned to client</span> — browser follows to long_url</li>
+      </ol>
+    </section>
+
+    <section id="step5-hld">
+      <div class="step-pill">Step 5 of 6 — High-Level Design</div>
+      <h2>High-level design</h2>
+      <p style="font-size:13px;color:#999;margin-bottom:0.75rem">What does the complete system look like? Same paths as Step 4, now with every supporting component visible.</p>
+
+      <div class="diagram-wrap">
+        <svg viewBox="0 0 740 260" xmlns="http://www.w3.org/2000/svg">
+          <defs><marker id="usHldArrow" markerWidth="8" markerHeight="8" refX="6" refY="3" orient="auto"><path d="M0,0 L6,3 L0,6 Z" fill="var(--border2)"/></marker></defs>
+          <g data-tip="Browsers and apps — both shorten and redirect requests originate here"><rect class="diag-box role-client" x="10" y="20" width="110" height="50"/><text class="diag-label" x="65" y="50" style="font-size:11px">Clients</text></g>
+          <path class="diag-arrow-path" d="M120,45 L155,45" marker-end="url(#usHldArrow)"/>
+          <g data-tip="Caches redirect responses at edge, absorbing the bulk of read traffic"><rect class="diag-box role-cdn" x="155" y="20" width="100" height="50"/><text class="diag-label" x="205" y="50" style="font-size:11px">CDN</text></g>
+          <path class="diag-arrow-path" d="M255,45 L290,45" marker-end="url(#usHldArrow)"/>
+          <g data-tip="Routes to shorten or redirect service; handles auth + rate limiting"><rect class="diag-box role-client" x="290" y="20" width="120" height="50"/><text class="diag-label" x="350" y="50" style="font-size:11px">API Gateway</text></g>
+
+          <path class="diag-arrow-path" d="M350,70 L350,105" marker-end="url(#usHldArrow)"/>
+          <g data-tip="Stateless, scales horizontally"><rect class="diag-box" x="220" y="105" width="130" height="46"/><text class="diag-label" x="285" y="128" style="font-size:11px">Redirect Svc</text><text class="diag-sublabel" x="285" y="143" style="font-size:8.5px">stateless</text></g>
+          <g data-tip="Stateless, scales horizontally"><rect class="diag-box" x="360" y="105" width="130" height="46"/><text class="diag-label" x="425" y="128" style="font-size:11px">Shorten Svc</text><text class="diag-sublabel" x="425" y="143" style="font-size:8.5px">stateless</text></g>
+
+          <path class="diag-arrow-path" d="M285,151 L285,185" marker-end="url(#usHldArrow)"/>
+          <g data-tip="Hot short_code → long_url mappings, LRU eviction"><rect class="diag-box role-cache" x="200" y="185" width="130" height="46"/><text class="diag-label" x="265" y="208" style="font-size:11px">Redis</text><text class="diag-sublabel" x="265" y="223" style="font-size:8.5px">cache</text></g>
+          <path class="diag-arrow-path" d="M425,151 L425,185" marker-end="url(#usHldArrow)"/>
+          <g data-tip="Source of truth, primary + read replicas"><rect class="diag-box role-db" x="360" y="185" width="130" height="46"/><text class="diag-label" x="425" y="208" style="font-size:11px">Postgres</text><text class="diag-sublabel" x="425" y="223" style="font-size:8.5px">primary + replicas</text></g>
+          <path class="diag-arrow-path" d="M330,208 L360,208" marker-end="url(#usHldArrow)" stroke-dasharray="3 3"/>
+        </svg>
+        <div class="diag-legend">
+          <div class="diag-legend-item"><span class="diag-legend-dot role-client"></span>Client / gateway</div>
+          <div class="diag-legend-item"><span class="diag-legend-dot role-cdn"></span>CDN — edge cache</div>
+          <div class="diag-legend-item"><span class="diag-legend-dot role-cache"></span>Redis — hot mappings</div>
+          <div class="diag-legend-item"><span class="diag-legend-dot role-db"></span>Postgres — source of truth</div>
+        </div>
+      </div>
+
+      <table class="def-table">
+        <thead><tr><th>Component</th><th>Role</th><th>Tech + why</th></tr></thead>
+        <tbody>
+          <tr><td>Redirect Svc</td><td>Looks up short_code, issues HTTP redirect</td><td>Go — because the hot path needs low per-request overhead; tradeoff is a smaller ecosystem than Node for this thin a service.</td></tr>
+          <tr><td>Shorten Svc</td><td>Validates URL, requests an ID, writes row</td><td>Stateless pods — because horizontal scaling needs zero coordination between instances; tradeoff is none, this is the easy side.</td></tr>
+          <tr><td>Cache</td><td>Serves hot short_code lookups</td><td>Redis — because O(1) key lookup at sub-ms latency is exactly the read pattern; tradeoff is dataset must fit in RAM.</td></tr>
+          <tr><td>Database</td><td>Source of truth for URL mappings</td><td>Postgres — because writes need a strong unique constraint on short_code; tradeoff is a single-writer bottleneck above ~10k writes/s.</td></tr>
+          <tr><td>CDN</td><td>Edge-caches redirect responses</td><td>Cloudflare/CloudFront — because it eliminates the network round-trip entirely for popular links; tradeoff is stale-cache risk on delete.</td></tr>
+        </tbody>
+      </table>
+
+      <h3 style="font-size:13px;color:var(--text);margin:1.25rem 0 0.6rem;font-weight:600">Scaling levers — cheapest to most complex</h3>
+      <ol class="levers-list">
+        <li><strong>Add Redis read replicas</strong> for the cache layer<span class="cost">near-zero complexity</span></li>
+        <li><strong>Add Postgres read replicas</strong> to absorb cache-miss reads<span class="cost">low complexity</span></li>
+        <li><strong>Put a CDN in front of the redirect service</strong><span class="cost">low complexity, high payoff</span></li>
+        <li><strong>Switch ID generation from DB auto-increment to Snowflake</strong><span class="cost">medium complexity</span></li>
+        <li><strong>Shard Postgres by short_code prefix</strong><span class="cost">high complexity — last resort</span></li>
+      </ol>
+
+      <table class="grid-table">
+        <thead><tr><th>Bottleneck</th><th>Triggers at</th><th>Exact fix</th></tr></thead>
+        <tbody>
+          <tr><td>DB read overload</td><td>&gt;50k RPS hitting Postgres directly</td><td class="fix">Redis cluster absorbs the majority; add read replicas for remaining misses</td></tr>
+          <tr><td>Hot short code (viral link)</td><td>Single code getting millions of RPS</td><td class="fix">CDN caches the redirect response at edge; Redis local replica per region</td></tr>
+          <tr><td>Write throughput</td><td>&gt;10k shortens/sec</td><td class="fix">Switch DB auto-increment to Snowflake; shard Postgres by user_id range</td></tr>
+        </tbody>
+      </table>
+
+      <div class="dial-wrap">
+        <div class="dial-title">New short URL — write visibility on next read</div>
+        <div class="dial-track"><div class="dial-marker" style="left:10%"></div></div>
+        <div class="dial-labels"><span class="end-left">Strong</span><span class="end-right">Eventual</span></div>
+      </div>
+      <div class="dial-wrap">
+        <div class="dial-title">Reads after cache miss — replica lag vs primary</div>
+        <div class="dial-track"><div class="dial-marker" style="left:65%"></div></div>
+        <div class="dial-labels"><span class="end-left">Strong</span><span class="end-right">Eventual</span></div>
+      </div>
+    </section>
+
+    <section id="step6-deepdive-idgen">
+      <div class="step-pill">Step 6 of 6 — Deep Dives</div>
+      <h2>Deep dive: ID generation</h2>
+      <p style="font-size:13px;color:#999;margin-bottom:0.75rem">This is the actual hard problem in the system — not the redirect.</p>
+      <div class="compare-grid">
+        <div class="compare-card good">
+          <div class="compare-label">Base62 counter</div>
+          <ul>
+            <li>Simple: increment a counter, encode to base62</li>
+            <li>No collisions by construction</li>
+            <li>Single point of contention — one DB sequence</li>
+            <li>Codes are sequential — guessable, minor info leak</li>
+          </ul>
+        </div>
+        <div class="compare-card bad">
+          <div class="compare-label">MD5/SHA hash of URL</div>
+          <ul>
+            <li>No coordination needed — pure function of input</li>
+            <li>Collision risk requires a uniqueness check on every write anyway</li>
+            <li>Truncating the hash for a short code raises collision odds further</li>
+          </ul>
+        </div>
+      </div>
+      <div class="callout good">At this scale (~12 writes/sec), a Postgres sequence with base62 encoding is genuinely sufficient — reach for Snowflake only once write throughput or multi-region writes make a single sequence a bottleneck (see the Bitly page for that scale).</div>
+    </section>
+
+    <section id="step6-deepdive-cache">
+      <h2>Deep dive: cache hit vs miss</h2>
+      <p style="font-size:13px;color:#999;margin-bottom:0.75rem">The entire &lt;10ms p99 target depends on the hit path.</p>
+      <div class="flow-cmp-grid">
+        <div class="flow-cmp-col hit">
+          <div class="flow-cmp-title">✓ Cache hit — ~1-3ms</div>
+          <svg viewBox="0 0 320 130" xmlns="http://www.w3.org/2000/svg">
+            <defs><marker id="usHitArrow" markerWidth="8" markerHeight="8" refX="6" refY="3" orient="auto"><path d="M0,0 L6,3 L0,6 Z" fill="var(--accent)"/></marker></defs>
+            <path class="us-hit-arrow-1" d="M95,40 L195,40" stroke="var(--accent)" stroke-width="2" marker-end="url(#usHitArrow)" fill="none"/>
+            <path class="us-hit-arrow-2" d="M195,60 L95,60" stroke="var(--accent)" stroke-width="2" marker-end="url(#usHitArrow)" fill="none"/>
+            <circle class="diag-dot diag-flow-dot" r="3" style="offset-path: path('M95,40 L195,40')"></circle>
+            <rect class="diag-box role-client" x="10" y="20" width="85" height="50" data-tip="Redirect Svc queries Redis"></rect>
+            <text class="diag-label" x="52" y="40">Redirect</text>
+            <text class="diag-sublabel" x="52" y="55">GET code</text>
+            <g data-tip="In-memory lookup, no disk I/O">
+              <rect class="diag-box role-cache" x="195" y="15" width="115" height="60" rx="6"></rect>
+              <text class="diag-label" x="252" y="38" style="font-weight:600">Redis</text>
+              <text class="diag-sublabel" x="252" y="53">key found</text>
+              <text class="diag-sublabel" x="252" y="65" style="fill:var(--accent)">~1-3ms</text>
+            </g>
+            <text x="145" y="100" text-anchor="middle" font-size="10" fill="var(--accent)" font-family="Inter,sans-serif">key exists → 302 immediately</text>
+          </svg>
+          <button class="flow-cmp-replay" data-replay="us-hit-arrow-1,us-hit-arrow-2">▸ Replay</button>
+        </div>
+        <div class="flow-cmp-col miss">
+          <div class="flow-cmp-title">✗ Cache miss — ~15-25ms</div>
+          <svg viewBox="0 0 420 130" xmlns="http://www.w3.org/2000/svg">
+            <defs><marker id="usMissArrow" markerWidth="8" markerHeight="8" refX="6" refY="3" orient="auto"><path d="M0,0 L6,3 L0,6 Z" fill="var(--amber)"/></marker></defs>
+            <path class="us-miss-arrow-1" d="M95,40 L195,40" stroke="var(--amber)" stroke-width="2" marker-end="url(#usMissArrow)" fill="none"/>
+            <path class="us-miss-arrow-2" d="M310,40 L405,40" stroke="var(--amber)" stroke-width="2" marker-end="url(#usMissArrow)" stroke-dasharray="4 3" fill="none"/>
+            <path class="us-miss-arrow-3" d="M405,60 L310,60" stroke="var(--amber)" stroke-width="2" marker-end="url(#usMissArrow)" stroke-dasharray="4 3" fill="none"/>
+            <path class="us-miss-arrow-4" d="M195,75 L95,75" stroke="var(--amber)" stroke-width="2" marker-end="url(#usMissArrow)" fill="none"/>
+            <circle class="diag-dot diag-flow-dot" r="3" style="offset-path: path('M95,40 L195,40')"></circle>
+            <rect class="diag-box role-client" x="10" y="20" width="85" height="55" data-tip="Redirect Svc queries Redis"></rect>
+            <text class="diag-label" x="52" y="42">Redirect</text>
+            <text class="diag-sublabel" x="52" y="57">GET code</text>
+            <g data-tip="Falls through to Postgres, SETs result back">
+              <rect class="diag-box role-cache" x="195" y="15" width="115" height="65" rx="6"></rect>
+              <text class="diag-label" x="252" y="35" style="font-weight:600">Redis</text>
+              <text class="diag-sublabel" x="252" y="50">MISS</text>
+              <text class="diag-sublabel" x="252" y="62" style="fill:var(--amber)">SET back</text>
+            </g>
+            <g data-tip="Indexed lookup, slower than memory">
+              <rect class="diag-box role-db" x="310" y="15" width="100" height="55" rx="6"></rect>
+              <text class="diag-label" x="360" y="38">Postgres</text>
+              <text class="diag-sublabel" x="360" y="53" style="fill:var(--amber)">~15-25ms</text>
+            </g>
+            <text x="160" y="105" text-anchor="middle" font-size="10" fill="var(--amber)" font-family="Inter,sans-serif">miss → query → cache → return</text>
+          </svg>
+          <button class="flow-cmp-replay" data-replay="us-miss-arrow-1,us-miss-arrow-2,us-miss-arrow-3,us-miss-arrow-4">▸ Replay</button>
+        </div>
+      </div>
+      <script>
+      (function(){
+        document.querySelectorAll('.flow-cmp-replay').forEach(function(btn){
+          if (btn.dataset.bound) return;
+          btn.dataset.bound = '1';
+          btn.addEventListener('click', function(){
+            var classes = btn.dataset.replay.split(',');
+            var svg = btn.previousElementSibling;
+            classes.forEach(function(cls){
+              var path = svg.querySelector('.' + cls);
+              if (!path) return;
+              var len = path.getTotalLength ? path.getTotalLength() : 100;
+              path.style.strokeDasharray = len;
+              path.style.strokeDashoffset = len;
+              path.getBoundingClientRect();
+              path.style.transition = 'stroke-dashoffset 0.5s ease';
+              path.style.strokeDashoffset = 0;
+            });
+          });
+        });
+      })();
+      </script>
+
+      <table class="grid-table">
+        <thead><tr><th>Scenario</th><th>User impact</th><th>Detection signal</th><th>Mitigation</th></tr></thead>
+        <tbody>
+          <tr><td>Redis down</td><td class="impact">Latency spikes 10-20x, all reads hit DB</td><td class="detect">Cache miss rate &gt;80% alert</td><td class="fix">Circuit breaker to protect DB; auto-scale replicas</td></tr>
+          <tr><td>Postgres primary down</td><td class="impact">Writes fail, cache misses fail</td><td class="detect">Write error spike + replication lag</td><td class="fix">Promote a read replica automatically</td></tr>
+          <tr><td>CDN misconfigured</td><td class="impact">All traffic hits origin, 10x spike</td><td class="detect">Origin request rate anomaly</td><td class="fix">Rate limit at gateway, auto-scale redirect pods</td></tr>
+          <tr><td>Malicious/phishing URL submitted</td><td class="impact">Users redirected to unsafe sites</td><td class="detect">Safe Browsing API flag on shorten</td><td class="fix">Block at write time, allow reports, auto-disable flagged codes</td></tr>
+        </tbody>
+      </table>
+    </section>
+
+    <section id="interview-moves">
+      <h2>Interview moves</h2>
+      <ul class="moves-list">
+        <li><span class="move-num">01</span><div><strong>"Before I design anything, let me clarify the read/write ratio — this is 100:1 read-heavy which changes the entire caching strategy"</strong> — anchors every downstream decision to a stated number</div></li>
+        <li><span class="move-num">02</span><div><strong>"The interesting problem here is ID generation, not the redirect — the redirect is a one-line cache lookup"</strong> — shows you know where the complexity actually lives</div></li>
+        <li><span class="move-num">03</span><div><strong>"I'd put a CDN in front of the redirect service, not just Redis behind it — that's a second, cheaper layer of caching"</strong> — most candidates stop at one cache tier</div></li>
+        <li><span class="move-num">04</span><div><strong>"Custom aliases go in a separate table so they can never collide with a generated short_code"</strong> — a subtlety that separates senior from mid-level answers</div></li>
+        <li><span class="move-num">05</span><div><strong>"At this write volume, a Postgres sequence is genuinely fine — I'd only reach for Snowflake once a single sequence becomes a bottleneck"</strong> — resists over-engineering for the stated scale</div></li>
+        <li><span class="move-num">06</span><div><strong>"What happens to a short code after it expires — do we hard-delete immediately or soft-delete and sweep in a background job?"</strong> — raises a lifecycle question interviewers often plant deliberately</div></li>
+      </ul>
+    </section>
+
+    <section id="follow-ups">
+      <h2>Follow-up questions</h2>
+      <div class="qa-block">
+        <div class="qa-q">How would you prevent short code enumeration attacks?</div>
+        <div class="qa-a">Rate limit per IP/user at the gateway. 62^7 ≈ 3.5 trillion combinations already makes brute-force scanning impractical without added protection.</div>
+      </div>
+      <div class="qa-block">
+        <div class="qa-q">What if the same long URL is submitted twice?</div>
+        <div class="qa-a">Default: generate a new code each time. Dedup by hashing long_url adds a read on every write to save storage — a real tradeoff, not a free win.</div>
+      </div>
+      <div class="qa-block">
+        <div class="qa-q">How do you handle 10x the current scale?</div>
+        <div class="qa-a">Shard Postgres by short_code prefix, switch ID generation to Snowflake, extend the code to 8 characters, make CDN mandatory rather than optional.</div>
+      </div>
+      <div class="qa-block">
+        <div class="qa-q">301 or 302 redirect?</div>
+        <div class="qa-a">302 by default — keeps every click hitting the server. 301 lets browsers cache it, which is faster but kills click visibility after the first visit. See the Bitly page for the full tradeoff.</div>
+      </div>
+      <div class="qa-block">
+        <div class="qa-q">How would you implement expiration efficiently?</div>
+        <div class="qa-a">Store expires_at in both Postgres and as a Redis TTL. The TTL handles the hot-path check for free; a daily background job hard-deletes expired rows in batches.</div>
+      </div>
+      <div class="qa-block">
+        <div class="qa-q">How do you keep the CDN and Redis cache consistent after a delete?</div>
+        <div class="qa-a">Short TTL (~60s) on both as a safety net, plus an explicit purge/DEL call fired synchronously on delete rather than relying on TTL expiry alone.</div>
+      </div>
+    </section>
+
+  </main>
+  <script src="../../assets/nav.js"></script>
+</body>
+</html>

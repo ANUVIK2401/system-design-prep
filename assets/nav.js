@@ -31,7 +31,7 @@
     { slug: 'time-series-databases',     name: 'Time-Series Databases',    cat: 'Advanced Topics', dir: 'advanced/' },
 
     { slug: 'question-breakdowns',name: 'Question Breakdowns', cat: 'Questions', dir: '' },
-    { slug: 'url-shortener',      name: 'URL Shortener',       cat: 'Questions', dir: '' },
+    { slug: 'url-shortener',      name: 'URL Shortener',       cat: 'Questions', dir: 'questions/' },
     { slug: 'bitly',              name: 'Design Bitly',        cat: 'Questions', dir: 'questions/' },
     { slug: 'dropbox',            name: 'Design Dropbox',      cat: 'Questions', dir: 'questions/' },
     { slug: 'local-delivery',     name: 'Local Delivery',      cat: 'Questions', dir: 'questions/' },

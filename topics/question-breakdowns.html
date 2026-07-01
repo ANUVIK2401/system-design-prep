@@ -33,18 +33,28 @@
     <section id="tier1">
       <h2>Tier 1 — Always asked</h2>
       <div class="topic-grid">
-        <a class="topic-card" href="url-shortener.html" style="--card-i:0">
+        <a class="topic-card" href="questions/url-shortener.html" style="--card-i:0">
           <div class="card-num">01</div>
           <div class="card-cat">Classic</div>
           <h3>URL Shortener</h3>
-          <p>Hash generation, redirect service, cache layer, analytics decoupling</p>
+          <p>ID generation as the core problem, cache-first redirect, CDN in front</p>
           <div class="card-meta">
             <span class="badge green">30-40 min</span>
             <span class="badge blue">Easy</span>
           </div>
         </a>
-        <div class="topic-card" style="border-style:dashed; cursor:default; opacity:0.5; --card-i:1">
+        <a class="topic-card" href="questions/bitly.html" style="--card-i:1">
           <div class="card-num">02</div>
+          <div class="card-cat">Classic</div>
+          <h3>Design Bitly</h3>
+          <p>Snowflake IDs, async click analytics, 301 vs 302 as a business decision</p>
+          <div class="card-meta">
+            <span class="badge green">35-45 min</span>
+            <span class="badge blue">Medium</span>
+          </div>
+        </a>
+        <div class="topic-card" style="border-style:dashed; cursor:default; opacity:0.5; --card-i:2">
+          <div class="card-num">03</div>
           <div class="card-cat">Coming soon</div>
           <h3>Rate Limiter</h3>
           <p>Token bucket, sliding window, distributed rate limiting with Redis</p>
@@ -53,24 +63,14 @@
             <span class="badge blue">Medium</span>
           </div>
         </div>
-        <div class="topic-card" style="border-style:dashed; cursor:default; opacity:0.5; --card-i:2">
-          <div class="card-num">03</div>
+        <div class="topic-card" style="border-style:dashed; cursor:default; opacity:0.5; --card-i:3">
+          <div class="card-num">04</div>
           <div class="card-cat">Coming soon</div>
           <h3>Notification System</h3>
           <p>Multi-channel delivery, fan-out, retries, user preference service</p>
           <div class="card-meta">
             <span class="badge green">35-45 min</span>
             <span class="badge blue">Medium</span>
-          </div>
-        </div>
-        <div class="topic-card" style="border-style:dashed; cursor:default; opacity:0.5; --card-i:3">
-          <div class="card-num">04</div>
-          <div class="card-cat">Coming soon</div>
-          <h3>Distributed Cache</h3>
-          <p>Cache topology, eviction, consistency, consistent hashing</p>
-          <div class="card-meta">
-            <span class="badge green">40-50 min</span>
-            <span class="badge amber">Medium</span>
           </div>
         </div>
         <div class="topic-card" style="border-style:dashed; cursor:default; opacity:0.5; --card-i:4">
@@ -89,8 +89,28 @@
     <section id="tier2">
       <h2>Tier 2 — Frequently asked</h2>
       <div class="topic-grid">
-        <div class="topic-card" style="border-style:dashed; cursor:default; opacity:0.5; --card-i:0">
+        <a class="topic-card" href="questions/dropbox.html" style="--card-i:0">
           <div class="card-num">01</div>
+          <div class="card-cat">Classic</div>
+          <h3>Design Dropbox</h3>
+          <p>Chunked upload, content-hash dedup, delta sync, conflict resolution</p>
+          <div class="card-meta">
+            <span class="badge green">40-50 min</span>
+            <span class="badge amber">Hard</span>
+          </div>
+        </a>
+        <a class="topic-card" href="questions/local-delivery.html" style="--card-i:1">
+          <div class="card-num">02</div>
+          <div class="card-cat">Classic</div>
+          <h3>Local Delivery Service</h3>
+          <p>Geohash driver matching, order state machine, hot-partition handling</p>
+          <div class="card-meta">
+            <span class="badge green">40-50 min</span>
+            <span class="badge amber">Hard</span>
+          </div>
+        </a>
+        <div class="topic-card" style="border-style:dashed; cursor:default; opacity:0.5; --card-i:2">
+          <div class="card-num">03</div>
           <div class="card-cat">Coming soon</div>
           <h3>News Feed</h3>
           <p>Fan-out on write vs read, hybrid approach, feed ranking</p>
@@ -99,8 +119,8 @@
             <span class="badge amber">Hard</span>
           </div>
         </div>
-        <div class="topic-card" style="border-style:dashed; cursor:default; opacity:0.5; --card-i:1">
-          <div class="card-num">02</div>
+        <div class="topic-card" style="border-style:dashed; cursor:default; opacity:0.5; --card-i:3">
+          <div class="card-num">04</div>
           <div class="card-cat">Coming soon</div>
           <h3>Search Autocomplete</h3>
           <p>Trie, prefix tree, top-K suggestions, real-time updates</p>
@@ -109,21 +129,11 @@
             <span class="badge blue">Medium</span>
           </div>
         </div>
-        <div class="topic-card" style="border-style:dashed; cursor:default; opacity:0.5; --card-i:2">
-          <div class="card-num">03</div>
+        <div class="topic-card" style="border-style:dashed; cursor:default; opacity:0.5; --card-i:4">
+          <div class="card-num">05</div>
           <div class="card-cat">Coming soon</div>
           <h3>Payment System</h3>
           <p>Idempotency, distributed transactions, ledger, fraud detection</p>
-          <div class="card-meta">
-            <span class="badge green">45-55 min</span>
-            <span class="badge amber">Hard</span>
-          </div>
-        </div>
-        <div class="topic-card" style="border-style:dashed; cursor:default; opacity:0.5; --card-i:3">
-          <div class="card-num">04</div>
-          <div class="card-cat">Coming soon</div>
-          <h3>Ride-sharing (Uber)</h3>
-          <p>Geospatial indexing, real-time matching, surge pricing</p>
           <div class="card-meta">
             <span class="badge green">45-55 min</span>
             <span class="badge amber">Hard</span>
