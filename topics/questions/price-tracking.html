@@ -1,0 +1,466 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Design a Price Tracking Service — SD Prep</title>
+  <link rel="stylesheet" href="../../assets/style.css">
+</head>
+<body>
+  <aside id="sidebar"></aside>
+  <main>
+
+    <header class="page-head">
+      <div class="pill">Questions</div>
+      <h1>Design a Price Tracking Service</h1>
+      <p class="sub">Tests whether you can keep a scraper fleet alive against sites actively trying to block it, not whether you can store a time series.</p>
+      <div class="meta-row">
+        <span class="badge green">30-40 min interview</span>
+        <span class="badge blue">Medium</span>
+      </div>
+    </header>
+
+    <div class="flash-card">
+      <div class="flash-label">Say this in the first 2 minutes</div>
+      <ul>
+        <li>The core insight: getting blocked by target sites is the primary operational risk, not storage or alert delivery — anti-detection is a first-class design concern</li>
+        <li>Key scale number to anchor on: 50M tracked products polled on independent per-domain schedules means the scheduler itself is a hard distributed-systems problem</li>
+        <li>Primary tradeoff being probed: crawl frequency vs politeness — hitting a domain too often gets the whole fleet IP-banned, not just one request</li>
+        <li>Component most candidates forget: a per-domain rate limiter that throttles the scraper fleet itself, independent of the site's own limits</li>
+        <li>Failure mode most candidates skip: a site changes its HTML structure — the scraper must fail loudly (alert a human) rather than silently store garbage prices</li>
+      </ul>
+    </div>
+
+    <section id="step1-requirements">
+      <div class="step-pill">Step 1 of 6 — Requirements</div>
+      <h2>Requirements</h2>
+
+      <div class="goal-arc-wrap">
+        <div class="goal-arc-row functional">
+          <div class="goal-arc-seg">1</div><div class="goal-arc-seg">2</div><div class="goal-arc-seg">3</div><div class="goal-arc-seg">4</div><div class="goal-arc-seg">5</div><div class="goal-arc-seg inactive">6</div>
+        </div>
+        <div class="goal-arc-label"><span>Arc 1 (steps 1-5) — <strong>Satisfy Functional Requirements</strong></span></div>
+        <div class="goal-arc-row nonfunctional" style="margin-top:8px">
+          <div class="goal-arc-seg">1</div><div class="goal-arc-seg">2</div><div class="goal-arc-seg">3</div><div class="goal-arc-seg">4</div><div class="goal-arc-seg">5</div><div class="goal-arc-seg">6</div>
+        </div>
+        <div class="goal-arc-label"><span>Arc 2 (all 6 steps) — <strong>Satisfy Non-Functional Requirements</strong></span></div>
+      </div>
+
+      <div class="compare-grid">
+        <div class="compare-card good">
+          <div class="compare-label">Functional</div>
+          <ul>
+            <li>Track a product URL and poll its price on a schedule</li>
+            <li>Store historical price points per product</li>
+            <li>Alert a user when price drops below a threshold or by a percentage</li>
+            <li>Show a price history chart to the user</li>
+          </ul>
+        </div>
+        <div class="compare-card bad">
+          <div class="compare-label">Non-Functional</div>
+          <ul>
+            <li>50M tracked (user, product) pairs across ~200k distinct product URLs</li>
+            <li>Alert delivery within 5 minutes of a detected price change</li>
+            <li>Scraper fleet must not get IP-banned by target retailers</li>
+            <li>Tolerate individual site layout changes without cascading failures</li>
+          </ul>
+        </div>
+      </div>
+
+      <div class="callout warn"><strong>What NOT to build:</strong> a general-purpose web crawler/search index, browser extension price-comparison shopping, or checkout/purchase automation. This is scheduled polling, price extraction, and threshold alerting only.</div>
+
+      <div class="stat-grid">
+        <div class="stat-card"><div class="stat-val">200k</div><div class="stat-label">distinct product URLs tracked</div></div>
+        <div class="stat-card"><div class="stat-val">~450/s</div><div class="stat-label">scrape jobs dispatched (avg)</div></div>
+        <div class="stat-card"><div class="stat-val">1-4x/day</div><div class="stat-label">poll frequency per product</div></div>
+        <div class="stat-card"><div class="stat-val">&lt;5 min</div><div class="stat-label">alert delivery SLA</div></div>
+      </div>
+    </section>
+
+    <section id="step2-entities">
+      <div class="step-pill">Step 2 of 6 — Core Entities</div>
+      <h2>Core entities</h2>
+      <p style="font-size:13px;color:#999;margin-bottom:0.75rem">Four entities split by access pattern: config lookups, append-only history, and a separate table for the anti-bot layer's per-domain state.</p>
+
+      <div class="entity-grid">
+        <div class="entity-box">
+          <div class="entity-head"><span class="entity-name">TrackedProduct</span><span class="entity-store pg">Postgres</span></div>
+          <div class="entity-fields">
+            <div class="entity-field"><span class="fname pk">id</span><span class="ftype">BIGINT</span></div>
+            <div class="entity-field"><span class="fname idx">url</span><span class="ftype">TEXT UNIQUE</span></div>
+            <div class="entity-field"><span class="fname">domain</span><span class="ftype">VARCHAR(255)</span></div>
+            <div class="entity-field"><span class="fname">poll_interval_min</span><span class="ftype">INT</span></div>
+            <div class="entity-field"><span class="fname">selector_config</span><span class="ftype">JSONB</span></div>
+          </div>
+          <div class="entity-why">Because scheduling and CSS-selector config are read far more often than written — a relational store with an indexed domain column fits the scheduler's query pattern. Tradeoff: schema migration needed whenever a new retailer's extraction logic differs enough to need new fields.</div>
+        </div>
+
+        <div class="entity-box">
+          <div class="entity-head"><span class="entity-name">PricePoint</span><span class="entity-store cass">TimescaleDB</span></div>
+          <div class="entity-fields">
+            <div class="entity-field"><span class="fname idx">product_id</span><span class="ftype">BIGINT → TrackedProduct.id</span></div>
+            <div class="entity-field"><span class="fname">ts</span><span class="ftype">TIMESTAMPTZ</span></div>
+            <div class="entity-field"><span class="fname">price_cents</span><span class="ftype">INT</span></div>
+            <div class="entity-field"><span class="fname">in_stock</span><span class="ftype">BOOLEAN</span></div>
+          </div>
+          <div class="entity-why">Because this is a pure append-only time series queried by product_id + time range for charting — a time-series-optimized store gives compression and range-query speed a general RDBMS table would need manual partitioning to match. Tradeoff: an extra system to operate versus reusing Postgres.</div>
+        </div>
+
+        <div class="entity-box">
+          <div class="entity-head"><span class="entity-name">PriceAlert</span><span class="entity-store pg">Postgres</span></div>
+          <div class="entity-fields">
+            <div class="entity-field"><span class="fname pk">id</span><span class="ftype">BIGINT</span></div>
+            <div class="entity-field"><span class="fname idx">user_id</span><span class="ftype">BIGINT</span></div>
+            <div class="entity-field"><span class="fname idx">product_id</span><span class="ftype">BIGINT → TrackedProduct.id</span></div>
+            <div class="entity-field"><span class="fname">threshold_type</span><span class="ftype">ENUM(absolute, pct_drop)</span></div>
+            <div class="entity-field"><span class="fname">threshold_value</span><span class="ftype">INT</span></div>
+          </div>
+          <div class="entity-why">Because alert rules are low-volume structured config evaluated on every new price point — needs transactional guarantees so a user is never double-notified for the same drop. Tradeoff: a hot product with 10k alert subscribers means the evaluation fan-out happens here, not in the scraper.</div>
+        </div>
+
+        <div class="entity-box">
+          <div class="entity-head"><span class="entity-name">DomainThrottleState</span><span class="entity-store cache">Redis</span></div>
+          <div class="entity-fields">
+            <div class="entity-field"><span class="fname pk">domain</span><span class="ftype">VARCHAR(255)</span></div>
+            <div class="entity-field"><span class="fname">requests_this_window</span><span class="ftype">INT</span></div>
+            <div class="entity-field"><span class="fname">backoff_until</span><span class="ftype">TIMESTAMP, nullable</span></div>
+          </div>
+          <div class="entity-why">Because the anti-bot layer needs a shared, low-latency counter that every scraper worker checks before every request — in-memory with TTL is the only store fast enough not to become the bottleneck at 450 req/s. Tradeoff: state resets on a Redis restart, briefly relaxing throttling.</div>
+        </div>
+      </div>
+
+      <div class="callout info">Primary key: <code>TrackedProduct.id</code>. Critical index: <code>UNIQUE INDEX on url</code> — prevents tracking the same product URL twice under different rows, and <code>INDEX on (product_id, ts)</code> on PricePoint for fast chart range queries.</div>
+    </section>
+
+    <section id="step3-api">
+      <div class="step-pill">Step 3 of 6 — API / Interface</div>
+      <h2>API design</h2>
+      <p style="font-size:13px;color:#999;margin-bottom:0.75rem">Four endpoints — track a product, fetch price history, create an alert rule, and list a user's tracked products. No endpoint exposes scraping internals.</p>
+
+      <div class="api-card">
+        <div class="api-line"><span class="api-method post">POST</span><span class="api-path">/api/v1/products/track</span><span class="api-auth">Auth: required</span></div>
+        <div class="api-io">
+          <div class="api-io-block"><div class="api-io-label">Request</div><div class="api-io-body">{ url }</div></div>
+          <div class="api-io-block"><div class="api-io-label">Response</div><div class="api-io-body">{ product_id, domain, first_price_cents, poll_interval_min }</div></div>
+        </div>
+      </div>
+
+      <div class="api-card">
+        <div class="api-line"><span class="api-method get">GET</span><span class="api-path">/api/v1/products/{id}/history</span><span class="api-auth">Auth: required</span></div>
+        <div class="api-io">
+          <div class="api-io-block"><div class="api-io-label">Request</div><div class="api-io-body">?from=&to= (ISO timestamps)</div></div>
+          <div class="api-io-block"><div class="api-io-label">Response</div><div class="api-io-body">{ points: [{ ts, price_cents, in_stock }] }</div></div>
+        </div>
+      </div>
+
+      <div class="api-card">
+        <div class="api-line"><span class="api-method post">POST</span><span class="api-path">/api/v1/alerts</span><span class="api-auth">Auth: required</span></div>
+        <div class="api-io">
+          <div class="api-io-block"><div class="api-io-label">Request</div><div class="api-io-body">{ product_id, threshold_type, threshold_value }</div></div>
+          <div class="api-io-block"><div class="api-io-label">Response</div><div class="api-io-body">{ alert_id, created_at }</div></div>
+        </div>
+      </div>
+
+      <div class="api-card">
+        <div class="api-line"><span class="api-method delete">DELETE</span><span class="api-path">/api/v1/products/{id}/track</span><span class="api-auth">Auth: required (owner)</span></div>
+        <div class="api-io">
+          <div class="api-io-block"><div class="api-io-label">Request</div><div class="api-io-body">path param only</div></div>
+          <div class="api-io-block"><div class="api-io-label">Response</div><div class="api-io-body">HTTP 204 — stops polling if no other user tracks this product</div></div>
+        </div>
+      </div>
+    </section>
+
+    <section id="step4-dataflow">
+      <div class="step-pill">Step 4 of 6 — Data Flow</div>
+      <h2>Data flow</h2>
+      <p style="font-size:13px;color:#999;margin-bottom:0.75rem">Scrape path (amber, async/scheduled) and user read path (mint) never touch the same hot component — a slow scrape never blocks a chart load.</p>
+
+      <div class="diagram-wrap" data-paths='{"scrape":{"boxes":["s-sched","s-queue","s-worker","s-target","s-store"],"arrows":["s1","s2","s3","s4"]},"read":{"boxes":["r-client","r-api","r-ts"],"arrows":["r1","r2"]}}'>
+        <svg viewBox="0 0 740 220" xmlns="http://www.w3.org/2000/svg">
+          <defs>
+            <marker id="ptS" markerWidth="8" markerHeight="8" refX="6" refY="3" orient="auto"><path d="M0,0 L6,3 L0,6 Z" fill="var(--amber)"/></marker>
+            <marker id="ptR" markerWidth="8" markerHeight="8" refX="6" refY="3" orient="auto"><path d="M0,0 L6,3 L0,6 Z" fill="var(--accent)"/></marker>
+          </defs>
+
+          <text class="diag-sublabel" x="150" y="14" style="font-size:10px;fill:var(--amber)">SCRAPE PATH — scheduled, async, ~450 jobs/s</text>
+          <circle class="diag-dot diag-flow-dot" r="3.5" style="offset-path: path('M10,24 L120,24 L120,24 L250,24 L250,24 L380,24 L380,24 L510,24')"></circle>
+          <g data-target="step6-deepdive-antibot" data-id="s-sched" data-tip="Computes due jobs from poll_interval_min per product"><rect class="diag-box role-async" x="10" y="24" width="110" height="46"/><text class="diag-label" x="65" y="47" style="font-size:11px">Scheduler</text><text class="diag-sublabel" x="65" y="61" style="font-size:8.5px">cron-driven</text></g>
+          <path class="diag-arrow-path" data-id="s1" d="M120,47 L155,47" marker-end="url(#ptS)"/>
+          <g data-target="step6-deepdive-antibot" data-id="s-queue" data-tip="Per-domain queues so one slow retailer can't starve others"><rect class="diag-box role-async" x="155" y="24" width="100" height="46"/><text class="diag-label" x="205" y="47" style="font-size:11px">Job Queue</text></g>
+          <path class="diag-arrow-path" data-id="s2" d="M255,47 L290,47" marker-end="url(#ptS)"/>
+          <g data-target="step6-deepdive-antibot" data-id="s-worker" data-tip="Checks Redis throttle state before every request"><rect class="diag-box" x="290" y="24" width="120" height="46"/><text class="diag-label" x="350" y="47" style="font-size:11px">Scraper Worker</text></g>
+          <path class="diag-arrow-path" data-id="s3" d="M410,47 L445,47" marker-end="url(#ptS)"/>
+          <g data-target="step6-deepdive-antibot" data-id="s-target" data-tip="External retailer site — the thing actively resisting us"><rect class="diag-box role-client" x="445" y="24" width="110" height="46"/><text class="diag-label" x="500" y="47" style="font-size:11px">Target Site</text></g>
+          <path class="diag-arrow-path" data-id="s4" d="M400,60 L400,90 L290,90" marker-end="url(#ptS)" stroke-dasharray="3 3"/>
+          <g data-target="step6-deepdive-alerts" data-id="s-store" data-tip="Writes the extracted price point, evaluates alert rules"><rect class="diag-box role-db" x="180" y="90" width="120" height="46"/><text class="diag-label" x="240" y="118" style="font-size:11px">TimescaleDB</text></g>
+
+          <text class="diag-sublabel" x="150" y="150" style="font-size:10px;fill:var(--accent)">READ PATH — user views chart</text>
+          <g data-target="step2-entities" data-id="r-client" data-tip="User opens a product's price history view"><rect class="diag-box role-client" x="10" y="160" width="100" height="46"/><text class="diag-label" x="60" y="188" style="font-size:11px">Client</text></g>
+          <path class="diag-arrow-path" data-id="r1" d="M110,183 L145,183" marker-end="url(#ptR)"/>
+          <g data-target="step2-entities" data-id="r-api" data-tip="Stateless read API, never touches the scrape queue"><rect class="diag-box" x="145" y="160" width="100" height="46"/><text class="diag-label" x="195" y="188" style="font-size:11px">Read API</text></g>
+          <path class="diag-arrow-path" data-id="r2" d="M245,183 L280,183" marker-end="url(#ptR)"/>
+          <g data-target="step2-entities" data-id="r-ts" data-tip="Range query over price_point by product_id + ts"><rect class="diag-box role-db" x="280" y="160" width="120" height="46"/><text class="diag-label" x="340" y="188" style="font-size:11px">TimescaleDB</text></g>
+        </svg>
+        <div class="diag-legend">
+          <div class="diag-legend-item"><span class="diag-legend-dot role-async"></span>Scrape path — scheduled, per-domain throttled</div>
+          <div class="diag-legend-item"><span class="diag-legend-dot role-client"></span>Read path — direct query, fully decoupled from scraping</div>
+        </div>
+      </div>
+
+      <ol class="flow-steps-list">
+        <li><span>Scheduler computes due jobs</span> — every product whose poll_interval_min has elapsed since its last scrape</li>
+        <li><span>Jobs land in per-domain queues</span> — isolates a slow or blocking retailer from delaying every other domain</li>
+        <li><span>Worker checks Redis throttle state</span> — skips or delays the request if the domain is in backoff</li>
+        <li><span>Worker fetches and extracts price</span> — via the domain's configured CSS/JSON selector</li>
+        <li><span>Price point written, alerts evaluated</span> — a write to TimescaleDB triggers a synchronous check against PriceAlert rules for that product</li>
+      </ol>
+    </section>
+
+    <section id="step5-hld">
+      <div class="step-pill">Step 5 of 6 — High-Level Design</div>
+      <h2>High-level design</h2>
+      <p style="font-size:13px;color:#999;margin-bottom:0.75rem">Full system: scrape pipeline, anti-bot layer, alert evaluation, and the read path together.</p>
+
+      <div class="diagram-wrap">
+        <svg viewBox="0 0 780 300" xmlns="http://www.w3.org/2000/svg">
+          <defs><marker id="ptHldArrow" markerWidth="8" markerHeight="8" refX="6" refY="3" orient="auto"><path d="M0,0 L6,3 L0,6 Z" fill="var(--border2)"/></marker></defs>
+
+          <g data-tip="Fires due jobs on each product's own interval"><rect class="diag-box role-async" x="10" y="20" width="120" height="46"/><text class="diag-label" x="70" y="43" style="font-size:11px">Scheduler</text><text class="diag-sublabel" x="70" y="58" style="font-size:8.5px">cron-driven</text></g>
+          <path class="diag-arrow-path" d="M130,43 L165,43" marker-end="url(#ptHldArrow)"/>
+          <g data-tip="One queue per domain, isolates slow retailers"><rect class="diag-box role-async" x="165" y="20" width="120" height="46"/><text class="diag-label" x="225" y="48" style="font-size:11px">Per-Domain Queues</text></g>
+          <path class="diag-arrow-path" d="M285,43 L320,43" marker-end="url(#ptHldArrow)"/>
+          <g data-tip="Pool of stateless workers, horizontally scaled"><rect class="diag-box" x="320" y="20" width="130" height="46"/><text class="diag-label" x="385" y="43" style="font-size:11px">Scraper Workers</text><text class="diag-sublabel" x="385" y="58" style="font-size:8.5px">pool, stateless</text></g>
+
+          <path class="diag-arrow-path" d="M385,66 L385,100" marker-end="url(#ptHldArrow)" stroke-dasharray="3 3"/>
+          <g data-tip="Shared throttle state, checked before every request"><rect class="diag-box role-cache" x="320" y="100" width="130" height="46"/><text class="diag-label" x="385" y="128" style="font-size:11px">Redis Throttle</text></g>
+          <path class="diag-arrow-path" d="M450,43 L560,43" marker-end="url(#ptHldArrow)"/>
+          <g data-tip="External sites, each with its own defenses"><rect class="diag-box role-client" x="560" y="20" width="120" height="46"/><text class="diag-label" x="620" y="43" style="font-size:11px">Target Sites</text><text class="diag-sublabel" x="620" y="58" style="font-size:8.5px">200k+ domains</text></g>
+
+          <path class="diag-arrow-path" d="M320,150 L285,150 L285,180" marker-end="url(#ptHldArrow)"/>
+          <g data-tip="Append-only price history, range-query optimized"><rect class="diag-box role-db" x="220" y="180" width="130" height="46"/><text class="diag-label" x="285" y="208" style="font-size:11px">TimescaleDB</text></g>
+          <path class="diag-arrow-path" d="M350,203 L385,203" marker-end="url(#ptHldArrow)"/>
+          <g data-tip="Every new price point checked against active rules"><rect class="diag-box role-async" x="385" y="180" width="130" height="46"/><text class="diag-label" x="450" y="203" style="font-size:11px">Alert Engine</text></g>
+          <path class="diag-arrow-path" d="M515,203 L550,203" marker-end="url(#ptHldArrow)"/>
+          <g data-tip="Email/push, decoupled via its own queue"><rect class="diag-box role-async" x="550" y="180" width="130" height="46"/><text class="diag-label" x="615" y="203" style="font-size:11px">Notification Svc</text></g>
+
+          <g data-tip="Views tracked products and price charts"><rect class="diag-box role-client" x="10" y="240" width="110" height="46"/><text class="diag-label" x="65" y="268" style="font-size:11px">Client</text></g>
+          <path class="diag-arrow-path" d="M120,263 L155,263" marker-end="url(#ptHldArrow)"/>
+          <g data-tip="Stateless, reads Postgres config + TimescaleDB history"><rect class="diag-box" x="155" y="240" width="110" height="46"/><text class="diag-label" x="210" y="268" style="font-size:11px">Read API</text></g>
+          <path class="diag-arrow-path" d="M265,255 L285,230 L285,226" marker-end="url(#ptHldArrow)" stroke-dasharray="3 3"/>
+        </svg>
+        <div class="diag-legend">
+          <div class="diag-legend-item"><span class="diag-legend-dot role-async"></span>Scheduler + queues + workers — the scrape pipeline</div>
+          <div class="diag-legend-item"><span class="diag-legend-dot role-cache"></span>Redis — shared per-domain throttle state</div>
+          <div class="diag-legend-item"><span class="diag-legend-dot role-db"></span>TimescaleDB — append-only price history</div>
+          <div class="diag-legend-item"><span class="diag-legend-dot role-client"></span>Target sites + end-user client</div>
+        </div>
+      </div>
+
+      <table class="def-table">
+        <thead><tr><th>Component</th><th>Role</th><th>Tech + why</th></tr></thead>
+        <tbody>
+          <tr><td>Scheduler</td><td>Determines which products are due for a scrape</td><td>Cron-driven job producer — because polling interval per product varies and needs to be computed cheaply at scale; tradeoff is a single logical scheduler needs its own HA setup.</td></tr>
+          <tr><td>Per-Domain Queues</td><td>Isolates scrape jobs by target domain</td><td>Kafka topics keyed by domain — because one retailer's slowdown or ban must never delay jobs for every other retailer; tradeoff is far more partitions/topics to operate than one shared queue.</td></tr>
+          <tr><td>Redis Throttle</td><td>Shared per-domain rate limit state</td><td>In-memory counters with TTL — because every worker in the fleet must see the same up-to-date backoff state with sub-ms latency; tradeoff is throttling briefly relaxes on a Redis restart.</td></tr>
+          <tr><td>Alert Engine</td><td>Evaluates price drops against user rules</td><td>Synchronous check on write — because a 5-minute alert SLA doesn't tolerate a batch job; tradeoff is added latency on the scrape write path, kept small by indexing rules on product_id.</td></tr>
+        </tbody>
+      </table>
+
+      <h3 style="font-size:13px;color:var(--text);margin:1.25rem 0 0.6rem;font-weight:600">Scaling levers — cheapest to most complex</h3>
+      <ol class="levers-list">
+        <li><strong>Add more scraper worker instances</strong><span class="cost">near-zero complexity</span></li>
+        <li><strong>Widen poll intervals for low-value/rarely-checked products</strong><span class="cost">low complexity, high cost payoff</span></li>
+        <li><strong>Rotate proxy pools and user agents per domain</strong><span class="cost">medium complexity</span></li>
+        <li><strong>Shard TimescaleDB by product_id range</strong> as history grows<span class="cost">medium complexity</span></li>
+        <li><strong>Headless-browser rendering tier for JS-heavy sites</strong><span class="cost">high complexity — last resort, only for sites that require it</span></li>
+      </ol>
+
+      <table class="grid-table">
+        <thead><tr><th>Bottleneck</th><th>Triggers at</th><th>Exact fix</th></tr></thead>
+        <tbody>
+          <tr><td>Single domain gets IP-banned</td><td>Backoff triggers, 429/403 rate climbs</td><td class="fix">Rotate proxy pool for that domain; widen its poll interval automatically</td></tr>
+          <tr><td>Alert engine lag</td><td>Price-write-to-alert-check latency &gt;5 min</td><td class="fix">Partition alert evaluation by product_id hash across more consumers</td></tr>
+          <tr><td>Selector drift (site redesign)</td><td>Extraction returns null/garbage for a domain</td><td class="fix">Circuit-break that domain's scraper, page an on-call human, don't write bad prices</td></tr>
+        </tbody>
+      </table>
+
+      <div class="dial-wrap">
+        <div class="dial-title">Crawl frequency vs politeness</div>
+        <div class="dial-track"><div class="dial-marker" style="left:35%"></div></div>
+        <div class="dial-labels"><span class="end-left">Aggressive polling</span><span class="end-right">Conservative, ban-averse</span></div>
+      </div>
+      <div class="dial-wrap">
+        <div class="dial-title">Price data freshness</div>
+        <div class="dial-track"><div class="dial-marker" style="left:70%"></div></div>
+        <div class="dial-labels"><span class="end-left">Real-time</span><span class="end-right">Eventual (hours)</span></div>
+      </div>
+    </section>
+
+    <section id="step6-deepdive-antibot">
+      <div class="step-pill">Step 6 of 6 — Deep Dives</div>
+      <h2>Deep dive: scraper anti-detection techniques</h2>
+      <p style="font-size:13px;color:#999;margin-bottom:0.75rem">Every layer exists to make the scraper fleet look like normal, distributed human traffic rather than a single bot hammering a site.</p>
+      <div class="flow-cmp-grid">
+        <div class="flow-cmp-col hit">
+          <div class="flow-cmp-title">✓ Well-behaved fleet — sustained access</div>
+          <svg viewBox="0 0 320 130" xmlns="http://www.w3.org/2000/svg">
+            <defs><marker id="ptGoodArrow" markerWidth="8" markerHeight="8" refX="6" refY="3" orient="auto"><path d="M0,0 L6,3 L0,6 Z" fill="var(--accent)"/></marker></defs>
+            <path class="pt-good-arrow-1" d="M95,40 L195,40" stroke="var(--accent)" stroke-width="2" marker-end="url(#ptGoodArrow)" fill="none"/>
+            <path class="pt-good-arrow-2" d="M195,60 L95,60" stroke="var(--accent)" stroke-width="2" marker-end="url(#ptGoodArrow)" fill="none"/>
+            <circle class="diag-dot diag-flow-dot" r="3" style="offset-path: path('M95,40 L195,40')"></circle>
+            <rect class="diag-box role-client" x="10" y="20" width="85" height="50" data-tip="Rotates proxy IP + user agent per request"></rect>
+            <text class="diag-label" x="52" y="40">Worker</text>
+            <text class="diag-sublabel" x="52" y="55">rotate + jitter</text>
+            <g data-tip="Sees varied, human-like request patterns">
+              <rect class="diag-box role-cache" x="195" y="15" width="115" height="60" rx="6"></rect>
+              <text class="diag-label" x="252" y="38" style="font-weight:600">Target Site</text>
+              <text class="diag-sublabel" x="252" y="53">looks organic</text>
+              <text class="diag-sublabel" x="252" y="65" style="fill:var(--accent)">200 OK</text>
+            </g>
+            <text x="145" y="100" text-anchor="middle" font-size="10" fill="var(--accent)" font-family="Inter,sans-serif">randomized headers, delays, IPs → sustained access</text>
+          </svg>
+          <button class="flow-cmp-replay" data-replay="pt-good-arrow-1,pt-good-arrow-2">▸ Replay</button>
+        </div>
+        <div class="flow-cmp-col miss">
+          <div class="flow-cmp-title">✗ Naive fleet — banned within minutes</div>
+          <svg viewBox="0 0 420 130" xmlns="http://www.w3.org/2000/svg">
+            <defs><marker id="ptBadArrow" markerWidth="8" markerHeight="8" refX="6" refY="3" orient="auto"><path d="M0,0 L6,3 L0,6 Z" fill="var(--red)"/></marker></defs>
+            <path class="pt-bad-arrow-1" d="M95,40 L195,40" stroke="var(--red)" stroke-width="2" marker-end="url(#ptBadArrow)" fill="none"/>
+            <path class="pt-bad-arrow-2" d="M310,40 L405,40" stroke="var(--red)" stroke-width="2" marker-end="url(#ptBadArrow)" stroke-dasharray="4 3" fill="none"/>
+            <path class="pt-bad-arrow-3" d="M405,60 L310,60" stroke="var(--red)" stroke-width="2" marker-end="url(#ptBadArrow)" stroke-dasharray="4 3" fill="none"/>
+            <path class="pt-bad-arrow-4" d="M195,75 L95,75" stroke="var(--red)" stroke-width="2" marker-end="url(#ptBadArrow)" fill="none"/>
+            <circle class="diag-dot diag-flow-dot" r="3" style="offset-path: path('M95,40 L195,40')"></circle>
+            <rect class="diag-box role-client" x="10" y="20" width="85" height="55" data-tip="Same IP, same user agent, fixed interval"></rect>
+            <text class="diag-label" x="52" y="42">Worker</text>
+            <text class="diag-sublabel" x="52" y="57">fixed pattern</text>
+            <g data-tip="Flags the fixed-interval single-IP pattern as a bot">
+              <rect class="diag-box role-cache" x="195" y="15" width="115" height="65" rx="6"></rect>
+              <text class="diag-label" x="252" y="35" style="font-weight:600">Target Site</text>
+              <text class="diag-sublabel" x="252" y="50">bot detection</text>
+              <text class="diag-sublabel" x="252" y="62" style="fill:var(--red)">flags pattern</text>
+            </g>
+            <g data-tip="IP added to a blocklist">
+              <rect class="diag-box role-db" x="310" y="15" width="100" height="55" rx="6"></rect>
+              <text class="diag-label" x="360" y="38">IP Ban</text>
+              <text class="diag-sublabel" x="360" y="53" style="fill:var(--red)">403 forever</text>
+            </g>
+            <text x="160" y="105" text-anchor="middle" font-size="10" fill="var(--red)" font-family="Inter,sans-serif">predictable pattern → detected → banned</text>
+          </svg>
+          <button class="flow-cmp-replay" data-replay="pt-bad-arrow-1,pt-bad-arrow-2,pt-bad-arrow-3,pt-bad-arrow-4">▸ Replay</button>
+        </div>
+      </div>
+      <script>
+      (function(){
+        document.querySelectorAll('.flow-cmp-replay').forEach(function(btn){
+          if (btn.dataset.bound) return;
+          btn.dataset.bound = '1';
+          btn.addEventListener('click', function(){
+            var classes = btn.dataset.replay.split(',');
+            var svg = btn.previousElementSibling;
+            classes.forEach(function(cls){
+              var path = svg.querySelector('.' + cls);
+              if (!path) return;
+              var len = path.getTotalLength ? path.getTotalLength() : 100;
+              path.style.strokeDasharray = len;
+              path.style.strokeDashoffset = len;
+              path.getBoundingClientRect();
+              path.style.transition = 'stroke-dashoffset 0.5s ease';
+              path.style.strokeDashoffset = 0;
+            });
+          });
+        });
+      })();
+      </script>
+      <ol class="flow-steps-list">
+        <li><span>Rotate proxy IPs per domain</span> — a pool of residential/datacenter proxies, never hammering from one IP</li>
+        <li><span>Rotate user-agent strings</span> — mimics a mix of real browsers instead of one static bot signature</li>
+        <li><span>Jitter request timing</span> — randomized delay instead of a suspiciously exact fixed interval</li>
+        <li><span>Per-domain rate limiting</span> — the scraper throttles itself below the site's own detection threshold, not just above it</li>
+        <li><span>Respect robots.txt where reasonable</span> — reduces adversarial posture and legal risk, though it isn't a technical requirement for public price pages</li>
+      </ol>
+      <div class="callout warn">This is an arms race, not a solved problem: sites tighten detection over time, so the anti-bot layer needs ongoing tuning per domain, not a one-time configuration.</div>
+    </section>
+
+    <section id="step6-deepdive-alerts">
+      <h2>Deep dive: price alert evaluation</h2>
+      <p style="font-size:13px;color:#999;margin-bottom:0.75rem">Two threshold types cover nearly every real use case, evaluated synchronously on every new price point.</p>
+      <div class="compare-grid">
+        <div class="compare-card good">
+          <div class="compare-label">Absolute threshold</div>
+          <ul>
+            <li>"Alert me when this drops below $50"</li>
+            <li>Simple comparison: new price_cents &lt; threshold_value</li>
+            <li>Best for a specific target price the user has in mind</li>
+          </ul>
+        </div>
+        <div class="compare-card bad">
+          <div class="compare-label">Percentage drop threshold</div>
+          <ul>
+            <li>"Alert me on any 15%+ drop from the price I started tracking at"</li>
+            <li>Compares against a stored baseline price, not the previous point</li>
+            <li>Best for catching sales without knowing a target price upfront</li>
+          </ul>
+        </div>
+      </div>
+      <ol class="flow-steps-list">
+        <li><span>New price point written</span> — the scraper worker's write to TimescaleDB completes</li>
+        <li><span>Alert Engine looks up active rules</span> — indexed query on PriceAlert.product_id, typically a handful of rows</li>
+        <li><span>Each rule evaluated against the new price</span> — absolute or percentage-drop comparison</li>
+        <li><span>Matching rules enqueue a notification</span> — deduplicated so a user isn't alerted twice for the same drop within a cooldown window</li>
+      </ol>
+      <table class="grid-table">
+        <thead><tr><th>Scenario</th><th>User impact</th><th>Detection signal</th><th>Mitigation</th></tr></thead>
+        <tbody>
+          <tr><td>Target site redesigns its HTML</td><td class="impact">Price extraction silently returns wrong or null values</td><td class="detect">Extracted price deviates &gt;50% from trailing average, or selector match fails</td><td class="fix">Circuit-break that domain, discard the bad point, page an on-call human to update the selector</td></tr>
+          <tr><td>Domain IP-bans the whole fleet</td><td class="impact">All products on that domain stop updating</td><td class="detect">429/403 rate spikes to 100% for the domain</td><td class="fix">Exponential backoff, rotate to a fresh proxy pool, widen poll interval temporarily</td></tr>
+          <tr><td>Redis throttle store down</td><td class="impact">Risk of over-scraping and mass bans</td><td class="detect">Redis health check failure</td><td class="fix">Workers fail closed — pause scraping for affected domains rather than scrape unthrottled</td></tr>
+          <tr><td>Alert Engine falls behind</td><td class="impact">Users notified late, missing the 5-min SLA</td><td class="detect">Consumer lag on the price-point write stream</td><td class="fix">Scale out alert evaluation consumers, partitioned by product_id hash</td></tr>
+          <tr><td>Duplicate product URLs tracked</td><td class="impact">Wasted scrape capacity on the same product</td><td class="detect">URL-normalization check at track time (strip tracking params, resolve redirects)</td><td class="fix">UNIQUE constraint on normalized URL merges duplicate tracking requests onto one TrackedProduct row</td></tr>
+        </tbody>
+      </table>
+    </section>
+
+    <section id="interview-moves">
+      <h2>Interview moves</h2>
+      <ul class="moves-list">
+        <li><span class="move-num">01</span><div><strong>"Before I design storage, let me flag that the hard constraint here is staying unblocked — getting IP-banned breaks the product entirely, not just degrades it"</strong> — reframes the problem correctly in the first minute</div></li>
+        <li><span class="move-num">02</span><div><strong>"I'd queue scrape jobs per-domain, not in one global queue, so one retailer's slowdown or ban never delays every other domain"</strong> — shows isolation instinct before being prompted</div></li>
+        <li><span class="move-num">03</span><div><strong>"A shared Redis-backed throttle means every worker in the fleet respects the same per-domain rate limit, even across hundreds of instances"</strong> — names the exact mechanism, not just the concept</div></li>
+        <li><span class="move-num">04</span><div><strong>"If extraction starts returning null or wildly different prices, I want that to page a human, not silently write garbage into the price history"</strong> — demonstrates data-integrity instincts</div></li>
+        <li><span class="move-num">05</span><div><strong>"I'd separate the scrape pipeline from the read API entirely — a user loading a price chart should never be slowed down by scraper backpressure"</strong> — correctly identifies the two independent hot paths</div></li>
+        <li><span class="move-num">06</span><div><strong>"Poll interval shouldn't be fixed — a $2,000 item a user is actively watching deserves more frequent checks than a $10 item nobody's alerted on"</strong> — connects a technical scheduling decision to product value</div></li>
+      </ul>
+    </section>
+
+    <section id="follow-ups">
+      <h2>Follow-up questions</h2>
+      <div class="qa-block">
+        <div class="qa-q">How do you avoid tracking the same product twice under slightly different URLs?</div>
+        <div class="qa-a">Normalize URLs at track time — strip tracking/query params, resolve redirects — then enforce a UNIQUE constraint on the normalized form before creating a new TrackedProduct.</div>
+      </div>
+      <div class="qa-block">
+        <div class="qa-q">How would you prioritize which products to scrape first when the worker pool is saturated?</div>
+        <div class="qa-a">Weight the per-domain queue by number of active alert subscribers and how overdue the product is relative to its poll interval, not simple FIFO.</div>
+      </div>
+      <div class="qa-block">
+        <div class="qa-q">What if a site requires JavaScript rendering to show the real price?</div>
+        <div class="qa-a">Route that domain to a separate headless-browser worker tier — it's far more expensive per request, so only sites that actually need it should use it.</div>
+      </div>
+      <div class="qa-block">
+        <div class="qa-q">How do you handle currency and regional pricing differences?</div>
+        <div class="qa-a">Store price_cents alongside a currency code and normalize to the user's display currency at read time using a periodically refreshed FX rate table, never at write time.</div>
+      </div>
+      <div class="qa-block">
+        <div class="qa-q">Could you reduce cost by sharing scrape results across users tracking the same product?</div>
+        <div class="qa-a">Yes — TrackedProduct is already deduplicated by normalized URL, so one scrape serves every user watching that product; only PriceAlert rules are per-user.</div>
+      </div>
+      <div class="qa-block">
+        <div class="qa-q">How would you extend this to support 10x the tracked products?</div>
+        <div class="qa-a">Shard TimescaleDB by product_id range, scale out per-domain queue partitions, and widen poll intervals for long-tail low-alert-subscriber products first.</div>
+      </div>
+    </section>
+
+  </main>
+  <script src="../../assets/nav.js"></script>
+</body>
+</html>

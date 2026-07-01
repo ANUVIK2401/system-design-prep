@@ -1,0 +1,505 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Design Tinder — SD Prep</title>
+  <link rel="stylesheet" href="../../assets/style.css">
+</head>
+<body>
+  <aside id="sidebar"></aside>
+  <main>
+
+    <header class="page-head">
+      <div class="pill">Questions</div>
+      <h1>Design Tinder</h1>
+      <p class="sub">Tests whether you treat recommendation as a geospatial + preference filter problem — narrow a city down to a few hundred candidates before any ranking model ever runs.</p>
+      <div class="meta-row">
+        <span class="badge green">40-50 min interview</span>
+        <span class="badge blue">Hard</span>
+      </div>
+    </header>
+
+    <div class="flash-card">
+      <div class="flash-label">Say this in the first 2 minutes</div>
+      <ul>
+        <li>The core insight: candidate discovery is geospatial retrieval first, ranking second — you never run a model over an entire city's users</li>
+        <li>Key scale number to anchor on: 75M DAU swiping ~150 times/day each is ~130k swipes/sec at peak, but geo-filtered candidate pools per query are only a few hundred rows</li>
+        <li>Primary tradeoff being probed: precomputed daily candidate batches vs on-demand geo queries — batching wins on read latency, loses on freshness</li>
+        <li>Component most candidates forget: the swipe write path needs idempotency — a retried swipe must never double-count or trigger a duplicate match</li>
+        <li>Failure mode most candidates skip: a match is a two-writer race — both users can swipe right in the same instant, so match detection needs an atomic check, not a read-then-write</li>
+      </ul>
+    </div>
+
+    <section id="step1-requirements">
+      <div class="step-pill">Step 1 of 6 — Requirements</div>
+      <h2>Requirements</h2>
+
+      <div class="goal-arc-wrap">
+        <div class="goal-arc-row functional">
+          <div class="goal-arc-seg">1</div><div class="goal-arc-seg">2</div><div class="goal-arc-seg">3</div><div class="goal-arc-seg">4</div><div class="goal-arc-seg">5</div><div class="goal-arc-seg inactive">6</div>
+        </div>
+        <div class="goal-arc-label"><span>Arc 1 (steps 1-5) — <strong>Satisfy Functional Requirements</strong></span></div>
+        <div class="goal-arc-row nonfunctional" style="margin-top:8px">
+          <div class="goal-arc-seg">1</div><div class="goal-arc-seg">2</div><div class="goal-arc-seg">3</div><div class="goal-arc-seg">4</div><div class="goal-arc-seg">5</div><div class="goal-arc-seg">6</div>
+        </div>
+        <div class="goal-arc-label"><span>Arc 2 (all 6 steps) — <strong>Satisfy Non-Functional Requirements</strong></span></div>
+      </div>
+
+      <div class="compare-grid">
+        <div class="compare-card good">
+          <div class="compare-label">Functional</div>
+          <ul>
+            <li>Build and edit a profile (photos, bio, preferences, location)</li>
+            <li>Fetch a deck of nearby candidate profiles to swipe on</li>
+            <li>Record swipe (like/pass) and detect mutual likes as a match</li>
+            <li>Notify both users in real time when a match occurs</li>
+          </ul>
+        </div>
+        <div class="compare-card bad">
+          <div class="compare-label">Non-Functional</div>
+          <ul>
+            <li>75M DAU, ~150 swipes/user/day → ~130k swipes/sec at peak</li>
+            <li>Deck fetch latency &lt;200ms p99, feels instant while swiping</li>
+            <li>Never show the same profile twice in one "seen" window</li>
+            <li>Match detection must be exactly-once — no missed or duplicate matches</li>
+          </ul>
+        </div>
+      </div>
+
+      <div class="callout warn"><strong>What NOT to build:</strong> the deep learning ranking model internals, in-app chat/messaging infra, payments for premium tiers, or content moderation/photo-verification pipelines. This is candidate discovery, swiping, and match detection only.</div>
+
+      <div class="stat-grid">
+        <div class="stat-card"><div class="stat-val">75M</div><div class="stat-label">daily active users</div></div>
+        <div class="stat-card"><div class="stat-val">~130k/s</div><div class="stat-label">swipe writes/sec (peak)</div></div>
+        <div class="stat-card"><div class="stat-val">&lt;200ms</div><div class="stat-label">deck fetch latency target (p99)</div></div>
+        <div class="stat-card"><div class="stat-val">6 chars</div><div class="stat-label">geohash precision (~1.2km cell)</div></div>
+      </div>
+    </section>
+
+    <section id="step2-entities">
+      <div class="step-pill">Step 2 of 6 — Core Entities</div>
+      <h2>Core entities</h2>
+      <p style="font-size:13px;color:#999;margin-bottom:0.75rem">Profile data is relational, location is geospatial, swipes are an append-heavy log — three access patterns, three stores.</p>
+
+      <div class="entity-grid">
+        <div class="entity-box">
+          <div class="entity-head"><span class="entity-name">Profile</span><span class="entity-store pg">Postgres</span></div>
+          <div class="entity-fields">
+            <div class="entity-field"><span class="fname pk">user_id</span><span class="ftype">BIGINT</span></div>
+            <div class="entity-field"><span class="fname">name, age, bio</span><span class="ftype">TEXT / SMALLINT</span></div>
+            <div class="entity-field"><span class="fname">photo_urls</span><span class="ftype">TEXT[] → S3 keys</span></div>
+            <div class="entity-field"><span class="fname idx">pref_age_min/max, pref_gender</span><span class="ftype">SMALLINT / ENUM</span></div>
+          </div>
+          <div class="entity-why">Because profile edits are low-frequency but must be strongly consistent — a user's own view of their profile can never look stale. Tradeoff: not built for the read-heavy deck-serving path, so it's replicated into the candidate index instead of queried live.</div>
+        </div>
+
+        <div class="entity-box">
+          <div class="entity-head"><span class="entity-name">UserLocation</span><span class="entity-store redis">Redis GEO</span></div>
+          <div class="entity-fields">
+            <div class="entity-field"><span class="fname pk">user_id</span><span class="ftype">member key</span></div>
+            <div class="entity-field"><span class="fname">lng, lat</span><span class="ftype">GEOADD coordinates</span></div>
+            <div class="entity-field"><span class="fname">ttl</span><span class="ftype">~24h, refreshed on app open</span></div>
+          </div>
+          <div class="entity-why">Because candidate discovery is fundamentally a radius query and Redis GEO answers it in low single-digit milliseconds against millions of members. Tradeoff: a node failure loses recent position updates, acceptable since location is re-pushed on next app open.</div>
+        </div>
+
+        <div class="entity-box">
+          <div class="entity-head"><span class="entity-name">Swipe</span><span class="entity-store cass">Cassandra</span></div>
+          <div class="entity-fields">
+            <div class="entity-field"><span class="fname pk">swiper_id</span><span class="ftype">partition key</span></div>
+            <div class="entity-field"><span class="fname idx">swipee_id</span><span class="ftype">clustering key</span></div>
+            <div class="entity-field"><span class="fname">action</span><span class="ftype">ENUM(like, pass, superlike)</span></div>
+            <div class="entity-field"><span class="fname">ts</span><span class="ftype">TIMESTAMP</span></div>
+          </div>
+          <div class="entity-why">Because writes are massive (130k/sec) and append-only with a simple key-value access pattern — exactly what a wide-column store is optimized for. Tradeoff: cross-partition queries (e.g. "who liked me") need a second table keyed by swipee_id.</div>
+        </div>
+
+        <div class="entity-box">
+          <div class="entity-head"><span class="entity-name">Match</span><span class="entity-store pg">Postgres</span></div>
+          <div class="entity-fields">
+            <div class="entity-field"><span class="fname pk">match_id</span><span class="ftype">UUID</span></div>
+            <div class="entity-field"><span class="fname idx">user_a_id, user_b_id</span><span class="ftype">BIGINT, sorted pair</span></div>
+            <div class="entity-field"><span class="fname">matched_at</span><span class="ftype">TIMESTAMP</span></div>
+          </div>
+          <div class="entity-why">Because a match is a low-volume, high-value event that must never be created twice for the same pair — a unique constraint on the sorted (user_a_id, user_b_id) pair enforces exactly-once at the DB level. Tradeoff: an extra write on the already-hot swipe path, mitigated by only triggering it on a detected mutual like.</div>
+        </div>
+      </div>
+
+      <div class="callout info">Primary key: <code>Swipe(swiper_id, swipee_id)</code> composite. Critical index: <code>UNIQUE INDEX on Match(user_a_id, user_b_id)</code> sorted-pair constraint — this is what makes match creation idempotent under a concurrent double-like race.</div>
+    </section>
+
+    <section id="step3-api">
+      <div class="step-pill">Step 3 of 6 — API / Interface</div>
+      <h2>API design</h2>
+      <p style="font-size:13px;color:#999;margin-bottom:0.75rem">Deck fetch and swipe are REST; match notifications push over a persistent connection since a match must reach both users instantly.</p>
+
+      <div class="api-card">
+        <div class="api-line"><span class="api-method get">GET</span><span class="api-path">/api/v1/deck</span><span class="api-auth">Auth: required</span></div>
+        <div class="api-io">
+          <div class="api-io-block"><div class="api-io-label">Request</div><div class="api-io-body">{ lat, lng, count } (defaults to cached daily batch)</div></div>
+          <div class="api-io-block"><div class="api-io-label">Response</div><div class="api-io-body">{ profiles: [{ user_id, name, age, photos, distance_km }] }</div></div>
+        </div>
+      </div>
+
+      <div class="api-card">
+        <div class="api-line"><span class="api-method post">POST</span><span class="api-path">/api/v1/swipes</span><span class="api-auth">Auth: required</span></div>
+        <div class="api-io">
+          <div class="api-io-block"><div class="api-io-label">Request</div><div class="api-io-body">{ swipee_id, action: like|pass|superlike, idempotency_key }</div></div>
+          <div class="api-io-block"><div class="api-io-label">Response</div><div class="api-io-body">{ matched: boolean, match_id? }</div></div>
+        </div>
+      </div>
+
+      <div class="api-card">
+        <div class="api-line"><span class="api-method post">POST</span><span class="api-path">/api/v1/profile/location</span><span class="api-auth">Auth: required</span></div>
+        <div class="api-io">
+          <div class="api-io-block"><div class="api-io-label">Request</div><div class="api-io-body">{ lat, lng }</div></div>
+          <div class="api-io-block"><div class="api-io-label">Response</div><div class="api-io-body">204, refreshes Redis GEO TTL</div></div>
+        </div>
+      </div>
+
+      <div class="api-card">
+        <div class="api-line"><span class="api-method ws">WEBSOCKET</span><span class="api-path">/ws/matches</span><span class="api-auth">Auth: required</span></div>
+        <div class="api-io">
+          <div class="api-io-block"><div class="api-io-label">Message out</div><div class="api-io-body">{ event: "new_match", match_id, other_user }</div></div>
+          <div class="api-io-block"><div class="api-io-label">Cadence</div><div class="api-io-body">pushed the instant Match Svc commits a row</div></div>
+        </div>
+      </div>
+
+      <div class="callout good">The swipe endpoint requires an <code>idempotency_key</code>: a mobile client on a flaky connection will retry a POST it thinks failed, and a retried "like" must never be double-counted or trigger a phantom second match check.</div>
+    </section>
+
+    <section id="step4-dataflow">
+      <div class="step-pill">Step 4 of 6 — Data Flow</div>
+      <h2>Data flow</h2>
+      <p style="font-size:13px;color:#999;margin-bottom:0.75rem">Deck read path (mint) pulls from a precomputed candidate cache; swipe write path (blue) records the action and checks for a match inline.</p>
+
+      <div class="diagram-wrap" data-paths='{"read":{"boxes":["r-client","r-svc","r-cache","r-geo"],"arrows":["r1","r2","r3"]},"write":{"boxes":["w-client","w-svc","w-cass","w-match"],"arrows":["w1","w2","w3"]}}'>
+        <svg viewBox="0 0 740 220" xmlns="http://www.w3.org/2000/svg">
+          <defs>
+            <marker id="tdR" markerWidth="8" markerHeight="8" refX="6" refY="3" orient="auto"><path d="M0,0 L6,3 L0,6 Z" fill="var(--accent)"/></marker>
+            <marker id="tdW" markerWidth="8" markerHeight="8" refX="6" refY="3" orient="auto"><path d="M0,0 L6,3 L0,6 Z" fill="var(--blue)"/></marker>
+          </defs>
+
+          <text class="diag-sublabel" x="150" y="14" style="font-size:10px;fill:var(--accent)">READ PATH — deck fetch</text>
+          <circle class="diag-dot diag-flow-dot" r="3.5" style="offset-path: path('M10,24 L120,24 L120,24 L260,24 L260,24 L400,24 L400,24 L530,24')"></circle>
+          <g data-target="step6-deepdive-geohash" data-id="r-client" data-tip="Requests the next batch of profiles to swipe on"><rect class="diag-box role-client" x="10" y="24" width="110" height="46"/><text class="diag-label" x="65" y="52" style="font-size:11px">Client App</text></g>
+          <path class="diag-arrow-path" data-id="r1" d="M120,47 L155,47" marker-end="url(#tdR)"/>
+          <g data-target="step6-deepdive-geohash" data-id="r-svc" data-tip="Stateless — applies preference filters to a precomputed batch"><rect class="diag-box" x="155" y="24" width="120" height="46"/><text class="diag-label" x="215" y="47" style="font-size:11px">Deck Svc</text><text class="diag-sublabel" x="215" y="62" style="font-size:8.5px">stateless</text></g>
+          <path class="diag-arrow-path" data-id="r2" d="M275,47 L310,47" marker-end="url(#tdR)"/>
+          <g data-target="step6-deepdive-geohash" data-id="r-cache" data-tip="Precomputed daily candidate batch per user, refreshed overnight"><rect class="diag-box role-cache" x="310" y="24" width="120" height="46"/><text class="diag-label" x="370" y="47" style="font-size:11px">Candidate Cache</text><text class="diag-sublabel" x="370" y="62" style="font-size:8.5px">Redis</text></g>
+          <path class="diag-arrow-path" data-id="r3" d="M430,47 L465,47" marker-end="url(#tdR)"/>
+          <text class="diag-sublabel" x="448" y="37" style="font-size:9px">miss</text>
+          <g data-target="step6-deepdive-geohash" data-id="r-geo" data-tip="Live radius query, expanding geohash rings, on cache miss only"><rect class="diag-box role-db" x="465" y="24" width="130" height="46"/><text class="diag-label" x="530" y="47" style="font-size:11px">Redis GEO</text></g>
+
+          <text class="diag-sublabel" x="150" y="105" style="font-size:10px;fill:var(--blue)">WRITE PATH — swipe + match check</text>
+          <g data-target="step6-deepdive-statemachine" data-id="w-client" data-tip="Sends like/pass with an idempotency key"><rect class="diag-box role-client" x="10" y="115" width="110" height="46"/><text class="diag-label" x="65" y="143" style="font-size:11px">Client App</text></g>
+          <path class="diag-arrow-path" data-id="w1" d="M120,138 L155,138" marker-end="url(#tdW)"/>
+          <g data-target="step6-deepdive-statemachine" data-id="w-svc" data-tip="Writes the swipe, then atomically checks for a mutual like"><rect class="diag-box" x="155" y="115" width="120" height="46"/><text class="diag-label" x="215" y="143" style="font-size:11px">Swipe Svc</text></g>
+          <path class="diag-arrow-path" data-id="w2" d="M275,138 L310,138" marker-end="url(#tdW)"/>
+          <g data-target="step2-entities" data-id="w-cass" data-tip="Append-only swipe log, 130k writes/sec at peak"><rect class="diag-box role-db" x="310" y="115" width="120" height="46"/><text class="diag-label" x="370" y="143" style="font-size:11px">Cassandra</text></g>
+          <path class="diag-arrow-path" data-id="w3" d="M275,150 L400,180 L400,161" marker-end="url(#tdW)" stroke-dasharray="3 3"/>
+          <g data-target="step6-deepdive-statemachine" data-id="w-match" data-tip="Only invoked when the reverse swipe already exists as a like"><rect class="diag-box role-async" x="340" y="180" width="140" height="30"/><text class="diag-label" x="410" y="200" style="font-size:10px">Match Svc → push</text></g>
+        </svg>
+        <div class="diag-legend">
+          <div class="diag-legend-item"><span class="diag-legend-dot role-cache"></span>Deck read — precomputed batch first, live geo fallback</div>
+          <div class="diag-legend-item"><span class="diag-legend-dot role-client"></span>Swipe write — logged then checked for a match inline</div>
+          <div class="diag-legend-item"><span class="diag-legend-dot role-async"></span>Match — only fires on a detected mutual like</div>
+        </div>
+      </div>
+
+      <ol class="flow-steps-list">
+        <li><span>Client requests a deck</span> — Deck Svc first checks the precomputed candidate cache for this user</li>
+        <li><span>Cache hit (common case)</span> — batch was built overnight by the recommendation pipeline, returned in low tens of ms</li>
+        <li><span>Cache miss (new/relocated user)</span> — falls through to a live Redis GEO radius query, expanding rings until enough candidates are found</li>
+        <li><span>Client swipes right</span> — Swipe Svc writes the row to Cassandra, keyed by (swiper_id, swipee_id)</li>
+        <li><span>Inline match check</span> — Swipe Svc reads for the reverse pair; if it's also a like, Match Svc commits a Match row and pushes to both sockets</li>
+      </ol>
+    </section>
+
+    <section id="step5-hld">
+      <div class="step-pill">Step 5 of 6 — High-Level Design</div>
+      <h2>High-level design</h2>
+      <p style="font-size:13px;color:#999;margin-bottom:0.75rem">Full system: deck serving, swipe/match, and the offline recommendation pipeline that fills the candidate cache.</p>
+
+      <div class="diagram-wrap">
+        <svg viewBox="0 0 780 300" xmlns="http://www.w3.org/2000/svg">
+          <defs><marker id="tdHldArrow" markerWidth="8" markerHeight="8" refX="6" refY="3" orient="auto"><path d="M0,0 L6,3 L0,6 Z" fill="var(--border2)"/></marker></defs>
+
+          <g data-tip="Deck fetch, swipes, and match socket all originate here"><rect class="diag-box role-client" x="10" y="20" width="110" height="50"/><text class="diag-label" x="65" y="50" style="font-size:11px">Client App</text></g>
+          <path class="diag-arrow-path" d="M120,45 L155,45" marker-end="url(#tdHldArrow)"/>
+          <g data-tip="Auth, rate limiting, routing"><rect class="diag-box role-client" x="155" y="20" width="120" height="50"/><text class="diag-label" x="215" y="50" style="font-size:11px">API Gateway</text></g>
+
+          <path class="diag-arrow-path" d="M215,70 L215,100" marker-end="url(#tdHldArrow)"/>
+          <g data-tip="Serves precomputed batches, falls back to live geo query"><rect class="diag-box" x="140" y="100" width="130" height="46"/><text class="diag-label" x="205" y="123" style="font-size:11px">Deck Svc</text><text class="diag-sublabel" x="205" y="138" style="font-size:8.5px">stateless</text></g>
+          <g data-tip="Writes swipes, checks for mutual likes"><rect class="diag-box" x="290" y="100" width="130" height="46"/><text class="diag-label" x="355" y="123" style="font-size:11px">Swipe Svc</text><text class="diag-sublabel" x="355" y="138" style="font-size:8.5px">stateless</text></g>
+
+          <path class="diag-arrow-path" d="M205,146 L205,180" marker-end="url(#tdHldArrow)"/>
+          <g data-tip="Per-user precomputed candidate batch, rebuilt nightly"><rect class="diag-box role-cache" x="140" y="180" width="130" height="46"/><text class="diag-label" x="205" y="203" style="font-size:11px">Candidate Cache</text></g>
+          <path class="diag-arrow-path" d="M355,146 L355,180" marker-end="url(#tdHldArrow)"/>
+          <g data-tip="Append-only swipe log"><rect class="diag-box role-db" x="290" y="180" width="130" height="46"/><text class="diag-label" x="355" y="203" style="font-size:11px">Cassandra</text></g>
+
+          <path class="diag-arrow-path" d="M270,203 L290,203" marker-end="url(#tdHldArrow)" stroke-dasharray="3 3"/>
+          <path class="diag-arrow-path" d="M205,226 L205,255" marker-end="url(#tdHldArrow)" stroke-dasharray="3 3"/>
+          <g data-tip="Live radius index, shared by cache-miss and the offline batch job"><rect class="diag-box role-db" x="140" y="255" width="130" height="35"/><text class="diag-label" x="205" y="277" style="font-size:11px">Redis GEO</text></g>
+
+          <path class="diag-arrow-path" d="M420,203 L455,203" marker-end="url(#tdHldArrow)"/>
+          <g data-tip="Sorted-pair unique constraint prevents duplicate matches"><rect class="diag-box role-db" x="455" y="180" width="120" height="46"/><text class="diag-label" x="515" y="203" style="font-size:11px">Match DB</text></g>
+          <path class="diag-arrow-path" d="M575,203 L610,203" marker-end="url(#tdHldArrow)"/>
+          <g data-tip="Fans out to both users' open sockets"><rect class="diag-box role-async" x="610" y="180" width="140" height="46"/><text class="diag-label" x="680" y="203" style="font-size:11px">Notification Svc</text></g>
+
+          <path class="diag-arrow-path" d="M420,123 L610,60 L610,45" marker-end="url(#tdHldArrow)" stroke-dasharray="3 3"/>
+          <g data-tip="Nightly batch: geo-filter then rank with a lightweight model"><rect class="diag-box role-async" x="555" y="20" width="150" height="46"/><text class="diag-label" x="630" y="43" style="font-size:11px">Rec Pipeline</text><text class="diag-sublabel" x="630" y="58" style="font-size:8.5px">geo filter → rank</text></g>
+          <path class="diag-arrow-path" d="M630,66 L630,90 L270,90 L270,180" marker-end="url(#tdHldArrow)" stroke-dasharray="3 3"/>
+        </svg>
+        <div class="diag-legend">
+          <div class="diag-legend-item"><span class="diag-legend-dot role-client"></span>Client + gateway</div>
+          <div class="diag-legend-item"><span class="diag-legend-dot role-cache"></span>Candidate cache — precomputed per-user batches</div>
+          <div class="diag-legend-item"><span class="diag-legend-dot role-db"></span>Cassandra + Redis GEO + Match DB</div>
+          <div class="diag-legend-item"><span class="diag-legend-dot role-async"></span>Rec pipeline + notifications — decoupled from hot path</div>
+        </div>
+      </div>
+
+      <table class="def-table">
+        <thead><tr><th>Component</th><th>Role</th><th>Tech + why</th></tr></thead>
+        <tbody>
+          <tr><td>Deck Svc</td><td>Serves the next batch of candidates</td><td>Stateless, reads precomputed cache — because computing ranked candidates per-request at 75M DAU is far too expensive; tradeoff is up to a day of staleness on the ranking.</td></tr>
+          <tr><td>Redis GEO</td><td>Radius query for candidate discovery</td><td>In-memory geospatial index — because both the nightly batch job and live cache-miss fallback need sub-10ms proximity queries; tradeoff is no durability per location ping.</td></tr>
+          <tr><td>Swipe Svc</td><td>Records swipes, detects mutual likes</td><td>Stateless, idempotent writes keyed by (swiper, swipee) — because a retried request must never double-write or double-match; tradeoff is an extra read before every match-triggering write.</td></tr>
+          <tr><td>Rec Pipeline</td><td>Builds each user's daily candidate batch</td><td>Offline batch job — geo-filter first (Redis GEO) to a few thousand rows, then rank with a lightweight model — because running ML inference over an entire city per request would never hit &lt;200ms.</td></tr>
+        </tbody>
+      </table>
+
+      <h3 style="font-size:13px;color:var(--text);margin:1.25rem 0 0.6rem;font-weight:600">Scaling levers — cheapest to most complex</h3>
+      <ol class="levers-list">
+        <li><strong>Add Redis GEO and Candidate Cache read replicas per region</strong><span class="cost">near-zero complexity</span></li>
+        <li><strong>Shard Cassandra by swiper_id</strong> (already partition-friendly)<span class="cost">low complexity</span></li>
+        <li><strong>Increase batch size / precompute frequency</strong> for high-density metros<span class="cost">medium complexity</span></li>
+        <li><strong>Shard the Rec Pipeline by geo-region</strong> so one metro's batch job never blocks another's<span class="cost">medium complexity</span></li>
+        <li><strong>Dynamic geohash cell-splitting</strong> in dense urban cores<span class="cost">high complexity — last resort</span></li>
+      </ol>
+
+      <table class="grid-table">
+        <thead><tr><th>Bottleneck</th><th>Triggers at</th><th>Exact fix</th></tr></thead>
+        <tbody>
+          <tr><td>Candidate cache miss storm</td><td>Cache hit rate drops below ~95%</td><td class="fix">Widen precompute coverage; serve a slightly stale batch instead of falling through to live query for everyone</td></tr>
+          <tr><td>Dense urban geohash cell</td><td>One cell has far more users than surrounding cells (e.g. NYC vs suburbs)</td><td class="fix">Finer geohash precision (7-char) in dense cells only, coarser (5-char) in sparse ones</td></tr>
+          <tr><td>Cassandra write hotspot</td><td>A viral profile gets swiped on far more than average</td><td class="fix">Partition key is swiper_id not swipee_id, so writes are naturally spread — hotspot risk is on the read side (who-liked-me), addressed with a separate denormalized table</td></tr>
+        </tbody>
+      </table>
+
+      <div class="dial-wrap">
+        <div class="dial-title">Candidate freshness: precomputed batch vs live query</div>
+        <div class="dial-track"><div class="dial-marker" style="left:15%"></div></div>
+        <div class="dial-labels"><span class="end-left">Precomputed (fast)</span><span class="end-right">Live (fresh)</span></div>
+      </div>
+      <div class="dial-wrap">
+        <div class="dial-title">Match detection consistency</div>
+        <div class="dial-track"><div class="dial-marker" style="left:8%"></div></div>
+        <div class="dial-labels"><span class="end-left">Strong</span><span class="end-right">Eventual</span></div>
+      </div>
+    </section>
+
+    <section id="step6-deepdive-geohash">
+      <div class="step-pill">Step 6 of 6 — Deep Dives</div>
+      <h2>Deep dive: geo-filter before you rank</h2>
+      <p style="font-size:13px;color:#999;margin-bottom:0.75rem">A city is divided into geohash cells. Candidate discovery filters by cell first, shrinking the pool to a few hundred rows — only then does a ranking model run.</p>
+      <div class="diagram-wrap">
+        <svg viewBox="0 0 480 320" xmlns="http://www.w3.org/2000/svg" id="tinderGeohashGrid">
+          <defs><marker id="tinderGeoArrow" markerWidth="8" markerHeight="8" refX="6" refY="3" orient="auto"><path d="M0,0 L6,3 L0,6 Z" fill="var(--accent)"/></marker></defs>
+          <text class="diag-sublabel" x="240" y="14" style="font-size:10px;fill:var(--muted)">CITY GRID — each cell ≈ 1.2km × 1.2km (6-char geohash)</text>
+          <g id="tinderGridCells"></g>
+          <circle id="tinderUserPin" cx="0" cy="0" r="5" fill="var(--blue)" opacity="0" />
+          <text id="tinderPinLabel" x="0" y="0" font-size="9" fill="var(--blue)" text-anchor="middle" opacity="0" font-family="Inter,sans-serif"></text>
+        </svg>
+        <div style="display:flex;gap:10px;margin-top:6px">
+          <button class="flow-cmp-replay" id="tinderPinBtn" style="width:auto;padding:6px 14px">▸ Simulate user location</button>
+          <button class="flow-cmp-replay" id="tinderQueryBtn" style="width:auto;padding:6px 14px">▸ Simulate candidate retrieval (expand outward)</button>
+        </div>
+      </div>
+      <script>
+      (function(){
+        var svg = document.getElementById('tinderGeohashGrid');
+        if (!svg) return;
+        var cellsG = document.getElementById('tinderGridCells');
+        var cols = 8, rows = 6, cellW = 48, cellH = 42, offX = 40, offY = 30;
+        var cellEls = [];
+        for (var r = 0; r < rows; r++) {
+          for (var c = 0; c < cols; c++) {
+            var x = offX + c * cellW, y = offY + r * cellH;
+            var rect = document.createElementNS('http://www.w3.org/2000/svg', 'rect');
+            rect.setAttribute('x', x); rect.setAttribute('y', y);
+            rect.setAttribute('width', cellW - 2); rect.setAttribute('height', cellH - 2);
+            rect.setAttribute('rx', 3);
+            rect.setAttribute('fill', 'var(--surface)');
+            rect.setAttribute('stroke', 'var(--border2)');
+            rect.setAttribute('stroke-width', '1');
+            rect.dataset.row = r; rect.dataset.col = c;
+            cellsG.appendChild(rect);
+            cellEls.push({ el: rect, r: r, c: c, x: x, y: y });
+          }
+        }
+        var centerR = 3, centerC = 3;
+        var pin = document.getElementById('tinderUserPin');
+        var pinLabel = document.getElementById('tinderPinLabel');
+
+        function cellCenter(r, c) {
+          return { x: offX + c * cellW + (cellW - 2) / 2, y: offY + r * cellH + (cellH - 2) / 2 };
+        }
+
+        document.getElementById('tinderPinBtn').addEventListener('click', function(){
+          cellEls.forEach(function(ce){ ce.el.setAttribute('fill', 'var(--surface)'); });
+          var target = cellEls.find(function(ce){ return ce.r === centerR && ce.c === centerC; });
+          var pt = cellCenter(centerR, centerC);
+          pin.setAttribute('cx', pt.x); pin.setAttribute('cy', pt.y);
+          pin.setAttribute('opacity', '0');
+          pinLabel.setAttribute('x', pt.x); pinLabel.setAttribute('y', pt.y - 12);
+          pinLabel.textContent = 'GEOADD';
+          pinLabel.setAttribute('opacity', '0');
+          requestAnimationFrame(function(){
+            pin.style.transition = 'opacity 0.3s ease';
+            pinLabel.style.transition = 'opacity 0.3s ease';
+            pin.setAttribute('opacity', '1');
+            pinLabel.setAttribute('opacity', '1');
+            if (target) target.el.setAttribute('fill', '#0d1a2d');
+            if (target) target.el.setAttribute('stroke', 'var(--blue)');
+          });
+        });
+
+        document.getElementById('tinderQueryBtn').addEventListener('click', function(){
+          cellEls.forEach(function(ce){ ce.el.setAttribute('fill', 'var(--surface)'); ce.el.setAttribute('stroke', 'var(--border2)'); });
+          var rings = [0, 1, 2];
+          rings.forEach(function(ring, i){
+            setTimeout(function(){
+              cellEls.forEach(function(ce){
+                var dist = Math.max(Math.abs(ce.r - centerR), Math.abs(ce.c - centerC));
+                if (dist === ring) {
+                  ce.el.style.transition = 'fill 0.3s ease, stroke 0.3s ease';
+                  ce.el.setAttribute('fill', ring === 0 ? '#08200f' : '#0d1f17');
+                  ce.el.setAttribute('stroke', 'var(--accent)');
+                }
+              });
+            }, i * 400);
+          });
+        });
+      })();
+      </script>
+      <ol class="flow-steps-list">
+        <li><span>User location lands in a cell</span> — GPS coordinate encoded to a 6-char geohash, GEOADD places the user in Redis GEO</li>
+        <li><span>Nightly batch job runs per user</span> — starts from their home cell and expands ring by ring until ~2,000 candidates are collected</li>
+        <li><span>Hard filters applied first</span> — age range, gender preference, max distance, already-swiped exclusion — all cheap boolean checks on the geo-filtered set</li>
+        <li><span>Lightweight ranking model scores the survivors</span> — activity recency, mutual-interest signals, photo quality — runs over hundreds, never millions, of rows</li>
+        <li><span>Top ~150 written to the candidate cache</span> — this is exactly what Deck Svc serves the next day, no per-request ranking cost</li>
+      </ol>
+      <div class="callout warn">Running the ranking model before the geo filter is the classic mistake: scoring every user in a metro against every other user is O(n²) and will never fit a nightly batch window, let alone a &lt;200ms request. Geo-filter to a few thousand candidates first — ranking only ever touches that shrunk set.</div>
+    </section>
+
+    <section id="step6-deepdive-statemachine">
+      <h2>Deep dive: swipe state machine and match race</h2>
+      <p style="font-size:13px;color:#999;margin-bottom:0.75rem">Every profile a user sees moves through seen → liked/passed, and a match only fires when both directions resolve to "liked."</p>
+      <div class="diagram-wrap">
+        <svg viewBox="0 0 700 200" xmlns="http://www.w3.org/2000/svg">
+          <defs>
+            <marker id="tinderStateArrowN" markerWidth="8" markerHeight="8" refX="6" refY="3" orient="auto"><path d="M0,0 L6,3 L0,6 Z" fill="var(--border2)"/></marker>
+            <marker id="tinderStateArrowW" markerWidth="8" markerHeight="8" refX="6" refY="3" orient="auto"><path d="M0,0 L6,3 L0,6 Z" fill="var(--amber)"/></marker>
+          </defs>
+
+          <rect class="state-node" x="10" y="70" width="110" height="50" rx="6"/>
+          <text class="state-label" x="65" y="92">Seen</text>
+          <text class="state-sublabel" x="65" y="106">in deck, not yet acted on</text>
+
+          <path class="state-arrow" d="M120,85 L155,60" marker-end="url(#tinderStateArrowN)"/>
+          <rect class="state-node terminal" x="155" y="20" width="110" height="50" rx="6"/>
+          <text class="state-label" x="210" y="42">Liked</text>
+          <text class="state-sublabel" x="210" y="56">swipe right</text>
+
+          <path class="state-arrow irreversible" d="M120,105 L155,130" marker-end="url(#tinderStateArrowW)"/>
+          <rect class="state-node terminal" x="155" y="105" width="110" height="50" rx="6" style="stroke:var(--red)"/>
+          <text class="state-label" x="210" y="127">Passed</text>
+          <text class="state-sublabel" x="210" y="141" style="fill:var(--red)">swipe left, terminal</text>
+
+          <path class="state-arrow" d="M265,45 L430,45" marker-end="url(#tinderStateArrowN)"/>
+          <text class="state-sublabel" x="345" y="35" style="font-size:8.5px">reverse swipe checked</text>
+          <rect class="state-node" x="430" y="20" width="130" height="50" rx="6"/>
+          <text class="state-label" x="495" y="42">Pending Check</text>
+          <text class="state-sublabel" x="495" y="56">reverse pair read</text>
+
+          <path class="state-arrow irreversible" d="M560,45 L600,45" marker-end="url(#tinderStateArrowW)"/>
+          <rect class="state-node terminal" x="600" y="20" width="90" height="50" rx="6"/>
+          <text class="state-label" x="645" y="42">Matched</text>
+          <text class="state-sublabel" x="645" y="56" style="font-size:8px">both liked</text>
+
+          <path class="state-arrow" d="M495,70 L495,100 L265,100" marker-end="url(#tinderStateArrowN)" stroke-dasharray="3 3"/>
+          <text class="diag-sublabel" x="495" y="115" style="font-size:8.5px;fill:var(--muted)">other side hasn't swiped yet → stays Liked, waits</text>
+        </svg>
+        <div class="diag-legend">
+          <div class="diag-legend-item"><span class="diag-legend-dot role-client"></span>Seen — no write yet, purely a "don't show again" flag</div>
+          <div class="diag-legend-item"><span class="diag-legend-dot role-async"></span>Matched — only reachable via an atomic reverse-pair check</div>
+        </div>
+      </div>
+      <table class="grid-table">
+        <thead><tr><th>Transition</th><th>Reversible?</th><th>Guard condition</th></tr></thead>
+        <tbody>
+          <tr><td>Seen → Liked / Passed</td><td>No — a swipe is final for that pair</td><td class="detect">Idempotency key on the swipe row prevents a client retry from double-recording</td></tr>
+          <tr><td>Liked → Pending Check</td><td class="impact">N/A — internal step</td><td class="detect">Swipe Svc reads Cassandra for the (swipee_id, swiper_id) reverse row inline, same request</td></tr>
+          <tr><td>Pending Check → Matched</td><td class="impact">No — terminal</td><td class="detect">Reverse row exists and is "like" — Match Svc does a conditional INSERT on the sorted pair, unique constraint rejects a duplicate</td></tr>
+        </tbody>
+      </table>
+      <div class="callout danger">The match race is the sharpest edge case in this system: both users can swipe right within milliseconds of each other, so two concurrent requests may both detect "the other side already liked me." The unique constraint on the sorted (user_a_id, user_b_id) pair in Postgres is what prevents two Match rows — the losing INSERT fails cleanly and that request just treats it as "match already exists," same outcome delivered to the user.</div>
+
+      <table class="grid-table" style="margin-top:1rem">
+        <thead><tr><th>Scenario</th><th>User impact</th><th>Detection signal</th><th>Mitigation</th></tr></thead>
+        <tbody>
+          <tr><td>Redis GEO node failure</td><td class="impact">Live candidate fallback degrades; precomputed decks unaffected</td><td class="detect">GEO query error rate spike</td><td class="fix">Replica promotion; users re-push location on next app open, self-healing</td></tr>
+          <tr><td>Candidate cache cold for a user</td><td class="impact">First deck fetch falls through to a slower live query</td><td class="detect">Cache miss rate per-user spike on new signups</td><td class="fix">On signup, trigger an on-demand mini batch instead of waiting for the nightly job</td></tr>
+          <tr><td>Simultaneous double-like race</td><td class="impact">Risk of duplicate match notification without a guard</td><td class="detect">Unique constraint violation rate on Match table (expected, monitored)</td><td class="fix">Conditional INSERT on sorted pair; losing writer treats the constraint error as a successful match</td></tr>
+          <tr><td>Cassandra partition hot from a high-swipe-volume user</td><td class="impact">Elevated write latency for that partition</td><td class="detect">Per-partition write latency p99 alert</td><td class="fix">Partition key is swiper_id, which is naturally load-balanced — pathological cases get a daily swipe cap</td></tr>
+          <tr><td>Notification Svc outage</td><td class="impact">Match created but not pushed in real time</td><td class="detect">WebSocket delivery failure rate</td><td class="fix">Match row is durable in Postgres regardless — client polls/reconciles on next app open, no data loss</td></tr>
+        </tbody>
+      </table>
+    </section>
+
+    <section id="interview-moves">
+      <h2>Interview moves</h2>
+      <ul class="moves-list">
+        <li><span class="move-num">01</span><div><strong>"Before I design ranking, let me separate candidate discovery from candidate scoring — geo-filter to a few thousand users first, then only rank that shrunk set"</strong> — states the core insight unprompted, prevents an O(n²) design</div></li>
+        <li><span class="move-num">02</span><div><strong>"I'd precompute each user's daily candidate batch offline rather than run the recommendation model on every deck request — that's the only way to hit &lt;200ms at 75M DAU"</strong> — justifies a caching decision with a concrete latency number</div></li>
+        <li><span class="move-num">03</span><div><strong>"A swipe needs an idempotency key — a mobile client retrying a failed request must never double-write or trigger a phantom match check"</strong> — shows awareness of real-world client behavior, not just the happy path</div></li>
+        <li><span class="move-num">04</span><div><strong>"Match detection is a two-writer race — I'd enforce it with a unique constraint on the sorted user pair rather than a read-then-write check, so it's atomic at the database level"</strong> — names the exact concurrency mechanism, not a vague "handle it"</div></li>
+        <li><span class="move-num">05</span><div><strong>"Swipes and profile edits have wildly different access patterns — 130k writes/sec of append-only swipes go to Cassandra, low-frequency strongly-consistent profile data stays in Postgres"</strong> — demonstrates picking storage per access pattern, not one store for everything</div></li>
+        <li><span class="move-num">06</span><div><strong>"If the candidate cache is cold for a brand-new signup, I'd trigger an on-demand mini batch rather than make them wait for the next nightly run"</strong> — proactively covers a cold-start edge case most candidates miss</div></li>
+      </ul>
+    </section>
+
+    <section id="follow-ups">
+      <h2>Follow-up questions</h2>
+      <div class="qa-block">
+        <div class="qa-q">How do you prevent showing the same profile twice in one session?</div>
+        <div class="qa-a">The candidate batch excludes anyone already in the user's Swipe table; "seen" state is also cached client-side for the current session to avoid a re-fetch showing stale entries.</div>
+      </div>
+      <div class="qa-block">
+        <div class="qa-q">How would you handle a user who travels to a new city?</div>
+        <div class="qa-a">Location POST refreshes the Redis GEO key immediately; if the candidate cache has no batch for the new region, trigger an on-demand mini geo-filter job instead of waiting overnight.</div>
+      </div>
+      <div class="qa-block">
+        <div class="qa-q">How do you scale the "who liked me" feature given Swipe is keyed by swiper_id?</div>
+        <div class="qa-a">Maintain a second denormalized table keyed by swipee_id, written asynchronously off the same swipe event — trades a bit of write amplification for a fast reverse lookup.</div>
+      </div>
+      <div class="qa-block">
+        <div class="qa-q">How would you rate-limit or throttle abusive swiping behavior?</div>
+        <div class="qa-a">A daily swipe cap enforced at Swipe Svc, backed by a Redis counter with a 24h TTL — cheap to check inline before the write, resets automatically.</div>
+      </div>
+      <div class="qa-block">
+        <div class="qa-q">Why not rank candidates in real time instead of precomputing batches?</div>
+        <div class="qa-a">Real-time ranking over millions of geo-filtered users per request can't hit &lt;200ms at 75M DAU; precomputing trades some freshness for a latency floor the live path can't reach.</div>
+      </div>
+      <div class="qa-block">
+        <div class="qa-q">How do you extend this to support video profiles or stories?</div>
+        <div class="qa-a">Store media in S3/CDN as with photos, keep only URLs in Profile — the deck-serving and matching logic is entirely unaffected since it never touches media bytes directly.</div>
+      </div>
+    </section>
+
+  </main>
+  <script src="../../assets/nav.js"></script>
+</body>
+</html>

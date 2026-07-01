@@ -1,0 +1,495 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Design Facebook News Feed — SD Prep</title>
+  <link rel="stylesheet" href="../../assets/style.css">
+</head>
+<body>
+  <aside id="sidebar"></aside>
+  <main>
+
+    <header class="page-head">
+      <div class="pill">Questions</div>
+      <h1>Design Facebook News Feed</h1>
+      <p class="sub">Tests whether you can reason about fan-out on write vs read at the tail of the follower-count distribution — one design breaks the moment a celebrity posts.</p>
+      <div class="meta-row">
+        <span class="badge green">40-50 min interview</span>
+        <span class="badge blue">Hard</span>
+      </div>
+    </header>
+
+    <div class="flash-card">
+      <div class="flash-label">Say this in the first 2 minutes</div>
+      <ul>
+        <li>The core insight: fan-out on write vs fan-out on read is not either/or — it's a hybrid keyed on follower count</li>
+        <li>Key scale number to anchor on: a celebrity with 50M followers makes push fan-out physically impossible on a single post</li>
+        <li>Primary tradeoff being probed: write amplification (push) vs read latency (pull) — and who pays the cost</li>
+        <li>Component most candidates forget: the feed is a precomputed, ranked cache (Redis sorted set), not a live query over the Post table</li>
+        <li>Failure mode most candidates skip: what happens when a fan-out worker falls behind during a viral moment — feed staleness must degrade gracefully, not block posting</li>
+      </ul>
+    </div>
+
+    <section id="step1-requirements">
+      <div class="step-pill">Step 1 of 6 — Requirements</div>
+      <h2>Requirements</h2>
+
+      <div class="goal-arc-wrap">
+        <div class="goal-arc-row functional">
+          <div class="goal-arc-seg">1</div><div class="goal-arc-seg">2</div><div class="goal-arc-seg">3</div><div class="goal-arc-seg">4</div><div class="goal-arc-seg">5</div><div class="goal-arc-seg inactive">6</div>
+        </div>
+        <div class="goal-arc-label"><span>Arc 1 (steps 1-5) — <strong>Satisfy Functional Requirements</strong></span></div>
+        <div class="goal-arc-row nonfunctional" style="margin-top:8px">
+          <div class="goal-arc-seg">1</div><div class="goal-arc-seg">2</div><div class="goal-arc-seg">3</div><div class="goal-arc-seg">4</div><div class="goal-arc-seg">5</div><div class="goal-arc-seg">6</div>
+        </div>
+        <div class="goal-arc-label"><span>Arc 2 (all 6 steps) — <strong>Satisfy Non-Functional Requirements</strong></span></div>
+      </div>
+
+      <div class="compare-grid">
+        <div class="compare-card good">
+          <div class="compare-label">Functional</div>
+          <ul>
+            <li>Publish a post (text, image, video) to a user's followers/friends</li>
+            <li>Fetch a ranked, paginated feed for the home page</li>
+            <li>Rank feed items by recency, affinity, and predicted engagement</li>
+            <li>Support likes/comments updating feed item state in near-real-time</li>
+          </ul>
+        </div>
+        <div class="compare-card bad">
+          <div class="compare-label">Non-Functional</div>
+          <ul>
+            <li>2B users, avg 300 friends/follows, celebrities up to 100M followers</li>
+            <li>Feed load latency &lt;200ms p99</li>
+            <li>Post-to-feed-visible latency &lt;5s for 99% of posts</li>
+            <li>Eventually consistent feed is fine; strong consistency on the post itself is not</li>
+          </ul>
+        </div>
+      </div>
+
+      <div class="callout warn"><strong>What NOT to build:</strong> Stories/ephemeral content, Messenger/DMs, group-specific feeds, ads auction/insertion logic, or the full ML training pipeline for ranking. This is publish + fan-out + rank + serve only — ranking signals are treated as inputs, not derived from scratch.</div>
+
+      <div class="stat-grid">
+        <div class="stat-card"><div class="stat-val">~5k/s</div><div class="stat-label">write QPS (new posts)</div></div>
+        <div class="stat-card"><div class="stat-val">~400k/s</div><div class="stat-label">read QPS (feed loads, avg)</div></div>
+        <div class="stat-card"><div class="stat-val">~10M</div><div class="stat-label">fan-out writes for one celebrity post</div></div>
+        <div class="stat-card"><div class="stat-val">800 items</div><div class="stat-label">feed cache depth kept per user</div></div>
+      </div>
+    </section>
+
+    <section id="step2-entities">
+      <div class="step-pill">Step 2 of 6 — Core Entities</div>
+      <h2>Core entities</h2>
+      <p style="font-size:13px;color:#999;margin-bottom:0.75rem">Four entities across three stores, split by access pattern — the feed itself is a derived cache, not a queryable table.</p>
+
+      <div class="entity-grid">
+        <div class="entity-box">
+          <div class="entity-head"><span class="entity-name">Post</span><span class="entity-store pg">Postgres</span></div>
+          <div class="entity-fields">
+            <div class="entity-field"><span class="fname pk">id</span><span class="ftype">BIGINT (Snowflake)</span></div>
+            <div class="entity-field"><span class="fname idx">author_id</span><span class="ftype">BIGINT → User.id</span></div>
+            <div class="entity-field"><span class="fname">content</span><span class="ftype">TEXT</span></div>
+            <div class="entity-field"><span class="fname">media_url</span><span class="ftype">TEXT, nullable → S3</span></div>
+            <div class="entity-field"><span class="fname idx">created_at</span><span class="ftype">TIMESTAMP</span></div>
+          </div>
+          <div class="entity-why">Because a post is the durable source of truth and needs relational integrity with the author — writes are moderate (5k/s) so a single well-indexed table handles it. Tradeoff: not the shape the feed reads from directly.</div>
+        </div>
+
+        <div class="entity-box">
+          <div class="entity-head"><span class="entity-name">SocialGraph</span><span class="entity-store cass">Cassandra</span></div>
+          <div class="entity-fields">
+            <div class="entity-field"><span class="fname pk">user_id</span><span class="ftype">BIGINT, partition key</span></div>
+            <div class="entity-field"><span class="fname idx">follower_id</span><span class="ftype">BIGINT, clustering key</span></div>
+            <div class="entity-field"><span class="fname">relation_type</span><span class="ftype">ENUM(friend, follow)</span></div>
+          </div>
+          <div class="entity-why">Because "who follows this user" must resolve in single-digit milliseconds for fan-out at write time, at massive read volume across a huge dataset — wide-column stores partition this cleanly by user_id. Tradeoff: no cross-partition joins, so friend-of-friend queries need a separate service.</div>
+        </div>
+
+        <div class="entity-box">
+          <div class="entity-head"><span class="entity-name">FeedCache</span><span class="entity-store redis">Redis</span></div>
+          <div class="entity-fields">
+            <div class="entity-field"><span class="fname pk">feed:{user_id}</span><span class="ftype">Sorted Set (ZSET)</span></div>
+            <div class="entity-field"><span class="fname">member</span><span class="ftype">post_id</span></div>
+            <div class="entity-field"><span class="fname">score</span><span class="ftype">rank_score (float, recency + affinity)</span></div>
+          </div>
+          <div class="entity-why">Because the feed read path can't afford to compute ranking on every page load — a precomputed sorted set gives O(log N) inserts and O(log N + K) ranged reads for pagination. Tradeoff: ~800 items/user capped, costs real memory at 2B users (~30TB cluster-wide at 15KB/user).</div>
+        </div>
+
+        <div class="entity-box">
+          <div class="entity-head"><span class="entity-name">EngagementEvent</span><span class="entity-store cass">ClickHouse</span></div>
+          <div class="entity-fields">
+            <div class="entity-field"><span class="fname idx">post_id</span><span class="ftype">String</span></div>
+            <div class="entity-field"><span class="fname">user_id</span><span class="ftype">BIGINT</span></div>
+            <div class="entity-field"><span class="fname">event_type</span><span class="ftype">ENUM(like, comment, share, dwell)</span></div>
+            <div class="entity-field"><span class="fname">ts</span><span class="ftype">DateTime</span></div>
+          </div>
+          <div class="entity-why">Because engagement signals feed the ranking model as append-only, aggregate-heavy analytics — a column store handles billions of daily events for feature computation. Tradeoff: not usable for a synchronous point read on the serving path.</div>
+        </div>
+      </div>
+
+      <div class="callout info">Primary key: <code>Post.id</code> (Snowflake). Critical index: <code>SocialGraph</code> partitioned on <code>user_id</code> so "give me all followers of X" is a single-partition scan — this is the query fan-out workers run millions of times per celebrity post.</div>
+    </section>
+
+    <section id="step3-api">
+      <div class="step-pill">Step 3 of 6 — API / Interface</div>
+      <h2>API design</h2>
+      <p style="font-size:13px;color:#999;margin-bottom:0.75rem">Three endpoints — publish, fetch feed, and engage. Feed fetch is the hottest and most latency-sensitive.</p>
+
+      <div class="api-card">
+        <div class="api-line"><span class="api-method post">POST</span><span class="api-path">/api/v1/posts</span><span class="api-auth">Auth: required</span></div>
+        <div class="api-io">
+          <div class="api-io-block"><div class="api-io-label">Request</div><div class="api-io-body">{ content, media_url? }</div></div>
+          <div class="api-io-block"><div class="api-io-label">Response</div><div class="api-io-body">{ post_id, created_at } — 201, fan-out happens async</div></div>
+        </div>
+      </div>
+
+      <div class="api-card">
+        <div class="api-line"><span class="api-method get">GET</span><span class="api-path">/api/v1/feed?cursor={cursor}&limit=20</span><span class="api-auth">Auth: required</span></div>
+        <div class="api-io">
+          <div class="api-io-block"><div class="api-io-label">Request</div><div class="api-io-body">cursor (opaque rank_score offset), limit</div></div>
+          <div class="api-io-block"><div class="api-io-label">Response</div><div class="api-io-body">{ posts: [{post_id, author, content, score}], next_cursor }</div></div>
+        </div>
+      </div>
+
+      <div class="api-card">
+        <div class="api-line"><span class="api-method post">POST</span><span class="api-path">/api/v1/posts/{post_id}/engage</span><span class="api-auth">Auth: required</span></div>
+        <div class="api-io">
+          <div class="api-io-block"><div class="api-io-label">Request</div><div class="api-io-body">{ event_type: like|comment|share }</div></div>
+          <div class="api-io-block"><div class="api-io-label">Response</div><div class="api-io-body">HTTP 202 — event queued, async fan-in to ranking signals</div></div>
+        </div>
+      </div>
+
+      <div class="api-card">
+        <div class="api-line"><span class="api-method delete">DELETE</span><span class="api-path">/api/v1/posts/{post_id}</span><span class="api-auth">Auth: required (owner)</span></div>
+        <div class="api-io">
+          <div class="api-io-block"><div class="api-io-label">Request</div><div class="api-io-body">path param only</div></div>
+          <div class="api-io-block"><div class="api-io-label">Response</div><div class="api-io-body">HTTP 204 — tombstoned; workers lazily drop it from ZSETs on next read</div></div>
+        </div>
+      </div>
+    </section>
+
+    <section id="step4-dataflow">
+      <div class="step-pill">Step 4 of 6 — Data Flow</div>
+      <h2>Data flow</h2>
+      <p style="font-size:13px;color:#999;margin-bottom:0.75rem">Write path (blue) fans a post out to followers asynchronously; read path (mint) merges the precomputed feed with a live pull for celebrity authors.</p>
+
+      <div class="diagram-wrap" data-paths='{"read":{"boxes":["r-client","r-svc","r-cache","r-pull","r-db"],"arrows":["r1","r2","r3","r4"]},"write":{"boxes":["w-client","w-svc","w-db","w-fanout","w-cache"],"arrows":["w1","w2","w3","w4"]}}'>
+        <svg viewBox="0 0 740 220" xmlns="http://www.w3.org/2000/svg">
+          <defs>
+            <marker id="fnR" markerWidth="8" markerHeight="8" refX="6" refY="3" orient="auto"><path d="M0,0 L6,3 L0,6 Z" fill="var(--accent)"/></marker>
+            <marker id="fnW" markerWidth="8" markerHeight="8" refX="6" refY="3" orient="auto"><path d="M0,0 L6,3 L0,6 Z" fill="var(--blue)"/></marker>
+          </defs>
+
+          <text class="diag-sublabel" x="150" y="14" style="font-size:10px;fill:var(--accent)">READ PATH — load feed</text>
+          <circle class="diag-dot diag-flow-dot" r="3.5" style="offset-path: path('M10,24 L120,24 L120,24 L250,24 L250,24 L380,24 L380,24 L510,24')"></circle>
+          <g data-target="step6-deepdive-fanout" data-id="r-client" data-tip="App opens home feed"><rect class="diag-box role-client" x="10" y="24" width="100" height="46"/><text class="diag-label" x="60" y="52" style="font-size:11px">Client</text></g>
+          <path class="diag-arrow-path" data-id="r1" d="M110,47 L145,47" marker-end="url(#fnR)"/>
+          <g data-target="step6-deepdive-fanout" data-id="r-svc" data-tip="Stateless feed service — reads cache, merges celebrity pulls"><rect class="diag-box" x="145" y="24" width="120" height="46"/><text class="diag-label" x="205" y="47" style="font-size:11px">Feed Svc</text><text class="diag-sublabel" x="205" y="62" style="font-size:8.5px">stateless</text></g>
+          <path class="diag-arrow-path" data-id="r2" d="M265,47 L300,47" marker-end="url(#fnR)"/>
+          <g data-target="step6-deepdive-fanout" data-id="r-cache" data-tip="Precomputed ZSET — read for normal follows, ~2-5ms"><rect class="diag-box role-cache" x="300" y="24" width="100" height="46"/><text class="diag-label" x="350" y="47" style="font-size:11px">Redis</text></g>
+          <path class="diag-arrow-path" data-id="r3" d="M400,47 L435,47" marker-end="url(#fnR)"/>
+          <text class="diag-sublabel" x="417" y="37" style="font-size:9px">merge</text>
+          <g data-target="step6-deepdive-fanout" data-id="r-pull" data-tip="Live fetch of latest posts from followed celebrities"><rect class="diag-box role-async" x="435" y="24" width="120" height="46"/><text class="diag-label" x="495" y="47" style="font-size:11px">Pull Merge</text><text class="diag-sublabel" x="495" y="62" style="font-size:8.5px">celeb authors</text></g>
+          <path class="diag-arrow-path" data-id="r4" d="M555,47 L590,47" marker-end="url(#fnR)"/>
+          <g data-target="step2-entities" data-id="r-db" data-tip="Post content hydration by ID"><rect class="diag-box role-db" x="590" y="24" width="120" height="46"/><text class="diag-label" x="650" y="47" style="font-size:11px">Postgres</text></g>
+
+          <text class="diag-sublabel" x="150" y="105" style="font-size:10px;fill:var(--blue)">WRITE PATH — publish + fan-out</text>
+          <g data-target="step2-entities" data-id="w-client" data-tip="User publishes a new post"><rect class="diag-box role-client" x="10" y="115" width="100" height="46"/><text class="diag-label" x="60" y="143" style="font-size:11px">Client</text></g>
+          <path class="diag-arrow-path" data-id="w1" d="M110,138 L145,138" marker-end="url(#fnW)"/>
+          <g data-target="step2-entities" data-id="w-svc" data-tip="Validates and persists the post, returns 201 immediately"><rect class="diag-box" x="145" y="115" width="120" height="46"/><text class="diag-label" x="205" y="143" style="font-size:11px">Post Svc</text></g>
+          <path class="diag-arrow-path" data-id="w2" d="M265,138 L300,138" marker-end="url(#fnW)"/>
+          <g data-target="step2-entities" data-id="w-db" data-tip="Source of truth for the post"><rect class="diag-box role-db" x="300" y="115" width="110" height="46"/><text class="diag-label" x="355" y="143" style="font-size:11px">Postgres</text></g>
+          <path class="diag-arrow-path" data-id="w3" d="M410,138 L445,138" marker-end="url(#fnW)" stroke-dasharray="3 3"/>
+          <g data-target="step6-deepdive-fanout" data-id="w-fanout" data-tip="Reads follower list, decides push vs skip per author size"><rect class="diag-box role-async" x="445" y="115" width="130" height="46"/><text class="diag-label" x="510" y="138" style="font-size:11px">Fan-out Worker</text><text class="diag-sublabel" x="510" y="153" style="font-size:8.5px">async, Kafka-driven</text></g>
+          <path class="diag-arrow-path" data-id="w4" d="M575,138 L610,138" marker-end="url(#fnW)"/>
+          <g data-target="step6-deepdive-fanout" data-id="w-cache" data-tip="ZADD post_id into each follower's feed ZSET"><rect class="diag-box role-cache" x="610" y="115" width="110" height="46"/><text class="diag-label" x="665" y="143" style="font-size:11px">Redis</text></g>
+
+          <text class="diag-sublabel" x="150" y="188" style="font-size:10px;fill:var(--amber)">ASYNC PATH — ranking signals, never touches read or write above</text>
+          <g data-target="step6-deepdive-ranking" data-id="kafka-eng" data-tip="Likes/comments/shares stream into ranking feature computation"><rect class="diag-box role-async" x="10" y="192" width="150" height="20"/><text class="diag-label" x="85" y="205" style="font-size:9.5px">Engagement → ClickHouse</text></g>
+        </svg>
+        <div class="diag-legend">
+          <div class="diag-legend-item"><span class="diag-legend-dot role-cache"></span>Read path — precomputed cache + celebrity pull merge</div>
+          <div class="diag-legend-item"><span class="diag-legend-dot role-client"></span>Write path — durable post, fan-out decoupled</div>
+          <div class="diag-legend-item"><span class="diag-legend-dot role-async"></span>Fan-out + ranking — fully async, never blocks either path</div>
+        </div>
+      </div>
+
+      <ol class="flow-steps-list">
+        <li><span>Client publishes a post</span> — Post Svc writes to Postgres and returns 201 in under 50ms</li>
+        <li><span>Post event queued to Kafka</span> — fan-out worker picks it up, never blocks the publish response</li>
+        <li><span>Worker checks author follower count</span> — under 1M: push to every follower's Redis ZSET; over 1M: skip push entirely</li>
+        <li><span>Client loads feed</span> — Feed Svc reads the precomputed ZSET, then merges in a live pull for any followed celebrity authors</li>
+        <li><span>Response hydrated and ranked</span> — post IDs resolved against Postgres/CDN for content, sorted by rank_score, paginated back</li>
+      </ol>
+    </section>
+
+    <section id="step5-hld">
+      <div class="step-pill">Step 5 of 6 — High-Level Design</div>
+      <h2>High-level design</h2>
+      <p style="font-size:13px;color:#999;margin-bottom:0.75rem">Full system: publish, hybrid fan-out, ranking signal collection, and feed serving together with every supporting component.</p>
+
+      <div class="diagram-wrap">
+        <svg viewBox="0 0 780 300" xmlns="http://www.w3.org/2000/svg">
+          <defs><marker id="fnHldArrow" markerWidth="8" markerHeight="8" refX="6" refY="3" orient="auto"><path d="M0,0 L6,3 L0,6 Z" fill="var(--border2)"/></marker></defs>
+          <g data-tip="Publish and feed-load requests originate here"><rect class="diag-box role-client" x="10" y="20" width="110" height="50"/><text class="diag-label" x="65" y="50" style="font-size:11px">Clients</text></g>
+          <path class="diag-arrow-path" d="M120,45 L155,45" marker-end="url(#fnHldArrow)"/>
+          <g data-tip="Auth, rate limiting, routing"><rect class="diag-box role-client" x="155" y="20" width="120" height="50"/><text class="diag-label" x="215" y="50" style="font-size:11px">API Gateway</text></g>
+
+          <path class="diag-arrow-path" d="M215,70 L215,105" marker-end="url(#fnHldArrow)"/>
+          <g data-tip="Stateless"><rect class="diag-box" x="150" y="105" width="130" height="46"/><text class="diag-label" x="215" y="128" style="font-size:11px">Post Svc</text><text class="diag-sublabel" x="215" y="143" style="font-size:8.5px">stateless</text></g>
+          <g data-tip="Stateless, merges pull for celebrity authors"><rect class="diag-box" x="300" y="105" width="130" height="46"/><text class="diag-label" x="365" y="128" style="font-size:11px">Feed Svc</text><text class="diag-sublabel" x="365" y="143" style="font-size:8.5px">stateless</text></g>
+          <path class="diag-arrow-path" d="M280,45 L365,45 L365,105" marker-end="url(#fnHldArrow)"/>
+
+          <path class="diag-arrow-path" d="M215,151 L215,185" marker-end="url(#fnHldArrow)"/>
+          <g data-tip="Source of truth for posts"><rect class="diag-box role-db" x="150" y="185" width="130" height="46"/><text class="diag-label" x="215" y="208" style="font-size:11px">Postgres</text></g>
+
+          <path class="diag-arrow-path" d="M215,231 L215,255" marker-end="url(#fnHldArrow)" stroke-dasharray="3 3"/>
+          <g data-tip="Kafka topic — post_created events"><rect class="diag-box role-async" x="150" y="255" width="130" height="35"/><text class="diag-label" x="215" y="277" style="font-size:10px">Kafka</text></g>
+          <path class="diag-arrow-path" d="M280,272 L430,272 L430,231" marker-end="url(#fnHldArrow)"/>
+          <g data-tip="Reads SocialGraph, decides push vs skip by follower count"><rect class="diag-box role-async" x="370" y="185" width="130" height="46"/><text class="diag-label" x="435" y="204" style="font-size:11px">Fan-out Worker</text><text class="diag-sublabel" x="435" y="219" style="font-size:8.5px">push if &lt;1M followers</text></g>
+
+          <path class="diag-arrow-path" d="M435,185 L435,151" marker-end="url(#fnHldArrow)"/>
+          <g data-tip="Wide-column follower/friend index"><rect class="diag-box role-db" x="370" y="105" width="130" height="46"/><text class="diag-label" x="435" y="124" style="font-size:11px">Social Graph</text><text class="diag-sublabel" x="435" y="139" style="font-size:8.5px">Cassandra</text></g>
+
+          <path class="diag-arrow-path" d="M500,208 L535,208" marker-end="url(#fnHldArrow)"/>
+          <g data-tip="Per-user sorted-set feed cache"><rect class="diag-box role-cache" x="535" y="185" width="120" height="46"/><text class="diag-label" x="595" y="208" style="font-size:11px">Redis Feed Cache</text></g>
+          <path class="diag-arrow-path" d="M595,185 L595,151 L430,151" marker-end="url(#fnHldArrow)" stroke-dasharray="3 3"/>
+
+          <g data-tip="Ranking signals feed a score into each ZADD"><rect class="diag-box role-async" x="640" y="20" width="120" height="46"/><text class="diag-label" x="700" y="39" style="font-size:11px">Ranking Svc</text><text class="diag-sublabel" x="700" y="54" style="font-size:8.5px">score model</text></g>
+          <path class="diag-arrow-path" d="M700,66 L700,105 L500,105 L500,185" marker-end="url(#fnHldArrow)" stroke-dasharray="3 3"/>
+
+          <g data-tip="Engagement events buffered for feature computation"><rect class="diag-box role-async" x="640" y="185" width="120" height="46"/><text class="diag-label" x="700" y="204" style="font-size:11px">Engagement</text><text class="diag-sublabel" x="700" y="219" style="font-size:8.5px">Kafka</text></g>
+          <path class="diag-arrow-path" d="M700,231 L700,255" marker-end="url(#fnHldArrow)"/>
+          <g data-tip="Column store for engagement feature aggregation"><rect class="diag-box role-db" x="620" y="255" width="160" height="35"/><text class="diag-label" x="700" y="277" style="font-size:10px">ClickHouse</text></g>
+          <path class="diag-arrow-path" d="M700,255 L700,66" marker-end="url(#fnHldArrow)" stroke-dasharray="2 4"/>
+        </svg>
+        <div class="diag-legend">
+          <div class="diag-legend-item"><span class="diag-legend-dot role-client"></span>Client / gateway</div>
+          <div class="diag-legend-item"><span class="diag-legend-dot role-cache"></span>Redis — precomputed feed</div>
+          <div class="diag-legend-item"><span class="diag-legend-dot role-db"></span>Postgres + Social Graph + ClickHouse</div>
+          <div class="diag-legend-item"><span class="diag-legend-dot role-async"></span>Fan-out worker + Kafka + Ranking Svc</div>
+        </div>
+      </div>
+
+      <table class="def-table">
+        <thead><tr><th>Component</th><th>Role</th><th>Tech + why</th></tr></thead>
+        <tbody>
+          <tr><td>Fan-out Worker</td><td>Pushes new post IDs into follower feed caches</td><td>Kafka-consumer worker pool — because it needs to absorb bursty publish traffic and scale horizontally independent of the write path; tradeoff is added lag under sustained load.</td></tr>
+          <tr><td>Social Graph</td><td>Resolves follower lists for fan-out</td><td>Cassandra — because a single-partition read of millions of followers must stay under ~10ms; tradeoff is eventual consistency on follow/unfollow.</td></tr>
+          <tr><td>Redis Feed Cache</td><td>Serves the precomputed, ranked feed</td><td>Sorted sets — because ZADD/ZREVRANGE give O(log N) writes and ranged reads without recomputing rank on every load; tradeoff is real memory cost at 2B users.</td></tr>
+          <tr><td>Ranking Svc</td><td>Scores each candidate post before it's cached</td><td>Feature-store-backed scoring service — because recency alone produces a bad feed; tradeoff is added latency on the fan-out write path (mitigated by being async).</td></tr>
+        </tbody>
+      </table>
+
+      <h3 style="font-size:13px;color:var(--text);margin:1.25rem 0 0.6rem;font-weight:600">Scaling levers — cheapest to most complex</h3>
+      <ol class="levers-list">
+        <li><strong>Add Redis + Postgres read replicas</strong><span class="cost">near-zero complexity</span></li>
+        <li><strong>Raise the celebrity threshold's fan-out worker pool size</strong> during known viral events<span class="cost">low complexity</span></li>
+        <li><strong>Shard Redis feed cache by user_id hash</strong><span class="cost">medium complexity</span></li>
+        <li><strong>Cap feed cache depth</strong> (e.g. 800 → 400 items) to cut memory footprint under pressure<span class="cost">medium complexity</span></li>
+        <li><strong>Move the celebrity threshold dynamically</strong> based on live fan-out worker lag<span class="cost">high complexity — last resort</span></li>
+      </ol>
+
+      <table class="grid-table">
+        <thead><tr><th>Bottleneck</th><th>Triggers at</th><th>Exact fix</th></tr></thead>
+        <tbody>
+          <tr><td>Fan-out worker lag</td><td>Kafka consumer lag &gt;30s during a viral post</td><td class="fix">Scale out consumer partitions; temporarily lower the celebrity push threshold so more authors fall back to pull</td></tr>
+          <tr><td>Redis memory pressure</td><td>Cluster memory &gt;80%</td><td class="fix">Shard by user_id hash; trim ZSET depth per user; evict cold users' feeds and rebuild on next login</td></tr>
+          <tr><td>Celebrity pull merge slow</td><td>Feed load p99 &gt;200ms for users following many celebrities</td><td class="fix">Cache each celebrity's latest N posts separately with a short TTL so the merge is a cache hit, not a DB query</td></tr>
+        </tbody>
+      </table>
+
+      <div class="dial-wrap">
+        <div class="dial-title">Fan-out strategy: write amplification vs read latency</div>
+        <div class="dial-track"><div class="dial-marker" style="left:30%"></div></div>
+        <div class="dial-labels"><span class="end-left">Push (fan-out on write)</span><span class="end-right">Pull (fan-out on read)</span></div>
+      </div>
+      <div class="dial-wrap">
+        <div class="dial-title">Feed freshness consistency</div>
+        <div class="dial-track"><div class="dial-marker" style="left:80%"></div></div>
+        <div class="dial-labels"><span class="end-left">Strong</span><span class="end-right">Eventual</span></div>
+      </div>
+    </section>
+
+    <section id="step6-deepdive-fanout">
+      <div class="step-pill">Step 6 of 6 — Deep Dives</div>
+      <h2>Deep dive: fan-out write amplification and the hybrid model</h2>
+      <p style="font-size:13px;color:#999;margin-bottom:0.75rem">Pure push fan-out is simple and fast to read — until a single post has to write into 10 million sorted sets.</p>
+
+      <div class="stat-grid">
+        <div class="stat-card"><div class="stat-val">1 post</div><div class="stat-label">published by a celebrity</div></div>
+        <div class="stat-card"><div class="stat-val">10M</div><div class="stat-label">followers to fan out to</div></div>
+        <div class="stat-card"><div class="stat-val">10M ZADDs</div><div class="stat-label">writes fired from one publish event</div></div>
+        <div class="stat-card"><div class="stat-val">~15 min</div><div class="stat-label">time to fully fan out at 11k writes/sec/worker</div></div>
+      </div>
+
+      <div class="flow-cmp-grid">
+        <div class="flow-cmp-col hit">
+          <div class="flow-cmp-title">✓ Normal user — push, ~2ms felt latency</div>
+          <svg viewBox="0 0 320 130" xmlns="http://www.w3.org/2000/svg">
+            <defs><marker id="fnPushArrow" markerWidth="8" markerHeight="8" refX="6" refY="3" orient="auto"><path d="M0,0 L6,3 L0,6 Z" fill="var(--accent)"/></marker></defs>
+            <path class="fn-push-arrow-1" d="M95,40 L195,40" stroke="var(--accent)" stroke-width="2" marker-end="url(#fnPushArrow)" fill="none"/>
+            <path class="fn-push-arrow-2" d="M195,60 L95,60" stroke="var(--accent)" stroke-width="2" marker-end="url(#fnPushArrow)" fill="none"/>
+            <circle class="diag-dot diag-flow-dot" r="3" style="offset-path: path('M95,40 L195,40')"></circle>
+            <rect class="diag-box role-client" x="10" y="20" width="85" height="50" data-tip="800 followers, worker fans out in milliseconds"></rect>
+            <text class="diag-label" x="52" y="40">Publish</text>
+            <text class="diag-sublabel" x="52" y="55">800 followers</text>
+            <g data-tip="ZADD into each follower's cached feed">
+              <rect class="diag-box role-cache" x="195" y="15" width="115" height="60" rx="6"></rect>
+              <text class="diag-label" x="252" y="38" style="font-weight:600">Redis</text>
+              <text class="diag-sublabel" x="252" y="53">800 ZADDs</text>
+              <text class="diag-sublabel" x="252" y="65" style="fill:var(--accent)">done in ~70ms</text>
+            </g>
+            <text x="145" y="100" text-anchor="middle" font-size="10" fill="var(--accent)" font-family="Inter,sans-serif">feed already warm when they open the app</text>
+          </svg>
+          <button class="flow-cmp-replay" data-replay="fn-push-arrow-1,fn-push-arrow-2">▸ Replay</button>
+        </div>
+        <div class="flow-cmp-col miss">
+          <div class="flow-cmp-title">✗ Celebrity (10M followers) — push would take ~15 min</div>
+          <svg viewBox="0 0 420 130" xmlns="http://www.w3.org/2000/svg">
+            <defs><marker id="fnPullArrow" markerWidth="8" markerHeight="8" refX="6" refY="3" orient="auto"><path d="M0,0 L6,3 L0,6 Z" fill="var(--amber)"/></marker></defs>
+            <path class="fn-pull-arrow-1" d="M95,40 L195,40" stroke="var(--amber)" stroke-width="2" marker-end="url(#fnPullArrow)" fill="none" stroke-dasharray="4 3"/>
+            <path class="fn-pull-arrow-2" d="M195,60 L95,60" stroke="var(--amber)" stroke-width="2" marker-end="url(#fnPullArrow)" fill="none" stroke-dasharray="4 3"/>
+            <path class="fn-pull-arrow-3" d="M195,90 L310,90" stroke="var(--amber)" stroke-width="2" marker-end="url(#fnPullArrow)" fill="none"/>
+            <circle class="diag-dot diag-flow-dot" r="3" style="offset-path: path('M195,90 L310,90')"></circle>
+            <rect class="diag-box role-client" x="10" y="20" width="85" height="50" data-tip="Skipped — too expensive to push"></rect>
+            <text class="diag-label" x="52" y="40">Publish</text>
+            <text class="diag-sublabel" x="52" y="55">10M followers</text>
+            <g data-tip="Fan-out worker sees follower_count > 1M and skips push entirely">
+              <rect class="diag-box role-cache" x="195" y="15" width="115" height="60" rx="6"></rect>
+              <text class="diag-label" x="252" y="38" style="font-weight:600">Redis</text>
+              <text class="diag-sublabel" x="252" y="53" style="fill:var(--amber)">push SKIPPED</text>
+              <text class="diag-sublabel" x="252" y="65">not written here</text>
+            </g>
+            <g data-tip="Follower's Feed Svc pulls this celebrity's recent posts live at read time">
+              <rect class="diag-box role-db" x="310" y="65" width="100" height="50" rx="6"></rect>
+              <text class="diag-label" x="360" y="88">Pulled at</text>
+              <text class="diag-sublabel" x="360" y="102" style="fill:var(--amber)">read time</text>
+            </g>
+            <text x="200" y="115" text-anchor="middle" font-size="10" fill="var(--amber)" font-family="Inter,sans-serif">follower's Feed Svc merges this in on load</text>
+          </svg>
+          <button class="flow-cmp-replay" data-replay="fn-pull-arrow-1,fn-pull-arrow-2,fn-pull-arrow-3">▸ Replay</button>
+        </div>
+      </div>
+      <script>
+      (function(){
+        document.querySelectorAll('.flow-cmp-replay').forEach(function(btn){
+          if (btn.dataset.bound) return;
+          btn.dataset.bound = '1';
+          btn.addEventListener('click', function(){
+            var classes = btn.dataset.replay.split(',');
+            var svg = btn.previousElementSibling;
+            classes.forEach(function(cls){
+              var path = svg.querySelector('.' + cls);
+              if (!path) return;
+              var len = path.getTotalLength ? path.getTotalLength() : 100;
+              path.style.strokeDasharray = len;
+              path.style.strokeDashoffset = len;
+              path.getBoundingClientRect();
+              path.style.transition = 'stroke-dashoffset 0.5s ease';
+              path.style.strokeDashoffset = 0;
+            });
+          });
+        });
+      })();
+      </script>
+
+      <div class="callout warn">The hybrid threshold (commonly ~1M followers) isn't arbitrary: below it, push cost is bounded and every follower gets an instantly warm feed; above it, the write amplification (10M+ ZADDs from one post) would starve the fan-out worker pool and delay every other user's fan-out behind it in the same queue.</div>
+    </section>
+
+    <section id="step6-deepdive-ranking">
+      <h2>Deep dive: feed ranking signal pipeline</h2>
+      <p style="font-size:13px;color:#999;margin-bottom:0.75rem">Every candidate post gets a rank_score before it's written into (or merged into) a feed — recency alone produces a feed nobody wants to scroll.</p>
+
+      <div class="diagram-wrap">
+        <svg viewBox="0 0 700 160" xmlns="http://www.w3.org/2000/svg">
+          <defs><marker id="fnRankArrow" markerWidth="8" markerHeight="8" refX="6" refY="3" orient="auto"><path d="M0,0 L6,3 L0,6 Z" fill="var(--border2)"/></marker></defs>
+
+          <g data-tip="Time since posted — decays quickly, half-life ~6 hours"><rect class="diag-box role-client" x="10" y="10" width="140" height="40"/><text class="diag-label" x="80" y="34" style="font-size:10.5px">Recency</text></g>
+          <g data-tip="Historical interaction strength between viewer and author"><rect class="diag-box role-client" x="10" y="60" width="140" height="40"/><text class="diag-label" x="80" y="84" style="font-size:10.5px">Affinity score</text></g>
+          <g data-tip="Model-predicted P(like/comment/share/dwell) for this viewer"><rect class="diag-box role-client" x="10" y="110" width="140" height="40"/><text class="diag-label" x="80" y="134" style="font-size:10.5px">Engagement prediction</text></g>
+          <path class="diag-arrow-path" d="M150,30 L230,80" marker-end="url(#fnRankArrow)"/>
+          <path class="diag-arrow-path" d="M150,80 L230,80" marker-end="url(#fnRankArrow)"/>
+          <path class="diag-arrow-path" d="M150,130 L230,80" marker-end="url(#fnRankArrow)"/>
+
+          <g data-target="step6-deepdive-ranking" data-tip="Weighted combination — a logistic model, not a hand-tuned formula"><rect class="diag-box role-async" x="230" y="55" width="140" height="50" rx="6"/><text class="diag-label" x="300" y="76" style="font-size:11px">Ranking Model</text><text class="diag-sublabel" x="300" y="92" style="font-size:8.5px">logistic regression / GBM</text></g>
+
+          <path class="diag-arrow-path" d="M370,80 L440,80" marker-end="url(#fnRankArrow)"/>
+          <g data-tip="Single float used as the ZADD score"><rect class="diag-box role-cache" x="440" y="55" width="120" height="50" rx="6"/><text class="diag-label" x="500" y="76" style="font-size:11px">rank_score</text><text class="diag-sublabel" x="500" y="92" style="font-size:8.5px">float, e.g. 0.842</text></g>
+
+          <path class="diag-arrow-path" d="M560,80 L630,80" marker-end="url(#fnRankArrow)"/>
+          <g data-tip="Score becomes the ZSET member's sort key"><rect class="diag-box role-db" x="630" y="55" width="60" height="50" rx="6"/><text class="diag-label" x="660" y="80" style="font-size:10px">ZADD</text></g>
+        </svg>
+        <div class="diag-legend">
+          <div class="diag-legend-item"><span class="diag-legend-dot role-client"></span>Input signals</div>
+          <div class="diag-legend-item"><span class="diag-legend-dot role-async"></span>Ranking model</div>
+          <div class="diag-legend-item"><span class="diag-legend-dot role-cache"></span>Score written as ZSET rank</div>
+        </div>
+      </div>
+
+      <ol class="flow-steps-list">
+        <li><span>Recency decays exponentially</span> — a post from 30 minutes ago outranks one from 3 days ago by default, half-life tuned to ~6 hours</li>
+        <li><span>Affinity score computed offline</span> — built from historical interaction rate between the specific viewer and author, refreshed periodically not per-request</li>
+        <li><span>Engagement prediction from ClickHouse features</span> — a lightweight model estimates P(engage) per viewer/post pair using aggregated signals</li>
+        <li><span>Signals combine into one rank_score</span> — a single float so it can be used directly as a Redis ZSET score, no re-ranking needed at read time</li>
+        <li><span>Score is recomputed only on fan-out</span> — not on every feed read, keeping the read path a pure sorted-set range query</li>
+      </ol>
+
+      <div class="callout warn">Ranking must not run synchronously on the feed-read path — if the model call is on the critical path, a slow feature lookup directly adds to feed load latency. Score at fan-out/write time instead, and treat the feed read as a dumb, fast ZREVRANGE.</div>
+
+      <table class="grid-table">
+        <thead><tr><th>Scenario</th><th>User impact</th><th>Detection signal</th><th>Mitigation</th></tr></thead>
+        <tbody>
+          <tr><td>Fan-out worker pool falls behind</td><td class="impact">New posts missing from followers' feeds for minutes</td><td class="detect">Kafka consumer lag alert &gt;60s</td><td class="fix">Auto-scale worker pool; temporarily lower celebrity push threshold to shed load</td></tr>
+          <tr><td>Redis feed cache node down</td><td class="impact">Affected users see empty/stale feed</td><td class="detect">Cache error rate spike on feed reads</td><td class="fix">Fall back to on-demand rebuild from Social Graph + recent Postgres posts, slower but correct</td></tr>
+          <tr><td>Social Graph partition hot (mega-celebrity)</td><td class="impact">Fan-out for that author stalls, delays queue for others</td><td class="detect">Per-partition write latency alarm on Cassandra</td><td class="fix">Route celebrity authors permanently to pull-only, skip fan-out entirely by policy</td></tr>
+          <tr><td>Ranking Svc outage</td><td class="impact">None to availability; feed quality degrades</td><td class="detect">Ranking Svc error rate / timeout alert</td><td class="fix">Fall back to recency-only scoring — feed still loads, just less personalized</td></tr>
+          <tr><td>ClickHouse ingestion backlog</td><td class="impact">None immediately; engagement features go stale over hours</td><td class="detect">Kafka consumer lag on engagement topic</td><td class="fix">Ranking model uses last-known feature snapshot; alert if staleness exceeds a few hours</td></tr>
+        </tbody>
+      </table>
+    </section>
+
+    <section id="interview-moves">
+      <h2>Interview moves</h2>
+      <ul class="moves-list">
+        <li><span class="move-num">01</span><div><strong>"The feed is a precomputed cache, not a live query — I'll rank and materialize it ahead of time so the read path is a cheap sorted-set range scan"</strong> — signals you understand the read/write asymmetry immediately</div></li>
+        <li><span class="move-num">02</span><div><strong>"Pure push fan-out breaks the moment someone with 10 million followers posts — that's 10 million writes fired from one event"</strong> — names the exact failure mode before being asked</div></li>
+        <li><span class="move-num">03</span><div><strong>"I'd use a hybrid: push for normal accounts under roughly a million followers, and merge in a live pull for celebrity accounts at read time"</strong> — the single answer that separates strong candidates on this question</div></li>
+        <li><span class="move-num">04</span><div><strong>"Ranking has to happen at fan-out/write time, not on the read path — otherwise every feed load pays for a model inference"</strong> — shows awareness that read latency budgets are non-negotiable</div></li>
+        <li><span class="move-num">05</span><div><strong>"I'll decouple engagement events into their own async pipeline so a slow ranking feature computation never blocks a like or comment from confirming"</strong> — demonstrates the same hot-path-isolation instinct as write/read separation</div></li>
+        <li><span class="move-num">06</span><div><strong>"If the fan-out workers fall behind during a viral spike, I'd rather show a slightly stale feed than block or slow down publishing"</strong> — states a concrete, correct failure-mode priority unprompted</div></li>
+      </ul>
+    </section>
+
+    <section id="follow-ups">
+      <h2>Follow-up questions</h2>
+      <div class="qa-block">
+        <div class="qa-q">How do you decide the exact follower-count threshold for push vs pull?</div>
+        <div class="qa-a">Based on fan-out worker throughput budget — pick the count where worst-case fan-out time stays under a few seconds, typically in the hundreds of thousands to low millions.</div>
+      </div>
+      <div class="qa-block">
+        <div class="qa-q">What happens when a user follows 500 celebrities?</div>
+        <div class="qa-a">The pull merge at read time queries a small, per-celebrity cached "latest posts" list rather than hitting Postgres directly, keeping the merge itself cache-backed and fast.</div>
+      </div>
+      <div class="qa-block">
+        <div class="qa-q">How do you handle a user with zero cached feed (new account, cold cache)?</div>
+        <div class="qa-a">Fall back to an on-demand build: pull recent posts from their follow list directly from Postgres/Social Graph, rank inline, and populate the ZSET for next time.</div>
+      </div>
+      <div class="qa-block">
+        <div class="qa-q">How do you prevent the feed from being dominated by one hyperactive friend?</div>
+        <div class="qa-a">Cap posts per author per feed window and fold repetition into the affinity signal so the ranking model naturally discounts over-posting from a single source.</div>
+      </div>
+      <div class="qa-block">
+        <div class="qa-q">How would you support real-time-ish updates (new post appears without refresh)?</div>
+        <div class="qa-a">A lightweight WebSocket/long-poll notifying the client a new item exists, prompting a background refetch — not pushing full content over the socket itself.</div>
+      </div>
+      <div class="qa-block">
+        <div class="qa-q">How do you extend this to 10x the user base?</div>
+        <div class="qa-a">Shard Redis and Social Graph further by user_id, push more authors into pull-only status, and move ranking feature computation to precomputed batch snapshots refreshed more frequently.</div>
+      </div>
+    </section>
+
+  </main>
+  <script src="../../assets/nav.js"></script>
+</body>
+</html>

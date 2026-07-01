@@ -1,0 +1,444 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Design a Rate Limiter — SD Prep</title>
+  <link rel="stylesheet" href="../../assets/style.css">
+</head>
+<body>
+  <aside id="sidebar"></aside>
+  <main>
+
+    <header class="page-head">
+      <div class="pill">Questions</div>
+      <h1>Design a Rate Limiter</h1>
+      <p class="sub">Tests whether you understand that rate limiting is fundamentally a distributed counting problem — get the shared-state model wrong and every instance silently multiplies the real limit.</p>
+      <div class="meta-row">
+        <span class="badge green">30-40 min interview</span>
+        <span class="badge blue">Medium</span>
+      </div>
+    </header>
+
+    <div class="flash-card">
+      <div class="flash-label">Say this in the first 2 minutes</div>
+      <ul>
+        <li>The core insight: local in-memory counters per instance are wrong at any scale &gt;1 instance — 10 instances behind a load balancer each enforcing "100/min" independently allows 1000/min in aggregate</li>
+        <li>Key scale number to anchor on: gateway sees ~200k req/s across ~50 backend instances, so the limiter check must add well under 1ms and never become the bottleneck it's supposed to protect</li>
+        <li>Primary tradeoff being probed: token bucket (smooths bursts, allows saved-up capacity) vs sliding window (precise but costs more memory) vs fixed window (cheap but bursts at boundaries)</li>
+        <li>Component most candidates forget: Redis itself needs to be fast and available for every request — if it's down, decide up front whether to fail open (allow) or fail closed (deny)</li>
+        <li>Failure mode most candidates skip: the check-then-increment race — two concurrent requests both read count=99 under a limit of 100 and both get allowed, so the increment must be atomic, not read-modify-write in app code</li>
+      </ul>
+    </div>
+
+    <section id="step1-requirements">
+      <div class="step-pill">Step 1 of 6 — Requirements</div>
+      <h2>Requirements</h2>
+
+      <div class="goal-arc-wrap">
+        <div class="goal-arc-row functional">
+          <div class="goal-arc-seg">1</div><div class="goal-arc-seg">2</div><div class="goal-arc-seg">3</div><div class="goal-arc-seg">4</div><div class="goal-arc-seg">5</div><div class="goal-arc-seg inactive">6</div>
+        </div>
+        <div class="goal-arc-label"><span>Arc 1 (steps 1-5) — <strong>Satisfy Functional Requirements</strong></span></div>
+        <div class="goal-arc-row nonfunctional" style="margin-top:8px">
+          <div class="goal-arc-seg">1</div><div class="goal-arc-seg">2</div><div class="goal-arc-seg">3</div><div class="goal-arc-seg">4</div><div class="goal-arc-seg">5</div><div class="goal-arc-seg">6</div>
+        </div>
+        <div class="goal-arc-label"><span>Arc 2 (all 6 steps) — <strong>Satisfy Non-Functional Requirements</strong></span></div>
+      </div>
+
+      <div class="compare-grid">
+        <div class="compare-card good">
+          <div class="compare-label">Functional</div>
+          <ul>
+            <li>Allow or deny a request based on a configurable rate limit</li>
+            <li>Support multiple limit tiers — per-user, per-API-key, per-IP, per-endpoint</li>
+            <li>Return 429 with a Retry-After header when denied</li>
+            <li>Let limits be configured/updated without redeploying services</li>
+          </ul>
+        </div>
+        <div class="compare-card bad">
+          <div class="compare-label">Non-Functional</div>
+          <ul>
+            <li>~200k req/s at the gateway across ~50 backend instances</li>
+            <li>Limiter check adds &lt;1ms p99 — it must never be the slow part</li>
+            <li>Limit enforcement consistent across all instances, not per-node</li>
+            <li>Highly available — a limiter outage should degrade, never take down the API</li>
+          </ul>
+        </div>
+      </div>
+
+      <div class="callout warn"><strong>What NOT to build:</strong> a general-purpose API gateway, DDoS mitigation at the network layer, or a billing/quota system. This is strictly the allow/deny decision and its supporting counter infrastructure — not WAF rules or usage-based invoicing.</div>
+
+      <div class="stat-grid">
+        <div class="stat-card"><div class="stat-val">100/min</div><div class="stat-label">typical per-user limit</div></div>
+        <div class="stat-card"><div class="stat-val">~200k/s</div><div class="stat-label">total gateway throughput</div></div>
+        <div class="stat-card"><div class="stat-val">&lt;1ms</div><div class="stat-label">Redis INCR + EXPIRE round trip</div></div>
+        <div class="stat-card"><div class="stat-val">~50</div><div class="stat-label">backend instances sharing state</div></div>
+      </div>
+    </section>
+
+    <section id="step2-entities">
+      <div class="step-pill">Step 2 of 6 — Core Entities</div>
+      <h2>Core entities</h2>
+      <p style="font-size:13px;color:#999;margin-bottom:0.75rem">Three entities — the rule config is cold and relational, the live counters are hot and ephemeral, so they live in different stores by access pattern.</p>
+
+      <div class="entity-grid">
+        <div class="entity-box">
+          <div class="entity-head"><span class="entity-name">RateLimitRule</span><span class="entity-store pg">Postgres</span></div>
+          <div class="entity-fields">
+            <div class="entity-field"><span class="fname pk">id</span><span class="ftype">BIGINT</span></div>
+            <div class="entity-field"><span class="fname idx">scope</span><span class="ftype">ENUM(user, api_key, ip, endpoint)</span></div>
+            <div class="entity-field"><span class="fname">limit_count</span><span class="ftype">INT</span></div>
+            <div class="entity-field"><span class="fname">window_seconds</span><span class="ftype">INT</span></div>
+            <div class="entity-field"><span class="fname">algorithm</span><span class="ftype">ENUM(token_bucket, sliding_window, fixed_window)</span></div>
+          </div>
+          <div class="entity-why">Because rule config changes rarely (ops-driven, not per-request) and needs relational integrity across scopes. Tradeoff: it's never on the hot path — it's read once and cached in-memory on each limiter node, refreshed every ~30s.</div>
+        </div>
+
+        <div class="entity-box">
+          <div class="entity-head"><span class="entity-name">Counter</span><span class="entity-store redis">Redis</span></div>
+          <div class="entity-fields">
+            <div class="entity-field"><span class="fname pk">key</span><span class="ftype">"rl:{scope}:{id}:{window}"</span></div>
+            <div class="entity-field"><span class="fname">count</span><span class="ftype">INT (atomic via INCR)</span></div>
+            <div class="entity-field"><span class="fname">ttl</span><span class="ftype">seconds, auto-expires the key</span></div>
+          </div>
+          <div class="entity-why">Because every request needs an atomic read-and-increment across every instance in under a millisecond — Redis's single-threaded command execution makes INCR inherently race-free without app-level locking. Tradeoff: Redis becomes a single dependency every request now hits.</div>
+        </div>
+
+        <div class="entity-box">
+          <div class="entity-head"><span class="entity-name">TokenBucketState</span><span class="entity-store redis">Redis</span></div>
+          <div class="entity-fields">
+            <div class="entity-field"><span class="fname pk">key</span><span class="ftype">"tb:{scope}:{id}"</span></div>
+            <div class="entity-field"><span class="fname">tokens</span><span class="ftype">FLOAT, current bucket level</span></div>
+            <div class="entity-field"><span class="fname">last_refill_ts</span><span class="ftype">FLOAT, epoch ms</span></div>
+          </div>
+          <div class="entity-why">Because token bucket needs two fields updated together (tokens consumed, refill timestamp advanced) — stored as a Redis hash and mutated via a Lua script so the read-compute-write is atomic in one round trip. Tradeoff: slightly more compute per request than a plain INCR.</div>
+        </div>
+      </div>
+
+      <div class="callout info">Primary key: <code>Counter.key</code>, composed as <code>rl:{scope}:{identifier}:{window_start}</code>. Critical index: none needed — Redis keys are the index, and TTL-based auto-expiry means no cleanup job is ever required.</div>
+    </section>
+
+    <section id="step3-api">
+      <div class="step-pill">Step 3 of 6 — API / Interface</div>
+      <h2>API design</h2>
+      <p style="font-size:13px;color:#999;margin-bottom:0.75rem">The rate limiter is usually a middleware/sidecar, not a public API — but it still needs an internal check endpoint plus admin CRUD for rules.</p>
+
+      <div class="api-card">
+        <div class="api-line"><span class="api-method post">POST</span><span class="api-path">/internal/v1/check</span><span class="api-auth">Auth: service-to-service</span></div>
+        <div class="api-io">
+          <div class="api-io-block"><div class="api-io-label">Request</div><div class="api-io-body">{ scope, identifier, endpoint }</div></div>
+          <div class="api-io-block"><div class="api-io-label">Response</div><div class="api-io-body">{ allowed, remaining, retry_after_ms }</div></div>
+        </div>
+      </div>
+
+      <div class="api-card">
+        <div class="api-line"><span class="api-method get">GET</span><span class="api-path">/internal/v1/rules/{scope}</span><span class="api-auth">Auth: service-to-service</span></div>
+        <div class="api-io">
+          <div class="api-io-block"><div class="api-io-label">Request</div><div class="api-io-body">path param only</div></div>
+          <div class="api-io-block"><div class="api-io-label">Response</div><div class="api-io-body">{ limit_count, window_seconds, algorithm } — cached client-side ~30s</div></div>
+        </div>
+      </div>
+
+      <div class="api-card">
+        <div class="api-line"><span class="api-method post">POST</span><span class="api-path">/api/v1/admin/rules</span><span class="api-auth">Auth: required (admin)</span></div>
+        <div class="api-io">
+          <div class="api-io-block"><div class="api-io-label">Request</div><div class="api-io-body">{ scope, limit_count, window_seconds, algorithm }</div></div>
+          <div class="api-io-block"><div class="api-io-label">Response</div><div class="api-io-body">{ rule_id } — HTTP 201, propagates on next refresh cycle</div></div>
+        </div>
+      </div>
+
+      <div class="api-card">
+        <div class="api-line"><span class="api-method put">PUT</span><span class="api-path">/api/v1/admin/rules/{id}</span><span class="api-auth">Auth: required (admin)</span></div>
+        <div class="api-io">
+          <div class="api-io-block"><div class="api-io-label">Request</div><div class="api-io-body">{ limit_count?, window_seconds? }</div></div>
+          <div class="api-io-block"><div class="api-io-label">Response</div><div class="api-io-body">HTTP 200 — existing in-flight windows are not retroactively affected</div></div>
+        </div>
+      </div>
+    </section>
+
+    <section id="step4-dataflow">
+      <div class="step-pill">Step 4 of 6 — Data Flow</div>
+      <h2>Data flow</h2>
+      <p style="font-size:13px;color:#999;margin-bottom:0.75rem">Two outcomes for the same path — the ALLOW row (mint) and the DENY row (amber) — both hit Redis, they just diverge on the response.</p>
+
+      <div class="diagram-wrap" data-paths='{"allow":{"boxes":["a-client","a-gw","a-mw","a-redis","a-svc"],"arrows":["a1","a2","a3","a4"]},"deny":{"boxes":["d-client","d-gw","d-mw","d-redis"],"arrows":["d1","d2","d3"]}}'>
+        <svg viewBox="0 0 740 220" xmlns="http://www.w3.org/2000/svg">
+          <defs>
+            <marker id="rlAllowArrow" markerWidth="8" markerHeight="8" refX="6" refY="3" orient="auto"><path d="M0,0 L6,3 L0,6 Z" fill="var(--accent)"/></marker>
+            <marker id="rlDenyArrow" markerWidth="8" markerHeight="8" refX="6" refY="3" orient="auto"><path d="M0,0 L6,3 L0,6 Z" fill="var(--amber)"/></marker>
+          </defs>
+
+          <text class="diag-sublabel" x="150" y="14" style="font-size:10px;fill:var(--accent)">ALLOW PATH — under limit</text>
+          <circle class="diag-dot diag-flow-dot" r="3.5" style="offset-path: path('M10,24 L120,24 L120,24 L250,24 L250,24 L380,24 L380,24 L510,24')"></circle>
+          <g data-target="step6-deepdive-tokenbucket" data-id="a-client" data-tip="Any authenticated API request"><rect class="diag-box role-client" x="10" y="24" width="100" height="46"/><text class="diag-label" x="60" y="52" style="font-size:11px">Client</text></g>
+          <path class="diag-arrow-path" data-id="a1" d="M110,47 L145,47" marker-end="url(#rlAllowArrow)"/>
+          <g data-target="step5-hld" data-id="a-gw" data-tip="Terminates TLS, authenticates the request"><rect class="diag-box role-client" x="145" y="24" width="100" height="46"/><text class="diag-label" x="195" y="52" style="font-size:11px">Gateway</text></g>
+          <path class="diag-arrow-path" data-id="a2" d="M245,47 L280,47" marker-end="url(#rlAllowArrow)"/>
+          <g data-target="step6-deepdive-tokenbucket" data-id="a-mw" data-tip="Extracts scope+identifier, calls the limiter"><rect class="diag-box" x="280" y="24" width="120" height="46"/><text class="diag-label" x="340" y="47" style="font-size:11px">Rate Limit MW</text><text class="diag-sublabel" x="340" y="62" style="font-size:8.5px">stateless</text></g>
+          <path class="diag-arrow-path" data-id="a3" d="M400,47 L435,47" marker-end="url(#rlAllowArrow)"/>
+          <g data-target="step6-deepdive-tokenbucket" data-id="a-redis" data-tip="Atomic INCR (or Lua token-bucket script) resolves in &lt;1ms"><rect class="diag-box role-cache" x="435" y="24" width="100" height="46"/><text class="diag-label" x="485" y="47" style="font-size:11px">Redis</text></g>
+          <path class="diag-arrow-path" data-id="a4" d="M535,47 L570,47" marker-end="url(#rlAllowArrow)"/>
+          <text class="diag-sublabel" x="552" y="37" style="font-size:9px">under limit</text>
+          <g data-target="step5-hld" data-id="a-svc" data-tip="Request proceeds to the actual backend"><rect class="diag-box role-db" x="570" y="24" width="120" height="46"/><text class="diag-label" x="630" y="47" style="font-size:11px">Backend Svc</text></g>
+
+          <text class="diag-sublabel" x="150" y="105" style="font-size:10px;fill:var(--amber)">DENY PATH — over limit</text>
+          <g data-target="step6-deepdive-window" data-id="d-client" data-tip="Same client, has burst past the limit"><rect class="diag-box role-client" x="10" y="115" width="100" height="46"/><text class="diag-label" x="60" y="143" style="font-size:11px">Client</text></g>
+          <path class="diag-arrow-path" data-id="d1" d="M110,138 L145,138" marker-end="url(#rlDenyArrow)"/>
+          <g data-target="step5-hld" data-id="d-gw" data-tip="Same gateway path"><rect class="diag-box role-client" x="145" y="115" width="100" height="46"/><text class="diag-label" x="195" y="143" style="font-size:11px">Gateway</text></g>
+          <path class="diag-arrow-path" data-id="d2" d="M245,138 L280,138" marker-end="url(#rlDenyArrow)"/>
+          <g data-target="step6-deepdive-window" data-id="d-mw" data-tip="Same atomic check, count already at limit"><rect class="diag-box" x="280" y="115" width="120" height="46"/><text class="diag-label" x="340" y="143" style="font-size:11px">Rate Limit MW</text></g>
+          <path class="diag-arrow-path" data-id="d3" d="M400,138 L435,138" marker-end="url(#rlDenyArrow)"/>
+          <g data-target="step6-deepdive-window" data-id="d-redis" data-tip="Returns count &gt;= limit, no backend call made"><rect class="diag-box role-cache" x="435" y="115" width="100" height="46"/><text class="diag-label" x="485" y="138" style="font-size:11px">Redis</text></g>
+          <text class="diag-sublabel" x="600" y="143" style="font-size:9.5px;fill:var(--amber)">429 + Retry-After returned to client</text>
+
+          <text class="diag-sublabel" x="150" y="188" style="font-size:10px;fill:var(--blue)">CONFIG PATH — rule updates, off the hot path</text>
+          <g data-target="step2-entities" data-id="rules-db" data-tip="Middleware polls/refreshes rules every ~30s, never per-request"><rect class="diag-box role-db" x="10" y="192" width="150" height="20"/><text class="diag-label" x="85" y="205" style="font-size:9.5px">Postgres → rule cache</text></g>
+        </svg>
+        <div class="diag-legend">
+          <div class="diag-legend-item"><span class="diag-legend-dot role-cache"></span>Redis — shared atomic counter, source of truth for the decision</div>
+          <div class="diag-legend-item"><span class="diag-legend-dot role-client"></span>Gateway + middleware — stateless, horizontally scalable</div>
+          <div class="diag-legend-item"><span class="diag-legend-dot role-db"></span>Postgres — cold rule config, polled not queried per-request</div>
+        </div>
+      </div>
+
+      <ol class="flow-steps-list">
+        <li><span>Gateway authenticates the request</span> — resolves the identifier (user ID, API key, or IP) used as the rate-limit scope</li>
+        <li><span>Middleware builds the counter key</span> — e.g. <code>rl:user:4471:2026-06-30T14:22</code> for a fixed window, or <code>tb:user:4471</code> for token bucket</li>
+        <li><span>Atomic Redis operation executes</span> — INCR+EXPIRE or a Lua script, resolving in under 1ms with no read-modify-write race</li>
+        <li><span>Decision made from the returned count</span> — under limit → forward to backend; at/over limit → short-circuit with 429</li>
+        <li><span>Response includes Retry-After</span> — computed from the window's remaining TTL or the bucket's refill rate, so clients can back off correctly</li>
+      </ol>
+    </section>
+
+    <section id="step5-hld">
+      <div class="step-pill">Step 5 of 6 — High-Level Design</div>
+      <h2>High-level design</h2>
+      <p style="font-size:13px;color:#999;margin-bottom:0.75rem">Full system: gateway, rate-limit middleware, the Redis counter tier, and the cold config path together.</p>
+
+      <div class="diagram-wrap">
+        <svg viewBox="0 0 780 300" xmlns="http://www.w3.org/2000/svg">
+          <defs><marker id="rlHldArrow" markerWidth="8" markerHeight="8" refX="6" refY="3" orient="auto"><path d="M0,0 L6,3 L0,6 Z" fill="var(--border2)"/></marker></defs>
+          <g data-tip="All inbound API traffic"><rect class="diag-box role-client" x="10" y="20" width="110" height="50"/><text class="diag-label" x="65" y="50" style="font-size:11px">Clients</text></g>
+          <path class="diag-arrow-path" d="M120,45 L155,45" marker-end="url(#rlHldArrow)"/>
+          <g data-tip="TLS termination, auth, routing to N backend instances"><rect class="diag-box role-cdn" x="155" y="20" width="120" height="50"/><text class="diag-label" x="215" y="50" style="font-size:11px">API Gateway</text></g>
+          <path class="diag-arrow-path" d="M275,45 L310,45" marker-end="url(#rlHldArrow)"/>
+          <g data-tip="Runs as gateway plugin or sidecar, not a separate network hop"><rect class="diag-box role-client" x="310" y="20" width="140" height="50"/><text class="diag-label" x="380" y="45" style="font-size:11px">Rate Limit MW</text><text class="diag-sublabel" x="380" y="60" style="font-size:8.5px">stateless, x50</text></g>
+
+          <path class="diag-arrow-path" d="M380,70 L380,105" marker-end="url(#rlHldArrow)"/>
+          <g data-tip="Cluster mode — sharded by key hash, replicated per shard"><rect class="diag-box role-cache" x="315" y="105" width="130" height="46"/><text class="diag-label" x="380" y="128" style="font-size:11px">Redis Cluster</text><text class="diag-sublabel" x="380" y="143" style="font-size:8.5px">counters + buckets</text></g>
+
+          <path class="diag-arrow-path" d="M410,151 L410,185" marker-end="url(#rlHldArrow)" stroke-dasharray="3 3"/>
+          <g data-tip="Forwarded only when the limiter allows"><rect class="diag-box role-db" x="345" y="185" width="130" height="46"/><text class="diag-label" x="410" y="208" style="font-size:11px">Backend Svc</text><text class="diag-sublabel" x="410" y="223" style="font-size:8.5px">horizontally scaled</text></g>
+
+          <path class="diag-arrow-path" d="M450,45 L620,45 L620,105" marker-end="url(#rlHldArrow)" stroke-dasharray="3 3"/>
+          <g data-tip="Cold config, source of truth for limits per scope"><rect class="diag-box role-db" x="555" y="105" width="130" height="46"/><text class="diag-label" x="620" y="128" style="font-size:11px">Postgres</text><text class="diag-sublabel" x="620" y="143" style="font-size:8.5px">rule config</text></g>
+          <path class="diag-arrow-path" d="M620,151 L620,185" marker-end="url(#rlHldArrow)"/>
+          <g data-tip="Async, batched — never blocks the allow/deny decision"><rect class="diag-box role-async" x="555" y="185" width="130" height="46"/><text class="diag-label" x="620" y="208" style="font-size:11px">Metrics/Alerting</text><text class="diag-sublabel" x="620" y="223" style="font-size:8.5px">deny-rate, hot keys</text></g>
+
+          <g data-tip="Emits deny events for monitoring dashboards"><rect class="diag-box role-async" x="10" y="240" width="230" height="40" rx="4"/><text class="diag-label" x="125" y="264" style="font-size:10px">Middleware emits async deny/allow counters → Metrics</text></g>
+        </svg>
+        <div class="diag-legend">
+          <div class="diag-legend-item"><span class="diag-legend-dot role-client"></span>Clients / gateway / middleware</div>
+          <div class="diag-legend-item"><span class="diag-legend-dot role-cache"></span>Redis — the shared source of truth for counts</div>
+          <div class="diag-legend-item"><span class="diag-legend-dot role-db"></span>Backend services + Postgres rule config</div>
+          <div class="diag-legend-item"><span class="diag-legend-dot role-async"></span>Metrics/alerting — decoupled from the decision path</div>
+        </div>
+      </div>
+
+      <table class="def-table">
+        <thead><tr><th>Component</th><th>Role</th><th>Tech + why</th></tr></thead>
+        <tbody>
+          <tr><td>Rate Limit MW</td><td>Computes the key, calls Redis, returns allow/deny</td><td>In-process middleware or sidecar — because an extra network hop per request would double the latency budget; tradeoff is it must be redeployed alongside the gateway.</td></tr>
+          <tr><td>Redis Cluster</td><td>Atomic shared counters across all instances</td><td>Single-threaded command execution — because it makes INCR and Lua scripts atomic with zero app-level locking; tradeoff is Redis itself becomes a critical dependency for every request.</td></tr>
+          <tr><td>Postgres</td><td>Durable rule configuration</td><td>Relational store — because rules are low-volume, ops-authored, and need integrity; tradeoff is it's never queried per-request, only polled every ~30s into an in-memory cache.</td></tr>
+          <tr><td>Metrics/Alerting</td><td>Tracks deny rates and hot keys</td><td>Async counters shipped off the request path — because computing dashboards synchronously would add latency to a system whose entire job is being fast; tradeoff is metrics lag reality by a few seconds.</td></tr>
+        </tbody>
+      </table>
+
+      <h3 style="font-size:13px;color:var(--text);margin:1.25rem 0 0.6rem;font-weight:600">Scaling levers — cheapest to most complex</h3>
+      <ol class="levers-list">
+        <li><strong>Cache rule config in-memory on each middleware node</strong>, refresh every 30s<span class="cost">near-zero complexity</span></li>
+        <li><strong>Batch the metrics/alerting counters</strong> instead of firing one event per request<span class="cost">low complexity</span></li>
+        <li><strong>Shard Redis by key hash across cluster nodes</strong> as counter volume grows<span class="cost">medium complexity</span></li>
+        <li><strong>Move to a local+global two-tier limiter</strong> — approximate locally, sync to Redis periodically<span class="cost">medium-high complexity</span></li>
+        <li><strong>Add per-region Redis clusters with async replication</strong> for multi-region deployments<span class="cost">high complexity — last resort</span></li>
+      </ol>
+
+      <table class="grid-table">
+        <thead><tr><th>Bottleneck</th><th>Triggers at</th><th>Exact fix</th></tr></thead>
+        <tbody>
+          <tr><td>Redis single-node saturation</td><td>&gt;100k ops/sec on one node</td><td class="fix">Move to Redis Cluster, shard counters by scope+identifier hash</td></tr>
+          <tr><td>Hot key contention</td><td>One identifier (e.g. a shared API key) dominates a shard</td><td class="fix">Add a client-local pre-check cache with short TTL to absorb repeat hits before they reach Redis</td></tr>
+          <tr><td>Redis unavailable</td><td>Cluster failover or network partition</td><td class="fix">Fail open for low-risk endpoints, fail closed for sensitive ones — decide per-endpoint up front, never a global default</td></tr>
+        </tbody>
+      </table>
+
+      <div class="dial-wrap">
+        <div class="dial-title">Algorithm choice: burst tolerance vs precision</div>
+        <div class="dial-track"><div class="dial-marker" style="left:25%"></div></div>
+        <div class="dial-labels"><span class="end-left">Token bucket (bursty, smooth)</span><span class="end-right">Sliding window log (precise, costly)</span></div>
+      </div>
+      <div class="dial-wrap">
+        <div class="dial-title">Redis outage behavior</div>
+        <div class="dial-track"><div class="dial-marker" style="left:70%"></div></div>
+        <div class="dial-labels"><span class="end-left">Fail open (available)</span><span class="end-right">Fail closed (protective)</span></div>
+      </div>
+    </section>
+
+    <section id="step6-deepdive-tokenbucket">
+      <div class="step-pill">Step 6 of 6 — Deep Dives</div>
+      <h2>Deep dive: token bucket algorithm</h2>
+      <p style="font-size:13px;color:#999;margin-bottom:0.75rem">Tokens refill continuously into a fixed-capacity bucket; each request consumes one. This is what allows a client to burst up to the bucket size, then throttles to the steady refill rate.</p>
+
+      <div class="diagram-wrap">
+        <svg viewBox="0 0 500 170" xmlns="http://www.w3.org/2000/svg">
+          <defs>
+            <marker id="rlTbArrow" markerWidth="8" markerHeight="8" refX="6" refY="3" orient="auto"><path d="M0,0 L6,3 L0,6 Z" fill="var(--accent)"/></marker>
+            <clipPath id="rlBucketClip"><rect x="185" y="35" width="90" height="90" rx="4"/></clipPath>
+          </defs>
+
+          <text class="diag-sublabel" x="60" y="20" style="font-size:10px;fill:var(--blue)">refill @ 100/60s = ~1.67/sec</text>
+          <circle class="rl-tb-refill" cx="55" cy="35" r="4" fill="var(--blue)"/>
+          <circle class="rl-tb-refill" cx="55" cy="35" r="4" fill="var(--blue)" style="animation-delay:0.6s"/>
+          <circle class="rl-tb-refill" cx="55" cy="35" r="4" fill="var(--blue)" style="animation-delay:1.2s"/>
+          <path d="M55,45 L55,90 L185,90" stroke="var(--blue)" stroke-width="1.5" fill="none" stroke-dasharray="3 3"/>
+
+          <rect x="185" y="35" width="90" height="90" rx="4" fill="none" stroke="var(--border2)" stroke-width="1.5"/>
+          <rect x="187" y="70" width="86" height="53" fill="#0d1f17" clip-path="url(#rlBucketClip)"/>
+          <text x="230" y="140" text-anchor="middle" font-size="10" fill="var(--accent)" font-family="Inter,sans-serif">bucket: 65/100 tokens</text>
+          <text x="230" y="60" text-anchor="middle" font-size="9" fill="var(--text)" font-family="Inter,sans-serif">capacity 100</text>
+
+          <path class="rl-tb-consume" d="M275,80 L400,80" stroke="var(--amber)" stroke-width="2" marker-end="url(#rlTbArrow)" fill="none"/>
+          <text x="335" y="70" text-anchor="middle" font-size="9" fill="var(--amber)" font-family="Inter,sans-serif">request consumes 1</text>
+          <g data-tip="Request arrives, checks tokens &gt;= 1"><rect class="diag-box role-client" x="400" y="55" width="90" height="50"/><text class="diag-label" x="445" y="80" style="font-size:10px">Request</text><text class="diag-sublabel" x="445" y="94" style="font-size:8px">cost: 1 token</text></g>
+        </svg>
+        <button class="flow-cmp-replay" data-replay="rl-tb-consume">▸ Replay consume</button>
+      </div>
+
+      <ol class="flow-steps-list">
+        <li><span>Lua script runs atomically in Redis</span> — reads <code>tokens</code> and <code>last_refill_ts</code> from the hash in one round trip</li>
+        <li><span>Compute elapsed time</span> — <code>now - last_refill_ts</code>, multiplied by the refill rate (e.g. 1.67 tokens/sec for 100/min)</li>
+        <li><span>Add refilled tokens, capped at bucket capacity</span> — a bucket never exceeds its max, so idle time doesn't grant unlimited future bursts</li>
+        <li><span>Check if tokens &gt;= cost</span> — if yes, subtract and allow; if no, deny and return time-until-next-token as Retry-After</li>
+        <li><span>Write back tokens and timestamp</span> — same Lua script, same round trip, no separate write call</li>
+      </ol>
+
+      <div class="callout info">Memory cost: one Redis hash per active identifier, ~100 bytes each. At 10M active users that's ~1GB — trivial for a Redis cluster, and idle users' keys just expire via TTL.</div>
+
+      <script>
+      (function(){
+        document.querySelectorAll('.flow-cmp-replay').forEach(function(btn){
+          if (btn.dataset.bound) return;
+          btn.dataset.bound = '1';
+          btn.addEventListener('click', function(){
+            var classes = btn.dataset.replay.split(',');
+            var svg = btn.previousElementSibling;
+            classes.forEach(function(cls){
+              var path = svg.querySelector('.' + cls);
+              if (!path) return;
+              var len = path.getTotalLength ? path.getTotalLength() : 100;
+              path.style.strokeDasharray = len;
+              path.style.strokeDashoffset = len;
+              path.getBoundingClientRect();
+              path.style.transition = 'stroke-dashoffset 0.5s ease';
+              path.style.strokeDashoffset = 0;
+            });
+          });
+        });
+      })();
+      </script>
+    </section>
+
+    <section id="step6-deepdive-window">
+      <h2>Deep dive: fixed window boundary burst vs sliding window</h2>
+      <p style="font-size:13px;color:#999;margin-bottom:0.75rem">Fixed windows are cheap (one INCR per key) but let a client burst up to 2x the limit right at the window edge. Sliding window log fixes it at the cost of storing a timestamp per request.</p>
+
+      <div class="flow-cmp-grid">
+        <div class="flow-cmp-col miss">
+          <div class="flow-cmp-title">✗ Fixed window — boundary burst</div>
+          <svg viewBox="0 0 340 150" xmlns="http://www.w3.org/2000/svg">
+            <line x1="20" y1="110" x2="320" y2="110" stroke="var(--border2)" stroke-width="1"/>
+            <rect x="20" y="20" width="150" height="90" fill="#1a1400" stroke="var(--amber)" stroke-width="1" stroke-dasharray="3 3"/>
+            <rect x="170" y="20" width="150" height="90" fill="#1a1400" stroke="var(--amber)" stroke-width="1" stroke-dasharray="3 3"/>
+            <text x="95" y="14" text-anchor="middle" font-size="9" fill="var(--amber)" font-family="Inter,sans-serif">window N (0:00-1:00)</text>
+            <text x="245" y="14" text-anchor="middle" font-size="9" fill="var(--amber)" font-family="Inter,sans-serif">window N+1 (1:00-2:00)</text>
+            <rect x="140" y="60" width="10" height="50" fill="var(--amber)"/>
+            <rect x="170" y="60" width="10" height="50" fill="var(--amber)"/>
+            <text x="160" y="130" text-anchor="middle" font-size="9.5" fill="var(--amber)" font-family="Inter,sans-serif">100 reqs at 0:59 + 100 reqs at 1:01</text>
+            <text x="160" y="144" text-anchor="middle" font-size="9.5" fill="var(--amber)" font-family="Inter,sans-serif">= 200 in 2 seconds, both windows say "allowed"</text>
+          </svg>
+        </div>
+        <div class="flow-cmp-col hit">
+          <div class="flow-cmp-title">✓ Sliding window log — smooth</div>
+          <svg viewBox="0 0 340 150" xmlns="http://www.w3.org/2000/svg">
+            <line x1="20" y1="110" x2="320" y2="110" stroke="var(--border2)" stroke-width="1"/>
+            <rect x="60" y="20" width="200" height="90" fill="#0d1f17" stroke="var(--accent)" stroke-width="1" stroke-dasharray="3 3"/>
+            <text x="160" y="14" text-anchor="middle" font-size="9" fill="var(--accent)" font-family="Inter,sans-serif">rolling 60s window, evaluated per-request</text>
+            <rect x="140" y="70" width="6" height="40" fill="var(--accent)"/>
+            <rect x="155" y="70" width="6" height="40" fill="var(--accent)"/>
+            <rect x="170" y="65" width="6" height="45" fill="var(--accent)"/>
+            <text x="160" y="130" text-anchor="middle" font-size="9.5" fill="var(--accent)" font-family="Inter,sans-serif">count = requests with ts in [now-60s, now]</text>
+            <text x="160" y="144" text-anchor="middle" font-size="9.5" fill="var(--accent)" font-family="Inter,sans-serif">rate is exact at every instant, no edge to exploit</text>
+          </svg>
+        </div>
+      </div>
+
+      <p style="font-size:13px;color:#999;margin:0.75rem 0">Implementation: a Redis sorted set per identifier, score = request timestamp. Each check does <code>ZREMRANGEBYSCORE</code> (drop entries older than the window) then <code>ZCARD</code> (count what's left) then <code>ZADD</code> (record this request) — all in one Lua script for atomicity. Cost: O(log n) per op and one sorted-set entry per request in the window, vs a single integer for fixed window — real memory tradeoff at high per-user limits.</p>
+
+      <table class="grid-table">
+        <thead><tr><th>Scenario</th><th>User impact</th><th>Detection signal</th><th>Mitigation</th></tr></thead>
+        <tbody>
+          <tr><td>Redis cluster unavailable</td><td class="impact">Every request blocked on a dependency that's down</td><td class="detect">Limiter error rate spikes, Redis health check failing</td><td class="fix">Fail open on low-risk read endpoints, fail closed on write/payment endpoints — decided per-route in config, not improvised at incident time</td></tr>
+          <tr><td>Hot key from a shared API key or NAT'd IP</td><td class="impact">One Redis shard gets disproportionate load, adds latency for unrelated keys on that shard</td><td class="detect">Per-shard ops/sec imbalance in Redis metrics</td><td class="fix">Add a short-TTL local cache in the middleware to absorb bursts before they reach Redis</td></tr>
+          <tr><td>Clock skew between limiter nodes</td><td class="impact">Token bucket refill math drifts, inconsistent allow/deny across nodes</td><td class="detect">NTP drift alert; anomalous allow-rate variance per node</td><td class="fix">Use Redis server TIME command inside the Lua script instead of each node's local clock</td></tr>
+          <tr><td>Rule config propagation lag</td><td class="impact">A newly lowered limit isn't enforced for up to 30s after the change</td><td class="detect">Admin audit log timestamp vs enforcement timestamp gap</td><td class="fix">Push-based invalidation (pub/sub) instead of pure polling for urgent limit changes</td></tr>
+          <tr><td>Sliding window log memory growth</td><td class="impact">High-limit identifiers (e.g. 100k/min) blow up sorted-set size</td><td class="detect">Redis memory usage per key alert</td><td class="fix">Switch high-volume scopes to sliding window counter (approximate) instead of the exact log variant</td></tr>
+        </tbody>
+      </table>
+    </section>
+
+    <section id="interview-moves">
+      <h2>Interview moves</h2>
+      <ul class="moves-list">
+        <li><span class="move-num">01</span><div><strong>"The first thing that breaks a rate limiter design is per-instance in-memory counters — with N backend nodes you're actually enforcing N times the stated limit"</strong> — names the single most common mistake before being asked</div></li>
+        <li><span class="move-num">02</span><div><strong>"The check-and-increment has to be one atomic operation, not a read followed by a write, or two concurrent requests both slip through under the limit"</strong> — shows you understand the race condition, not just the happy path</div></li>
+        <li><span class="move-num">03</span><div><strong>"I'd use token bucket for a public-facing API since it tolerates legitimate bursts, but sliding window log for something like a login endpoint where boundary bursts are a security problem"</strong> — ties the algorithm choice to a concrete requirement, not a default</div></li>
+        <li><span class="move-num">04</span><div><strong>"When Redis is down, failing open vs failing closed isn't one global answer — I'd fail open on read traffic and fail closed on anything that touches money or auth"</strong> — demonstrates the failure mode isn't binary, it's per-endpoint risk</div></li>
+        <li><span class="move-num">05</span><div><strong>"Rule config lives in Postgres but is polled into an in-memory cache every 30 seconds — the hot path never makes a database call, only Redis"</strong> — separates cold config from hot enforcement unprompted</div></li>
+        <li><span class="move-num">06</span><div><strong>"I'd put the rate limit check in the request path but everything downstream of the decision — metrics, alerting — goes through an async pipeline so it never adds latency"</strong> — reuses the hot-path/side-effect isolation pattern that shows up across every well-designed system</div></li>
+      </ul>
+    </section>
+
+    <section id="follow-ups">
+      <h2>Follow-up questions</h2>
+      <div class="qa-block">
+        <div class="qa-q">Why not just use a local in-memory counter per instance with sticky sessions?</div>
+        <div class="qa-a">It works only if every request from a given user always lands on the same instance, which load balancers don't guarantee cheaply — and it silently breaks the moment you autoscale or a node restarts.</div>
+      </div>
+      <div class="qa-block">
+        <div class="qa-q">How do you rate limit by IP when clients sit behind a shared NAT or corporate proxy?</div>
+        <div class="qa-a">Pure IP-based limiting punishes everyone behind that IP. Prefer API-key or user-ID scoping where possible, and treat IP-based limits as a coarser, higher-threshold safety net layered on top.</div>
+      </div>
+      <div class="qa-block">
+        <div class="qa-q">How would you support per-endpoint limits without a rule lookup on every request?</div>
+        <div class="qa-a">Bake the endpoint into the counter key itself (e.g. rl:user:4471:POST:/orders) and load all rules for a scope into the middleware's in-memory cache at startup/refresh, not per-request.</div>
+      </div>
+      <div class="qa-block">
+        <div class="qa-q">What's the tradeoff between fixed window, sliding window log, and sliding window counter?</div>
+        <div class="qa-a">Fixed window: cheapest, allows boundary bursts. Sliding log: exact, but O(n) memory per identifier. Sliding counter: approximates the log using two fixed windows weighted by time — good middle ground.</div>
+      </div>
+      <div class="qa-block">
+        <div class="qa-q">How do you rate limit across multiple regions with regional Redis clusters?</div>
+        <div class="qa-a">Either accept eventual consistency with async cross-region replication (limit is approximate but latency stays low), or route all counting for a given identifier to one home region at the cost of extra hops.</div>
+      </div>
+      <div class="qa-block">
+        <div class="qa-q">How would you let a client know how close they are to their limit before being denied?</div>
+        <div class="qa-a">Return X-RateLimit-Limit, X-RateLimit-Remaining, and X-RateLimit-Reset headers on every response, not just on the 429 — lets well-behaved clients self-throttle proactively.</div>
+      </div>
+    </section>
+
+  </main>
+  <script src="../../assets/nav.js"></script>
+</body>
+</html>

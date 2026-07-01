@@ -1,0 +1,439 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Design Facebook Live Comments — SD Prep</title>
+  <link rel="stylesheet" href="../../assets/style.css">
+</head>
+<body>
+  <aside id="sidebar"></aside>
+  <main>
+
+    <header class="page-head">
+      <div class="pill">Questions</div>
+      <h1>Design Facebook Live Comments</h1>
+      <p class="sub">Tests whether you can fan a single comment out to millions of concurrent viewers in under a second — this is pub/sub at extreme scale, not a CRUD comments feature.</p>
+      <div class="meta-row">
+        <span class="badge green">40-50 min interview</span>
+        <span class="badge blue">Hard</span>
+      </div>
+    </header>
+
+    <div class="flash-card">
+      <div class="flash-label">Say this in the first 2 minutes</div>
+      <ul>
+        <li>The core insight: this is fan-out delivery at extreme scale, not a comments CRUD problem — writes are cheap, broadcast is the hard part</li>
+        <li>Key scale number to anchor on: a single hot stream can hold 1M+ concurrent viewers, each needing every new comment pushed within ~1 second</li>
+        <li>Primary tradeoff being probed: strict comment ordering per stream vs horizontal write throughput — solved by partitioning on stream_id</li>
+        <li>Component most candidates forget: a connection server layer that holds the long-lived WebSockets, decoupled from the stateless ingestion path</li>
+        <li>Failure mode most candidates skip: a fan-out worker falling behind on a viral stream — it must shed load gracefully, never crash the whole pipeline</li>
+      </ul>
+    </div>
+
+    <section id="step1-requirements">
+      <div class="step-pill">Step 1 of 6 — Requirements</div>
+      <h2>Requirements</h2>
+
+      <div class="goal-arc-wrap">
+        <div class="goal-arc-row functional">
+          <div class="goal-arc-seg">1</div><div class="goal-arc-seg">2</div><div class="goal-arc-seg">3</div><div class="goal-arc-seg">4</div><div class="goal-arc-seg">5</div><div class="goal-arc-seg inactive">6</div>
+        </div>
+        <div class="goal-arc-label"><span>Arc 1 (steps 1-5) — <strong>Satisfy Functional Requirements</strong></span></div>
+        <div class="goal-arc-row nonfunctional" style="margin-top:8px">
+          <div class="goal-arc-seg">1</div><div class="goal-arc-seg">2</div><div class="goal-arc-seg">3</div><div class="goal-arc-seg">4</div><div class="goal-arc-seg">5</div><div class="goal-arc-seg">6</div>
+        </div>
+        <div class="goal-arc-label"><span>Arc 2 (all 6 steps) — <strong>Satisfy Non-Functional Requirements</strong></span></div>
+      </div>
+
+      <div class="compare-grid">
+        <div class="compare-card good">
+          <div class="compare-label">Functional</div>
+          <ul>
+            <li>Post a comment on a live stream</li>
+            <li>Broadcast new comments to every connected viewer in real time</li>
+            <li>Load recent comment history when a viewer joins mid-stream</li>
+            <li>Support moderation — delete/hide a comment for all viewers instantly</li>
+          </ul>
+        </div>
+        <div class="compare-card bad">
+          <div class="compare-label">Non-Functional</div>
+          <ul>
+            <li>1M+ concurrent viewers on a single hot stream, millions of streams overall</li>
+            <li>Fan-out delivery latency &lt;1s p99 from post to viewer render</li>
+            <li>Comments within a stream must render in a consistent order for every viewer</li>
+            <li>99.9% delivery availability; brief comment loss during overload is acceptable, silent crash is not</li>
+          </ul>
+        </div>
+      </div>
+
+      <div class="callout warn"><strong>What NOT to build:</strong> comment threading/replies, reactions/emoji bursts, spam/toxicity ML models, or the video transcoding pipeline itself. This is post-a-comment + broadcast-it-to-everyone-watching only.</div>
+
+      <div class="stat-grid">
+        <div class="stat-card"><div class="stat-val">1M+</div><div class="stat-label">concurrent viewers, single hot stream</div></div>
+        <div class="stat-card"><div class="stat-val">~50k/s</div><div class="stat-label">comments/sec at peak, platform-wide</div></div>
+        <div class="stat-card"><div class="stat-val">&lt;1s</div><div class="stat-label">post-to-render fan-out latency, p99</div></div>
+        <div class="stat-card"><div class="stat-val">~50k</div><div class="stat-label">open WebSockets per connection server instance</div></div>
+      </div>
+    </section>
+
+    <section id="step2-entities">
+      <div class="step-pill">Step 2 of 6 — Core Entities</div>
+      <h2>Core entities</h2>
+      <p style="font-size:13px;color:#999;margin-bottom:0.75rem">Three entities across two stores, split by access pattern — durable comment history is a different shape than in-memory viewer routing.</p>
+
+      <div class="entity-grid">
+        <div class="entity-box">
+          <div class="entity-head"><span class="entity-name">Stream</span><span class="entity-store pg">Postgres</span></div>
+          <div class="entity-fields">
+            <div class="entity-field"><span class="fname pk">id</span><span class="ftype">BIGINT (Snowflake)</span></div>
+            <div class="entity-field"><span class="fname">host_id</span><span class="ftype">BIGINT → User.id</span></div>
+            <div class="entity-field"><span class="fname idx">status</span><span class="ftype">ENUM(live, ended)</span></div>
+            <div class="entity-field"><span class="fname">started_at</span><span class="ftype">TIMESTAMP</span></div>
+          </div>
+          <div class="entity-why">Because stream metadata is low-volume and needs strong consistency for status transitions (live → ended). A relational store fits; tradeoff is irrelevant to the hot comment path so it never sits on it.</div>
+        </div>
+
+        <div class="entity-box">
+          <div class="entity-head"><span class="entity-name">Comment</span><span class="entity-store cass">Cassandra</span></div>
+          <div class="entity-fields">
+            <div class="entity-field"><span class="fname pk idx">stream_id</span><span class="ftype">BIGINT (partition key)</span></div>
+            <div class="entity-field"><span class="fname pk">comment_id</span><span class="ftype">TIMEUUID (clustering key)</span></div>
+            <div class="entity-field"><span class="fname">author_id</span><span class="ftype">BIGINT</span></div>
+            <div class="entity-field"><span class="fname">text</span><span class="ftype">VARCHAR(500)</span></div>
+            <div class="entity-field"><span class="fname">is_hidden</span><span class="ftype">BOOLEAN</span></div>
+          </div>
+          <div class="entity-why">Because writes are append-only and the only read pattern is "last N comments for this stream_id, in order" — a wide-column store with stream_id as partition key gives that for free. Tradeoff: no ad-hoc queries across streams.</div>
+        </div>
+
+        <div class="entity-box">
+          <div class="entity-head"><span class="entity-name">ViewerConnection</span><span class="entity-store redis">Redis</span></div>
+          <div class="entity-fields">
+            <div class="entity-field"><span class="fname pk idx">stream_id</span><span class="ftype">BIGINT</span></div>
+            <div class="entity-field"><span class="fname">connection_server_id</span><span class="ftype">SET member</span></div>
+            <div class="entity-field"><span class="fname">viewer_count</span><span class="ftype">INT, approximate</span></div>
+          </div>
+          <div class="entity-why">Because viewer routing is pure in-memory, ephemeral state — a viewer's socket lives only as long as they're watching. Redis gives O(1) membership lookups for "which connection servers hold viewers of this stream." Tradeoff: state is lost on Redis restart, acceptable since clients reconnect and re-register.</div>
+        </div>
+      </div>
+
+      <div class="callout info">Primary key: <code>Comment(stream_id, comment_id)</code> — a composite/partition key. Critical index: partitioning on <code>stream_id</code> guarantees every comment for a stream lives on one partition, which is what makes in-order delivery possible without a distributed sort.</div>
+    </section>
+
+    <section id="step3-api">
+      <div class="step-pill">Step 3 of 6 — API / Interface</div>
+      <h2>API design</h2>
+      <p style="font-size:13px;color:#999;margin-bottom:0.75rem">Posting a comment and joining a stream are REST; the live comment feed itself pushes over a persistent WebSocket — polling can't hit sub-second fan-out at this scale.</p>
+
+      <div class="api-card">
+        <div class="api-line"><span class="api-method post">POST</span><span class="api-path">/api/v1/streams/{stream_id}/comments</span><span class="api-auth">Auth: required</span></div>
+        <div class="api-io">
+          <div class="api-io-block"><div class="api-io-label">Request</div><div class="api-io-body">{ text }</div></div>
+          <div class="api-io-block"><div class="api-io-label">Response</div><div class="api-io-body">{ comment_id, accepted: true } — HTTP 202, fan-out happens async</div></div>
+        </div>
+      </div>
+
+      <div class="api-card">
+        <div class="api-line"><span class="api-method get">GET</span><span class="api-path">/ws/streams/{stream_id}/comments</span><span class="api-auth">Auth: required</span></div>
+        <div class="api-io">
+          <div class="api-io-block"><div class="api-io-label">Request</div><div class="api-io-body">WebSocket upgrade; server registers viewer in Redis on connect</div></div>
+          <div class="api-io-block"><div class="api-io-label">Response</div><div class="api-io-body">stream of { comment_id, author, text, ts } frames, pushed as posted</div></div>
+        </div>
+      </div>
+
+      <div class="api-card">
+        <div class="api-line"><span class="api-method get">GET</span><span class="api-path">/api/v1/streams/{stream_id}/comments?limit=50</span><span class="api-auth">Auth: optional</span></div>
+        <div class="api-io">
+          <div class="api-io-block"><div class="api-io-label">Request</div><div class="api-io-body">query params: limit, before_comment_id</div></div>
+          <div class="api-io-block"><div class="api-io-label">Response</div><div class="api-io-body">{ comments: [...] } — last N, backfilled once on join before the socket takes over</div></div>
+        </div>
+      </div>
+
+      <div class="api-card">
+        <div class="api-line"><span class="api-method delete">DELETE</span><span class="api-path">/api/v1/streams/{stream_id}/comments/{comment_id}</span><span class="api-auth">Auth: required (moderator/host)</span></div>
+        <div class="api-io">
+          <div class="api-io-block"><div class="api-io-label">Request</div><div class="api-io-body">path params only</div></div>
+          <div class="api-io-block"><div class="api-io-label">Response</div><div class="api-io-body">HTTP 204, broadcasts a delete event over the same socket to hide it live</div></div>
+        </div>
+      </div>
+    </section>
+
+    <section id="step4-dataflow">
+      <div class="step-pill">Step 4 of 6 — Data Flow</div>
+      <h2>Data flow</h2>
+      <p style="font-size:13px;color:#999;margin-bottom:0.75rem">Write path (blue) — post a comment. Read/fan-out path (mint) — that comment delivered to every viewer's open socket.</p>
+
+      <div class="diagram-wrap" data-paths='{"write":{"boxes":["w-client","w-ingest","w-kafka","w-store"],"arrows":["w1","w2","w3"]},"read":{"boxes":["r-kafka","r-fanout","r-conn","r-viewer"],"arrows":["r1","r2","r3"]}}'>
+        <svg viewBox="0 0 740 220" xmlns="http://www.w3.org/2000/svg">
+          <defs>
+            <marker id="flcW" markerWidth="8" markerHeight="8" refX="6" refY="3" orient="auto"><path d="M0,0 L6,3 L0,6 Z" fill="var(--blue)"/></marker>
+            <marker id="flcR" markerWidth="8" markerHeight="8" refX="6" refY="3" orient="auto"><path d="M0,0 L6,3 L0,6 Z" fill="var(--accent)"/></marker>
+          </defs>
+
+          <text class="diag-sublabel" x="150" y="14" style="font-size:10px;fill:var(--blue)">WRITE PATH — post a comment</text>
+          <circle class="diag-dot diag-flow-dot" r="3.5" style="offset-path: path('M10,24 L120,24 L120,24 L260,24 L260,24 L400,24 L400,24 L530,24')"></circle>
+          <g data-target="step2-entities" data-id="w-client" data-tip="Viewer submits a comment while watching"><rect class="diag-box role-client" x="10" y="24" width="100" height="46"/><text class="diag-label" x="60" y="52" style="font-size:11px">Client</text></g>
+          <path class="diag-arrow-path" data-id="w1" d="M110,47 L155,47" marker-end="url(#flcW)"/>
+          <g data-target="step2-entities" data-id="w-ingest" data-tip="Validates and persists the comment, then publishes for fan-out"><rect class="diag-box" x="155" y="24" width="120" height="46"/><text class="diag-label" x="215" y="47" style="font-size:11px">Ingestion Svc</text><text class="diag-sublabel" x="215" y="62" style="font-size:8.5px">stateless</text></g>
+          <path class="diag-arrow-path" data-id="w2" d="M275,47 L320,47" marker-end="url(#flcW)"/>
+          <g data-target="step6-deepdive-partitioning" data-id="w-kafka" data-tip="Partitioned by stream_id — preserves per-stream ordering"><rect class="diag-box role-async" x="320" y="24" width="120" height="46"/><text class="diag-label" x="380" y="47" style="font-size:11px">Kafka</text><text class="diag-sublabel" x="380" y="62" style="font-size:8.5px">topic per stream</text></g>
+          <path class="diag-arrow-path" data-id="w3" d="M440,47 L485,47" marker-end="url(#flcW)"/>
+          <g data-target="step2-entities" data-id="w-store" data-tip="Durable comment history for backfill on join"><rect class="diag-box role-db" x="485" y="24" width="120" height="46"/><text class="diag-label" x="545" y="47" style="font-size:11px">Cassandra</text></g>
+
+          <text class="diag-sublabel" x="150" y="105" style="font-size:10px;fill:var(--accent)">READ / FAN-OUT PATH — delivered to viewers</text>
+          <g data-target="step6-deepdive-partitioning" data-id="r-kafka" data-tip="Fan-out workers consume from the same partitioned topic"><rect class="diag-box role-async" x="10" y="115" width="120" height="46"/><text class="diag-label" x="70" y="143" style="font-size:11px">Kafka</text></g>
+          <path class="diag-arrow-path" data-id="r1" d="M130,138 L165,138" marker-end="url(#flcR)"/>
+          <g data-target="step6-deepdive-connservers" data-id="r-fanout" data-tip="Looks up which connection servers hold this stream's viewers, pushes to each"><rect class="diag-box role-async" x="165" y="115" width="130" height="46"/><text class="diag-label" x="230" y="138" style="font-size:11px">Fan-out Worker</text><text class="diag-sublabel" x="230" y="153" style="font-size:8.5px">reads Redis routing</text></g>
+          <path class="diag-arrow-path" data-id="r2" d="M295,138 L340,138" marker-end="url(#flcR)"/>
+          <g data-target="step6-deepdive-connservers" data-id="r-conn" data-tip="Holds long-lived WebSockets, one shard of total viewers per instance"><rect class="diag-box role-cache" x="340" y="115" width="130" height="46"/><text class="diag-label" x="405" y="138" style="font-size:11px">Connection Svr</text><text class="diag-sublabel" x="405" y="153" style="font-size:8.5px">~50k sockets/instance</text></g>
+          <path class="diag-arrow-path" data-id="r3" d="M470,138 L515,138" marker-end="url(#flcR)"/>
+          <g data-target="step6-deepdive-connservers" data-id="r-viewer" data-tip="Comment renders in the live feed, target &lt;1s from post"><rect class="diag-box role-client" x="515" y="115" width="110" height="46"/><text class="diag-label" x="570" y="143" style="font-size:11px">Viewer</text></g>
+
+          <text class="diag-sublabel" x="150" y="188" style="font-size:10px;fill:var(--muted)">JOIN PATH — new viewer registers before the first push arrives</text>
+          <g data-target="step2-entities" data-id="join" data-tip="On connect: viewer registered in Redis, last 50 comments backfilled via REST"><rect class="diag-box" x="10" y="192" width="220" height="20"/><text class="diag-label" x="120" y="205" style="font-size:9.5px">register in Redis + REST backfill</text></g>
+        </svg>
+        <div class="diag-legend">
+          <div class="diag-legend-item"><span class="diag-legend-dot role-client"></span>Client / viewer</div>
+          <div class="diag-legend-item"><span class="diag-legend-dot role-async"></span>Kafka — durable, ordered by stream_id</div>
+          <div class="diag-legend-item"><span class="diag-legend-dot role-cache"></span>Connection servers — hold the sockets</div>
+          <div class="diag-legend-item"><span class="diag-legend-dot role-db"></span>Cassandra — comment history</div>
+        </div>
+      </div>
+
+      <ol class="flow-steps-list">
+        <li><span>Client posts a comment</span> — Ingestion Svc validates and returns 202 immediately</li>
+        <li><span>Comment persisted to Cassandra</span> — durable history, keyed by stream_id + comment_id</li>
+        <li><span>Comment published to Kafka</span> — partitioned by stream_id, so order is preserved per stream</li>
+        <li><span>Fan-out worker consumes and looks up routing</span> — Redis tells it which connection servers hold this stream's viewers</li>
+        <li><span>Pushed to every connection server holding a viewer</span> — each pushes down its open WebSockets, target &lt;1s end-to-end</li>
+      </ol>
+    </section>
+
+    <section id="step5-hld">
+      <div class="step-pill">Step 5 of 6 — High-Level Design</div>
+      <h2>High-level design</h2>
+      <p style="font-size:13px;color:#999;margin-bottom:0.75rem">Full system: ingestion, ordered fan-out, and the connection server pool that actually holds the millions of open sockets.</p>
+
+      <div class="diagram-wrap">
+        <svg viewBox="0 0 780 300" xmlns="http://www.w3.org/2000/svg">
+          <defs><marker id="flcHldArrow" markerWidth="8" markerHeight="8" refX="6" refY="3" orient="auto"><path d="M0,0 L6,3 L0,6 Z" fill="var(--border2)"/></marker></defs>
+
+          <g data-tip="Commenters and viewers, same client app"><rect class="diag-box role-client" x="10" y="20" width="110" height="50"/><text class="diag-label" x="65" y="50" style="font-size:11px">Clients</text></g>
+          <path class="diag-arrow-path" d="M120,45 L155,45" marker-end="url(#flcHldArrow)"/>
+          <g data-tip="Auth, rate limiting, routes writes vs socket upgrades"><rect class="diag-box role-client" x="155" y="20" width="120" height="50"/><text class="diag-label" x="215" y="50" style="font-size:11px">API Gateway</text></g>
+
+          <path class="diag-arrow-path" d="M215,70 L215,105" marker-end="url(#flcHldArrow)"/>
+          <g data-tip="Validates, writes to Cassandra, publishes to Kafka"><rect class="diag-box" x="150" y="105" width="130" height="46"/><text class="diag-label" x="215" y="128" style="font-size:11px">Ingestion Svc</text><text class="diag-sublabel" x="215" y="143" style="font-size:8.5px">stateless</text></g>
+
+          <path class="diag-arrow-path" d="M215,151 L215,185" marker-end="url(#flcHldArrow)"/>
+          <g data-tip="Durable comment history, partitioned by stream_id"><rect class="diag-box role-db" x="150" y="185" width="130" height="46"/><text class="diag-label" x="215" y="208" style="font-size:11px">Cassandra</text></g>
+
+          <path class="diag-arrow-path" d="M280,128 L330,128" marker-end="url(#flcHldArrow)"/>
+          <g data-tip="One topic per stream, partitioned by stream_id for ordering"><rect class="diag-box role-async" x="330" y="105" width="130" height="46"/><text class="diag-label" x="395" y="128" style="font-size:11px">Kafka</text><text class="diag-sublabel" x="395" y="143" style="font-size:8.5px">topic per stream</text></g>
+
+          <path class="diag-arrow-path" d="M460,128 L505,128" marker-end="url(#flcHldArrow)"/>
+          <g data-tip="Consumes ordered comments, resolves routing, pushes to connection servers"><rect class="diag-box role-async" x="505" y="105" width="140" height="46"/><text class="diag-label" x="575" y="122" style="font-size:11px">Fan-out Workers</text><text class="diag-sublabel" x="575" y="137" style="font-size:8.5px">consumer group</text></g>
+
+          <path class="diag-arrow-path" d="M575,151 L575,185" marker-end="url(#flcHldArrow)"/>
+          <g data-tip="stream_id → set of connection_server_id holding its viewers"><rect class="diag-box role-cache" x="505" y="185" width="140" height="46"/><text class="diag-label" x="575" y="208" style="font-size:11px">Redis</text><text class="diag-sublabel" x="575" y="223" style="font-size:8.5px">viewer routing</text></g>
+
+          <path class="diag-arrow-path" d="M645,128 L695,128 L695,185" marker-end="url(#flcHldArrow)"/>
+          <g data-tip="Each instance holds a shard of viewer WebSockets, ~50k sockets/instance"><rect class="diag-box role-cache" x="625" y="185" width="145" height="46"/><text class="diag-label" x="697" y="203" style="font-size:11px">Connection Svr</text><text class="diag-sublabel" x="697" y="218" style="font-size:8.5px">pool, horizontally scaled</text></g>
+
+          <path class="diag-arrow-path" d="M697,231 L697,260" marker-end="url(#flcHldArrow)"/>
+          <g data-tip="Pushes comment frames down open sockets"><rect class="diag-box role-client" x="625" y="260" width="145" height="35"/><text class="diag-label" x="697" y="282" style="font-size:11px">Viewers (millions)</text></g>
+
+          <path class="diag-arrow-path" d="M215,231 L400,231 L400,260" marker-end="url(#flcHldArrow)" stroke-dasharray="3 3"/>
+          <g data-tip="New viewer backfills last ~50 comments via REST before socket push takes over"><rect class="diag-box" x="330" y="260" width="140" height="35"/><text class="diag-label" x="400" y="278" style="font-size:10px">Join backfill (REST)</text></g>
+        </svg>
+        <div class="diag-legend">
+          <div class="diag-legend-item"><span class="diag-legend-dot role-client"></span>Clients / gateway / viewers</div>
+          <div class="diag-legend-item"><span class="diag-legend-dot role-db"></span>Cassandra — durable comment history</div>
+          <div class="diag-legend-item"><span class="diag-legend-dot role-async"></span>Kafka + fan-out workers — ordered delivery</div>
+          <div class="diag-legend-item"><span class="diag-legend-dot role-cache"></span>Redis routing + connection server pool</div>
+        </div>
+      </div>
+
+      <table class="def-table">
+        <thead><tr><th>Component</th><th>Role</th><th>Tech + why</th></tr></thead>
+        <tbody>
+          <tr><td>Ingestion Svc</td><td>Validates and accepts new comments</td><td>Stateless HTTP service — because it needs to scale horizontally with write volume independent of everything downstream; tradeoff is an extra network hop before persistence.</td></tr>
+          <tr><td>Kafka</td><td>Ordered, durable transport for fan-out</td><td>Partitioned log, one partition per stream_id — because ordering only needs to hold within a stream, not globally; tradeoff is a hot stream can still overload a single partition.</td></tr>
+          <tr><td>Fan-out Workers</td><td>Push comments to the right connection servers</td><td>Kafka consumer group — because horizontal scaling is just adding consumers; tradeoff is consumer lag directly becomes viewer-facing delivery lag.</td></tr>
+          <tr><td>Redis (routing)</td><td>Maps stream_id → connection servers holding its viewers</td><td>In-memory set per stream — because it's a hot, high-QPS lookup on every fan-out; tradeoff is ephemeral state that must be rebuilt on restart.</td></tr>
+          <tr><td>Connection Server pool</td><td>Holds millions of long-lived WebSockets</td><td>Horizontally sharded stateful pool — because a single process can only hold so many open sockets; tradeoff is it's the one genuinely stateful tier in the whole system.</td></tr>
+          <tr><td>Cassandra</td><td>Durable comment history for backfill</td><td>Wide-column store keyed by stream_id — because the only read is "last N comments for this stream, in order"; tradeoff is no secondary-index queries across streams.</td></tr>
+        </tbody>
+      </table>
+
+      <h3 style="font-size:13px;color:var(--text);margin:1.25rem 0 0.6rem;font-weight:600">Scaling levers — cheapest to most complex</h3>
+      <ol class="levers-list">
+        <li><strong>Add more connection server instances</strong> to the pool<span class="cost">near-zero complexity</span></li>
+        <li><strong>Add more fan-out consumer instances</strong> per stream's partition group<span class="cost">low complexity</span></li>
+        <li><strong>Batch comment pushes</strong> into ~200ms windows on very hot streams<span class="cost">medium complexity</span></li>
+        <li><strong>Split a single hot stream across extra Kafka partitions</strong> keyed by comment_id sub-ranges once volume outgrows one partition<span class="cost">medium-high complexity</span></li>
+        <li><strong>Regional connection server pools</strong> to cut cross-region push latency<span class="cost">high complexity — last resort</span></li>
+      </ol>
+
+      <table class="grid-table">
+        <thead><tr><th>Bottleneck</th><th>Triggers at</th><th>Exact fix</th></tr></thead>
+        <tbody>
+          <tr><td>Connection server socket limit</td><td>~50k sockets on one instance</td><td class="fix">Add instances; Redis routing set spreads new viewers across the pool</td></tr>
+          <tr><td>Fan-out consumer lag</td><td>Push latency exceeds 1s p99 on a hot stream</td><td class="fix">Scale out consumer group; batch pushes into short windows instead of one push per comment</td></tr>
+          <tr><td>Single Kafka partition hotspot</td><td>One viral stream saturates its partition's throughput</td><td class="fix">Sub-partition that stream's topic; accept slightly relaxed ordering only on that stream</td></tr>
+        </tbody>
+      </table>
+
+      <div class="dial-wrap">
+        <div class="dial-title">Comment ordering guarantee</div>
+        <div class="dial-track"><div class="dial-marker" style="left:80%"></div></div>
+        <div class="dial-labels"><span class="end-left">Best-effort</span><span class="end-right">Strict per-stream</span></div>
+      </div>
+      <div class="dial-wrap">
+        <div class="dial-title">Fan-out delivery under load</div>
+        <div class="dial-track"><div class="dial-marker" style="left:75%"></div></div>
+        <div class="dial-labels"><span class="end-left">Never drop</span><span class="end-right">Shed gracefully</span></div>
+      </div>
+    </section>
+
+    <section id="step6-deepdive-connservers">
+      <div class="step-pill">Step 6 of 6 — Deep Dives</div>
+      <h2>Deep dive: connection server architecture</h2>
+      <p style="font-size:13px;color:#999;margin-bottom:0.75rem">Millions of long-lived WebSockets can't live on one box — the pool is sharded, and Redis is the map from stream to shard.</p>
+
+      <div class="diagram-wrap">
+        <svg viewBox="0 0 740 220" xmlns="http://www.w3.org/2000/svg">
+          <defs><marker id="flcConnArrow" markerWidth="8" markerHeight="8" refX="6" refY="3" orient="auto"><path d="M0,0 L6,3 L0,6 Z" fill="var(--border2)"/></marker></defs>
+
+          <g data-tip="Fan-out worker looks up which servers hold this stream's viewers"><rect class="diag-box role-async" x="10" y="85" width="130" height="46"/><text class="diag-label" x="75" y="103" style="font-size:11px">Fan-out Worker</text><text class="diag-sublabel" x="75" y="118" style="font-size:8.5px">1 comment event</text></g>
+          <path class="diag-arrow-path" d="M140,108 L180,108" marker-end="url(#flcConnArrow)"/>
+          <g data-tip="SMEMBERS stream:{id}:servers"><rect class="diag-box role-cache" x="180" y="85" width="110" height="46"/><text class="diag-label" x="235" y="103" style="font-size:11px">Redis</text><text class="diag-sublabel" x="235" y="118" style="font-size:8.5px">routing set</text></g>
+
+          <path class="diag-arrow-path" d="M290,95 L340,40" marker-end="url(#flcConnArrow)"/>
+          <path class="diag-arrow-path" d="M290,108 L340,108" marker-end="url(#flcConnArrow)"/>
+          <path class="diag-arrow-path" d="M290,120 L340,175" marker-end="url(#flcConnArrow)"/>
+
+          <g data-tip="Holds ~50k viewer sockets for streams it was assigned"><rect class="diag-box role-cache" x="340" y="18" width="150" height="44"/><text class="diag-label" x="415" y="35" style="font-size:11px">Conn Svr #1</text><text class="diag-sublabel" x="415" y="50" style="font-size:8.5px">~50k sockets</text></g>
+          <g data-tip="Holds a different shard of viewer sockets for the same stream"><rect class="diag-box role-cache" x="340" y="86" width="150" height="44"/><text class="diag-label" x="415" y="103" style="font-size:11px">Conn Svr #2</text><text class="diag-sublabel" x="415" y="118" style="font-size:8.5px">~50k sockets</text></g>
+          <g data-tip="Pool scales horizontally as concurrent viewers grow"><rect class="diag-box role-cache" x="340" y="154" width="150" height="44"/><text class="diag-label" x="415" y="171" style="font-size:11px">Conn Svr #N</text><text class="diag-sublabel" x="415" y="186" style="font-size:8.5px">~50k sockets</text></g>
+
+          <path class="diag-arrow-path" d="M490,40 L530,40" marker-end="url(#flcConnArrow)"/>
+          <path class="diag-arrow-path" d="M490,108 L530,108" marker-end="url(#flcConnArrow)"/>
+          <path class="diag-arrow-path" d="M490,176 L530,176" marker-end="url(#flcConnArrow)"/>
+          <g data-tip="A viewer of this stream connected to server #1"><rect class="diag-box role-client" x="530" y="20" width="90" height="40"/><text class="diag-label" x="575" y="44" style="font-size:10px">Viewer A</text></g>
+          <g data-tip="A different viewer of the same stream, connected to server #2"><rect class="diag-box role-client" x="530" y="88" width="90" height="40"/><text class="diag-label" x="575" y="112" style="font-size:10px">Viewer B</text></g>
+          <g data-tip="A viewer connected to server #N — same comment, same instant"><rect class="diag-box role-client" x="530" y="156" width="90" height="40"/><text class="diag-label" x="575" y="180" style="font-size:10px">Viewer C</text></g>
+
+          <text x="415" y="200" text-anchor="middle" font-size="9.5" fill="var(--muted)" font-family="Inter,sans-serif">1M viewers on one stream = spread across ~20 connection server instances</text>
+        </svg>
+        <div class="diag-legend">
+          <div class="diag-legend-item"><span class="diag-legend-dot role-async"></span>Fan-out worker — one comment, many targets</div>
+          <div class="diag-legend-item"><span class="diag-legend-dot role-cache"></span>Redis routing + connection server pool</div>
+          <div class="diag-legend-item"><span class="diag-legend-dot role-client"></span>Viewers — sharded across the pool</div>
+        </div>
+      </div>
+
+      <ol class="flow-steps-list">
+        <li><span>Viewer opens the WebSocket</span> — load balancer assigns it to whichever connection server has headroom</li>
+        <li><span>Server registers itself in Redis</span> — adds its ID to the set for that stream_id</li>
+        <li><span>Fan-out worker never talks to sockets directly</span> — it asks Redis which servers to notify, then pushes once per server, not once per viewer</li>
+        <li><span>Each connection server fans out locally</span> — iterates its own in-memory socket map for that stream, writes the frame to each</li>
+        <li><span>On disconnect, the server removes itself from the Redis set</span> — if it was the last one for that stream, the set is cleaned up</li>
+      </ol>
+      <div class="callout warn">The connection server is the one genuinely stateful tier in this system — a single instance dying drops every socket it held. Clients must detect the drop and reconnect (with backoff), and the load balancer must route the reconnect to a healthy instance. This is why capacity planning targets ~50k sockets/instance, not the theoretical OS-level max — headroom for a full instance failure without cascading reconnect storms.</div>
+    </section>
+
+    <section id="step6-deepdive-partitioning">
+      <h2>Deep dive: Kafka partition strategy</h2>
+      <p style="font-size:13px;color:#999;margin-bottom:0.75rem">Partitioning by stream_id is what makes "every viewer sees comments in the same order" possible without a distributed sort.</p>
+
+      <div class="diagram-wrap">
+        <svg viewBox="0 0 740 200" xmlns="http://www.w3.org/2000/svg">
+          <defs><marker id="flcPartArrow" markerWidth="8" markerHeight="8" refX="6" refY="3" orient="auto"><path d="M0,0 L6,3 L0,6 Z" fill="var(--border2)"/></marker></defs>
+
+          <g data-tip="hash(stream_id) selects the partition — deterministic, always the same partition for this stream"><rect class="diag-box" x="10" y="80" width="140" height="46"/><text class="diag-label" x="80" y="98" style="font-size:11px">Producer</text><text class="diag-sublabel" x="80" y="113" style="font-size:8.5px">key = stream_id</text></g>
+          <path class="diag-arrow-path" d="M150,90 L195,35" marker-end="url(#flcPartArrow)"/>
+          <path class="diag-arrow-path" d="M150,103 L195,103" marker-end="url(#flcPartArrow)"/>
+          <path class="diag-arrow-path" d="M150,116 L195,171" marker-end="url(#flcPartArrow)"/>
+
+          <g data-tip="Every comment for stream_id=42 lands here, in post order"><rect class="diag-box role-async" x="195" y="12" width="180" height="46"/><text class="diag-label" x="285" y="30" style="font-size:11px">Partition 0</text><text class="diag-sublabel" x="285" y="45" style="font-size:8.5px">stream_id=42: c1 → c2 → c3</text></g>
+          <g data-tip="Comments from a different stream, ordered independently"><rect class="diag-box role-async" x="195" y="80" width="180" height="46"/><text class="diag-label" x="285" y="98" style="font-size:11px">Partition 1</text><text class="diag-sublabel" x="285" y="113" style="font-size:8.5px">stream_id=77: c1 → c2</text></g>
+          <g data-tip="A third stream, its own ordered log"><rect class="diag-box role-async" x="195" y="148" width="180" height="46"/><text class="diag-label" x="285" y="166" style="font-size:11px">Partition 2</text><text class="diag-sublabel" x="285" y="181" style="font-size:8.5px">stream_id=13: c1</text></g>
+
+          <path class="diag-arrow-path" d="M375,35 L420,35" marker-end="url(#flcPartArrow)"/>
+          <path class="diag-arrow-path" d="M375,103 L420,103" marker-end="url(#flcPartArrow)"/>
+          <path class="diag-arrow-path" d="M375,171 L420,171" marker-end="url(#flcPartArrow)"/>
+          <g data-tip="One consumer owns partition 0 — reads c1, c2, c3 in that exact order, always"><rect class="diag-box role-cache" x="420" y="12" width="180" height="46"/><text class="diag-label" x="510" y="30" style="font-size:11px">Consumer (fan-out)</text><text class="diag-sublabel" x="510" y="45" style="font-size:8.5px">stream 42 always in-order</text></g>
+          <g data-tip="A different consumer instance owns partition 1"><rect class="diag-box role-cache" x="420" y="80" width="180" height="46"/><text class="diag-label" x="510" y="98" style="font-size:11px">Consumer (fan-out)</text><text class="diag-sublabel" x="510" y="113" style="font-size:8.5px">stream 77 always in-order</text></g>
+          <g data-tip="A third consumer instance owns partition 2"><rect class="diag-box role-cache" x="420" y="148" width="180" height="46"/><text class="diag-label" x="510" y="166" style="font-size:11px">Consumer (fan-out)</text><text class="diag-sublabel" x="510" y="181" style="font-size:8.5px">stream 13 always in-order</text></g>
+        </svg>
+        <div class="diag-legend">
+          <div class="diag-legend-item"><span class="diag-legend-dot role-async"></span>Kafka partitions — one ordered log each</div>
+          <div class="diag-legend-item"><span class="diag-legend-dot role-cache"></span>Consumers — each owns a fixed set of partitions</div>
+        </div>
+      </div>
+
+      <ol class="flow-steps-list">
+        <li><span>Producer hashes stream_id</span> — picks the partition deterministically, same stream always lands on the same partition</li>
+        <li><span>Kafka preserves order within a partition</span> — comments for one stream are appended in the exact order they were produced</li>
+        <li><span>One consumer instance owns a partition at a time</span> — guarantees a single stream's comments are never processed out of order or in parallel</li>
+        <li><span>A viral stream can still overload its single partition</span> — the tradeoff for ordering is a per-partition throughput ceiling</li>
+        <li><span>Mitigation for a hot stream: sub-key by comment_id ranges</span> — relaxes strict ordering only for that one stream, in exchange for parallelism</li>
+      </ol>
+
+      <table class="grid-table">
+        <thead><tr><th>Scenario</th><th>User impact</th><th>Detection signal</th><th>Mitigation</th></tr></thead>
+        <tbody>
+          <tr><td>Fan-out consumer group falls behind</td><td class="impact">Comments arrive late, feels laggy on a hot stream</td><td class="detect">Kafka consumer lag metric climbing per partition</td><td class="fix">Auto-scale consumer instances; batch pushes into short windows to shed per-comment overhead</td></tr>
+          <tr><td>Connection server instance crashes</td><td class="impact">Every viewer on that instance is disconnected</td><td class="detect">Instance health check failure, socket count drop to zero</td><td class="fix">Client auto-reconnects with backoff; load balancer routes to a healthy instance, Redis re-registers</td></tr>
+          <tr><td>Redis routing store unavailable</td><td class="impact">Fan-out workers can't resolve which servers to push to</td><td class="detect">Redis error rate spike on routing lookups</td><td class="fix">Workers buffer briefly and retry; Redis runs as a replicated cluster to survive single-node loss</td></tr>
+          <tr><td>Single stream goes viral mid-broadcast</td><td class="impact">One Kafka partition and its consumer become a bottleneck</td><td class="detect">Partition lag isolated to one stream_id</td><td class="fix">Sub-partition that stream's topic on the fly; accept relaxed ordering only there</td></tr>
+          <tr><td>Cassandra write latency spikes</td><td class="impact">None to live fan-out; join backfill may be briefly stale</td><td class="detect">Write p99 latency alarm on the comments table</td><td class="fix">Fan-out reads from Kafka, not Cassandra — persistence and delivery are decoupled by design</td></tr>
+        </tbody>
+      </table>
+    </section>
+
+    <section id="interview-moves">
+      <h2>Interview moves</h2>
+      <ul class="moves-list">
+        <li><span class="move-num">01</span><div><strong>"The hard part here isn't storing comments — it's fanning one comment out to a million open connections in under a second"</strong> — names the real problem before diving into a familiar CRUD shape</div></li>
+        <li><span class="move-num">02</span><div><strong>"I'll partition Kafka by stream_id so ordering only needs to hold within a stream, not globally — that's the scope the requirement actually needs"</strong> — shows the ordering guarantee is scoped deliberately, not accidentally weak</div></li>
+        <li><span class="move-num">03</span><div><strong>"Connection servers are the one stateful tier in this system — everything else stays stateless so it can scale freely around it"</strong> — demonstrates architectural awareness of where state actually lives</div></li>
+        <li><span class="move-num">04</span><div><strong>"Fan-out workers never talk to individual sockets — they push once per connection server, and each server fans out locally to its own viewers"</strong> — a concrete detail that shows the fan-out isn't O(viewers) at the messaging layer</div></li>
+        <li><span class="move-num">05</span><div><strong>"If a fan-out worker falls behind on a viral stream, I'd rather batch pushes into short windows than let latency creep unbounded"</strong> — proactively states a degrade-gracefully strategy before being asked</div></li>
+        <li><span class="move-num">06</span><div><strong>"A connection server dying drops every socket it holds — I size instances at ~50k sockets, not the OS max, specifically to leave headroom for that failure"</strong> — ties a concrete capacity number directly to a stated failure mode</div></li>
+      </ul>
+    </section>
+
+    <section id="follow-ups">
+      <h2>Follow-up questions</h2>
+      <div class="qa-block">
+        <div class="qa-q">Why not just have every viewer poll for new comments every second?</div>
+        <div class="qa-a">At 1M concurrent viewers that's 1M requests/sec just for one stream's polling — a persistent WebSocket amortizes that into a single push per comment instead.</div>
+      </div>
+      <div class="qa-block">
+        <div class="qa-q">How do you handle a viewer switching between streams rapidly?</div>
+        <div class="qa-a">Each switch closes the old socket registration in Redis and opens a new one; the connection server itself can often be reused, only the routing entry changes.</div>
+      </div>
+      <div class="qa-block">
+        <div class="qa-q">How would you extend this to support 10x the concurrent viewers?</div>
+        <div class="qa-a">Add more connection server instances (near-linear scaling), scale the fan-out consumer group, and sub-partition Kafka topics for any individual stream that outgrows one partition.</div>
+      </div>
+      <div class="qa-block">
+        <div class="qa-q">What happens to in-flight comments if a fan-out worker crashes mid-broadcast?</div>
+        <div class="qa-a">Kafka retains the offset; a new consumer in the group picks up the partition from the last committed offset, so comments are delayed, not lost.</div>
+      </div>
+      <div class="qa-block">
+        <div class="qa-q">How do you moderate a comment out in real time across a million viewers?</div>
+        <div class="qa-a">Delete publishes a lightweight "hide comment_id" event through the same Kafka/fan-out path, so every connected client removes it client-side within the same latency budget.</div>
+      </div>
+      <div class="qa-block">
+        <div class="qa-q">Why Cassandra for comment history instead of Postgres?</div>
+        <div class="qa-a">The access pattern is purely append + range-scan by stream_id, which a wide-column store handles at far higher write throughput than a relational store without sharding.</div>
+      </div>
+    </section>
+
+  </main>
+  <script src="../../assets/nav.js"></script>
+</body>
+</html>

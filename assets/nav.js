@@ -35,6 +35,19 @@
     { slug: 'bitly',              name: 'Design Bitly',        cat: 'Questions', dir: 'questions/' },
     { slug: 'dropbox',            name: 'Design Dropbox',      cat: 'Questions', dir: 'questions/' },
     { slug: 'local-delivery',     name: 'Local Delivery',      cat: 'Questions', dir: 'questions/' },
+    { slug: 'news-aggregator',    name: 'News Aggregator',     cat: 'Questions', dir: 'questions/' },
+    { slug: 'ticketmaster',       name: 'Ticketmaster',        cat: 'Questions', dir: 'questions/' },
+    { slug: 'fb-news-feed',       name: 'Facebook News Feed',  cat: 'Questions', dir: 'questions/' },
+    { slug: 'tinder',             name: 'Tinder',              cat: 'Questions', dir: 'questions/' },
+    { slug: 'leetcode',           name: 'LeetCode',            cat: 'Questions', dir: 'questions/' },
+    { slug: 'whatsapp',           name: 'WhatsApp',            cat: 'Questions', dir: 'questions/' },
+    { slug: 'yelp',               name: 'Yelp',                cat: 'Questions', dir: 'questions/' },
+    { slug: 'strava',             name: 'Strava',              cat: 'Questions', dir: 'questions/' },
+    { slug: 'rate-limiter',       name: 'Rate Limiter',        cat: 'Questions', dir: 'questions/' },
+    { slug: 'online-auction',     name: 'Online Auction',      cat: 'Questions', dir: 'questions/' },
+    { slug: 'fb-live-comments',   name: 'FB Live Comments',    cat: 'Questions', dir: 'questions/' },
+    { slug: 'fb-post-search',     name: 'FB Post Search',      cat: 'Questions', dir: 'questions/' },
+    { slug: 'price-tracking',     name: 'Price Tracking',      cat: 'Questions', dir: 'questions/' },
   ];
 
   const sidebar  = document.getElementById('sidebar');

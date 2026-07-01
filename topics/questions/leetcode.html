@@ -1,0 +1,406 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Design LeetCode — SD Prep</title>
+  <link rel="stylesheet" href="../../assets/style.css">
+</head>
+<body>
+  <aside id="sidebar"></aside>
+  <main>
+
+    <header class="page-head">
+      <div class="pill">Questions</div>
+      <h1>Design LeetCode (Online Code Judge)</h1>
+      <p class="sub">Tests whether you can safely run untrusted user code at scale — sandboxing is the actual system design problem, the CRUD around it is a distraction.</p>
+      <div class="meta-row">
+        <span class="badge green">30-40 min interview</span>
+        <span class="badge blue">Medium</span>
+      </div>
+    </header>
+
+    <div class="flash-card">
+      <div class="flash-label">Say this in the first 2 minutes</div>
+      <ul>
+        <li>The core insight: this is an untrusted-workload isolation problem, not a CRUD problem — sandboxing is the whole design, not a detail</li>
+        <li>Key scale number to anchor on: ~5k submissions/sec at peak (contest start), each fanning out into 20-100 test case runs</li>
+        <li>Primary tradeoff being probed: sandbox isolation strength (VM-level) vs spin-up latency (container-level) — you can't max both</li>
+        <li>Component most candidates forget: a job queue between submission and execution — synchronous execution on the request thread cannot survive a contest-start spike</li>
+        <li>Failure mode most candidates skip: infinite loops and fork bombs — every sandbox needs hard CPU/memory/wall-clock caps enforced by the host, not the guest</li>
+      </ul>
+    </div>
+
+    <section id="step1-requirements">
+      <div class="step-pill">Step 1 of 6 — Requirements</div>
+      <h2>Requirements</h2>
+
+      <div class="goal-arc-wrap">
+        <div class="goal-arc-row functional">
+          <div class="goal-arc-seg">1</div><div class="goal-arc-seg">2</div><div class="goal-arc-seg">3</div><div class="goal-arc-seg">4</div><div class="goal-arc-seg">5</div><div class="goal-arc-seg inactive">6</div>
+        </div>
+        <div class="goal-arc-label"><span>Arc 1 (steps 1-5) — <strong>Satisfy Functional Requirements</strong></span></div>
+        <div class="goal-arc-row nonfunctional" style="margin-top:8px">
+          <div class="goal-arc-seg">1</div><div class="goal-arc-seg">2</div><div class="goal-arc-seg">3</div><div class="goal-arc-seg">4</div><div class="goal-arc-seg">5</div><div class="goal-arc-seg">6</div>
+        </div>
+        <div class="goal-arc-label"><span>Arc 2 (all 6 steps) — <strong>Satisfy Non-Functional Requirements</strong></span></div>
+      </div>
+
+      <div class="compare-grid">
+        <div class="compare-card good">
+          <div class="compare-label">Functional</div>
+          <ul>
+            <li>Submit code (multiple languages) against a problem's test cases</li>
+            <li>Run submission against all test cases and return pass/fail + runtime/memory per case</li>
+            <li>Stream live status (queued → running → passed/failed) to the browser</li>
+            <li>Rank submissions on a contest leaderboard by correctness + speed</li>
+          </ul>
+        </div>
+        <div class="compare-card bad">
+          <div class="compare-label">Non-Functional</div>
+          <ul>
+            <li>Untrusted code execution must never compromise the host or other tenants</li>
+            <li>~5k submissions/sec at peak (contest start), ~50/sec steady-state</li>
+            <li>Judge result returned in &lt;10s p99 for a typical submission</li>
+            <li>Every submission's resource use is hard-capped — no single job can starve the fleet</li>
+          </ul>
+        </div>
+      </div>
+
+      <div class="callout warn"><strong>What NOT to build:</strong> a full IDE with autocomplete/debugging, a general-purpose CI/CD platform, or a public code-hosting service. This is submit → sandbox-execute → grade → return only.</div>
+
+      <div class="stat-grid">
+        <div class="stat-card"><div class="stat-val">~5k/s</div><div class="stat-label">submissions/sec (contest-start peak)</div></div>
+        <div class="stat-card"><div class="stat-val">~150ms</div><div class="stat-label">sandbox cold-start latency</div></div>
+        <div class="stat-card"><div class="stat-val">2s / 256MB</div><div class="stat-label">default CPU time / memory cap</div></div>
+        <div class="stat-card"><div class="stat-val">20-100</div><div class="stat-label">test cases fanned out per submission</div></div>
+      </div>
+    </section>
+
+    <section id="step2-entities">
+      <div class="step-pill">Step 2 of 6 — Core Entities</div>
+      <h2>Core entities</h2>
+      <p style="font-size:13px;color:#999;margin-bottom:0.75rem">Four entities — problem definition is relatively static and relational; submissions and their per-test-case results are high-write and split by access pattern.</p>
+
+      <div class="entity-grid">
+        <div class="entity-box">
+          <div class="entity-head"><span class="entity-name">Problem</span><span class="entity-store pg">Postgres</span></div>
+          <div class="entity-fields">
+            <div class="entity-field"><span class="fname pk">problem_id</span><span class="ftype">BIGINT</span></div>
+            <div class="entity-field"><span class="fname">title</span><span class="ftype">TEXT</span></div>
+            <div class="entity-field"><span class="fname">time_limit_ms</span><span class="ftype">INT</span></div>
+            <div class="entity-field"><span class="fname">memory_limit_mb</span><span class="ftype">INT</span></div>
+            <div class="entity-field"><span class="fname">test_cases_uri</span><span class="ftype">TEXT → S3</span></div>
+          </div>
+          <div class="entity-why">Because problems are read constantly and written rarely — a relational store with a CDN-cached read path fits. Tradeoff: schema changes to limits require careful backfill for in-flight submissions.</div>
+        </div>
+
+        <div class="entity-box">
+          <div class="entity-head"><span class="entity-name">Submission</span><span class="entity-store pg">Postgres</span></div>
+          <div class="entity-fields">
+            <div class="entity-field"><span class="fname pk">submission_id</span><span class="ftype">UUID</span></div>
+            <div class="entity-field"><span class="fname idx">user_id</span><span class="ftype">BIGINT</span></div>
+            <div class="entity-field"><span class="fname idx">problem_id</span><span class="ftype">BIGINT → Problem</span></div>
+            <div class="entity-field"><span class="fname">language</span><span class="ftype">ENUM</span></div>
+            <div class="entity-field"><span class="fname">status</span><span class="ftype">ENUM (queued/running/passed/failed)</span></div>
+          </div>
+          <div class="entity-why">Because a submission's row is small and needs strong consistency for status transitions the UI polls/subscribes to. Tradeoff: high write rate at contest start needs write buffering ahead of Postgres.</div>
+        </div>
+
+        <div class="entity-box">
+          <div class="entity-head"><span class="entity-name">TestCaseResult</span><span class="entity-store cass">ClickHouse</span></div>
+          <div class="entity-fields">
+            <div class="entity-field"><span class="fname idx">submission_id</span><span class="ftype">UUID</span></div>
+            <div class="entity-field"><span class="fname">test_case_id</span><span class="ftype">INT</span></div>
+            <div class="entity-field"><span class="fname">verdict</span><span class="ftype">ENUM (AC/WA/TLE/MLE/RE)</span></div>
+            <div class="entity-field"><span class="fname">runtime_ms</span><span class="ftype">INT</span></div>
+            <div class="entity-field"><span class="fname">memory_kb</span><span class="ftype">INT</span></div>
+          </div>
+          <div class="entity-why">Because it's append-only, one row per test case per submission, and queried in aggregate (pass rate, runtime distribution) far more than by single row. Tradeoff: not the source of truth for "did the submission pass overall" — that's a rollup back onto Submission.</div>
+        </div>
+
+        <div class="entity-box">
+          <div class="entity-head"><span class="entity-name">SourceCode</span><span class="entity-store s3">S3</span></div>
+          <div class="entity-fields">
+            <div class="entity-field"><span class="fname pk">submission_id</span><span class="ftype">UUID</span></div>
+            <div class="entity-field"><span class="fname">code_uri</span><span class="ftype">TEXT</span></div>
+            <div class="entity-field"><span class="fname">size_bytes</span><span class="ftype">INT</span></div>
+          </div>
+          <div class="entity-why">Because raw source blobs are large relative to metadata and immutable once submitted — object storage is cheaper than a relational TEXT column at this volume. Tradeoff: an extra fetch on the judge worker's critical path.</div>
+        </div>
+      </div>
+
+      <div class="callout info">Primary key: <code>Submission.submission_id</code> (UUID, client-safe to generate optimistically). Critical index: <code>(user_id, problem_id)</code> on Submission — powers both "my submission history" and duplicate-submission throttling.</div>
+    </section>
+
+    <section id="step3-api">
+      <div class="step-pill">Step 3 of 6 — API / Interface</div>
+      <h2>API design</h2>
+      <p style="font-size:13px;color:#999;margin-bottom:0.75rem">Submit and fetch-problem are REST; live grading status is a WebSocket push — polling for a job that takes seconds wastes both client and server cycles.</p>
+
+      <div class="api-card">
+        <div class="api-line"><span class="api-method get">GET</span><span class="api-path">/api/v1/problems/{problem_id}</span><span class="api-auth">Auth: optional</span></div>
+        <div class="api-io">
+          <div class="api-io-block"><div class="api-io-label">Request</div><div class="api-io-body">path param only</div></div>
+          <div class="api-io-block"><div class="api-io-label">Response</div><div class="api-io-body">{ title, description, time_limit_ms, memory_limit_mb, sample_cases }</div></div>
+        </div>
+      </div>
+
+      <div class="api-card">
+        <div class="api-line"><span class="api-method post">POST</span><span class="api-path">/api/v1/submissions</span><span class="api-auth">Auth: required</span></div>
+        <div class="api-io">
+          <div class="api-io-block"><div class="api-io-label">Request</div><div class="api-io-body">{ problem_id, language, source_code }</div></div>
+          <div class="api-io-block"><div class="api-io-label">Response</div><div class="api-io-body">HTTP 202 + { submission_id, status: "queued" }</div></div>
+        </div>
+      </div>
+
+      <div class="api-card">
+        <div class="api-line"><span class="api-method ws">WS</span><span class="api-path">/ws/submissions/{submission_id}</span><span class="api-auth">Auth: required</span></div>
+        <div class="api-io">
+          <div class="api-io-block"><div class="api-io-label">Connection</div><div class="api-io-body">opened right after submit, held until a terminal status</div></div>
+          <div class="api-io-block"><div class="api-io-label">Message</div><div class="api-io-body">{ status, cases_passed, cases_total, verdict? }</div></div>
+        </div>
+      </div>
+
+      <div class="api-card">
+        <div class="api-line"><span class="api-method get">GET</span><span class="api-path">/api/v1/submissions/{submission_id}</span><span class="api-auth">Auth: required (owner)</span></div>
+        <div class="api-io">
+          <div class="api-io-block"><div class="api-io-label">Request</div><div class="api-io-body">path param only</div></div>
+          <div class="api-io-block"><div class="api-io-label">Response</div><div class="api-io-body">{ status, verdict, runtime_ms, memory_kb, per_case_results }</div></div>
+        </div>
+      </div>
+
+      <div class="callout good">WebSocket over polling here: a submission takes 1-10s end to end and the client wants sub-second status updates during that window — polling every 500ms per active submission multiplies request volume for no benefit over a push.</div>
+    </section>
+
+    <section id="step4-dataflow">
+      <div class="step-pill">Step 4 of 6 — Data Flow</div>
+      <h2>Data flow</h2>
+      <p style="font-size:13px;color:#999;margin-bottom:0.75rem">Write path (blue) queues the job and returns immediately; read path (mint) is the async judge execution that pushes results back over the open socket.</p>
+
+      <div class="diagram-wrap" data-paths='{"write":{"boxes":["w-client","w-svc","w-s3","w-queue"],"arrows":["w1","w2","w3"]},"read":{"boxes":["r-queue","r-worker","r-sandbox","r-result","r-ws"],"arrows":["r1","r2","r3","r4"]}}'>
+        <svg viewBox="0 0 740 220" xmlns="http://www.w3.org/2000/svg">
+          <defs>
+            <marker id="lcW" markerWidth="8" markerHeight="8" refX="6" refY="3" orient="auto"><path d="M0,0 L6,3 L0,6 Z" fill="var(--blue)"/></marker>
+            <marker id="lcR" markerWidth="8" markerHeight="8" refX="6" refY="3" orient="auto"><path d="M0,0 L6,3 L0,6 Z" fill="var(--accent)"/></marker>
+          </defs>
+
+          <text class="diag-sublabel" x="150" y="14" style="font-size:10px;fill:var(--blue)">WRITE PATH — submit</text>
+          <circle class="diag-dot diag-flow-dot" r="3.5" style="offset-path: path('M10,24 L120,24 L120,24 L260,24 L260,24 L400,24')"></circle>
+          <g data-target="step2-entities" data-id="w-client" data-tip="Submits source code for a problem"><rect class="diag-box role-client" x="10" y="24" width="110" height="46"/><text class="diag-label" x="65" y="47" style="font-size:11px">Client</text></g>
+          <path class="diag-arrow-path" data-id="w1" d="M120,47 L155,47" marker-end="url(#lcW)"/>
+          <g data-target="step2-entities" data-id="w-svc" data-tip="Validates language, size limits, writes Submission row as queued"><rect class="diag-box" x="155" y="24" width="105" height="46"/><text class="diag-label" x="207" y="47" style="font-size:11px">Submit Svc</text></g>
+          <path class="diag-arrow-path" data-id="w2" d="M260,47 L295,47" marker-end="url(#lcW)"/>
+          <g data-target="step2-entities" data-id="w-s3" data-tip="Raw source code persisted before queueing the job"><rect class="diag-box role-db" x="295" y="24" width="105" height="46"/><text class="diag-label" x="347" y="47" style="font-size:11px">S3</text></g>
+          <path class="diag-arrow-path" data-id="w3" d="M400,47 L435,47" marker-end="url(#lcW)"/>
+          <g data-target="step6-deepdive-sandbox" data-id="w-queue" data-tip="Absorbs contest-start bursts, decouples submit from execution"><rect class="diag-box role-async" x="435" y="24" width="105" height="46"/><text class="diag-label" x="487" y="47" style="font-size:11px">Kafka</text></g>
+
+          <text class="diag-sublabel" x="150" y="105" style="font-size:10px;fill:var(--accent)">READ PATH — judge execution, async</text>
+          <g data-target="step6-deepdive-sandbox" data-id="r-queue" data-tip="Same queue as above, consumed by the judge worker pool"><rect class="diag-box role-async" x="10" y="115" width="105" height="46"/><text class="diag-label" x="62" y="143" style="font-size:11px">Kafka</text></g>
+          <path class="diag-arrow-path" data-id="r1" d="M115,138 L150,138" marker-end="url(#lcR)"/>
+          <g data-target="step6-deepdive-sandbox" data-id="r-worker" data-tip="Pulls source + test cases, spins up an isolated sandbox"><rect class="diag-box" x="150" y="115" width="115" height="46"/><text class="diag-label" x="207" y="143" style="font-size:11px">Judge Worker</text></g>
+          <path class="diag-arrow-path" data-id="r2" d="M265,138 L300,138" marker-end="url(#lcR)"/>
+          <g data-target="step6-deepdive-sandbox" data-id="r-sandbox" data-tip="gVisor sandbox, hard CPU/memory/time caps enforced by host"><rect class="diag-box role-cache" x="300" y="115" width="115" height="46"/><text class="diag-label" x="357" y="138" style="font-size:11px">Sandbox</text><text class="diag-sublabel" x="357" y="153" style="font-size:8.5px">gVisor + seccomp</text></g>
+          <path class="diag-arrow-path" data-id="r3" d="M415,138 L450,138" marker-end="url(#lcR)"/>
+          <g data-target="step2-entities" data-id="r-result" data-tip="Per-test-case verdict + runtime/memory written back"><rect class="diag-box role-db" x="450" y="115" width="115" height="46"/><text class="diag-label" x="507" y="138" style="font-size:11px">Result Store</text></g>
+          <path class="diag-arrow-path" data-id="r4" d="M565,138 L600,138" marker-end="url(#lcR)"/>
+          <g data-target="step3-api" data-id="r-ws" data-tip="Pushes status transitions to the still-open client socket"><rect class="diag-box role-cdn" x="600" y="115" width="105" height="46"/><text class="diag-label" x="652" y="138" style="font-size:11px">WS Gateway</text></g>
+        </svg>
+        <div class="diag-legend">
+          <div class="diag-legend-item"><span class="diag-legend-dot role-client"></span>Write path — submit returns 202 immediately</div>
+          <div class="diag-legend-item"><span class="diag-legend-dot role-async"></span>Kafka — decouples submit from execution</div>
+          <div class="diag-legend-item"><span class="diag-legend-dot role-cache"></span>Sandbox — the actual hard part</div>
+        </div>
+      </div>
+
+      <ol class="flow-steps-list">
+        <li><span>Client submits code</span> — Submit Svc writes a queued Submission row and enqueues a job, returns 202 in ms</li>
+        <li><span>Client opens a WebSocket</span> — subscribes to that submission_id for live status</li>
+        <li><span>Judge worker dequeues the job</span> — pulls source from S3 and test cases from the problem's bundle</li>
+        <li><span>Sandbox executes each test case</span> — isolated, resource-capped, no network access</li>
+        <li><span>Result written and pushed</span> — verdict lands in the result store, WS gateway pushes the update to the open socket</li>
+      </ol>
+    </section>
+
+    <section id="step5-hld">
+      <div class="step-pill">Step 5 of 6 — High-Level Design</div>
+      <h2>High-level design</h2>
+      <p style="font-size:13px;color:#999;margin-bottom:0.75rem">Full system: submission intake, the queue that absorbs bursts, the judge worker fleet, and result delivery back to the browser.</p>
+
+      <div class="diagram-wrap">
+        <svg viewBox="0 0 780 300" xmlns="http://www.w3.org/2000/svg">
+          <defs><marker id="lcHldArrow" markerWidth="8" markerHeight="8" refX="6" refY="3" orient="auto"><path d="M0,0 L6,3 L0,6 Z" fill="var(--border2)"/></marker></defs>
+
+          <g data-tip="Browser IDE — submits code, holds a WS for live status"><rect class="diag-box role-client" x="10" y="20" width="110" height="50"/><text class="diag-label" x="65" y="50" style="font-size:11px">Clients</text></g>
+          <path class="diag-arrow-path" d="M120,45 L155,45" marker-end="url(#lcHldArrow)"/>
+          <g data-tip="Auth, rate limiting, routing"><rect class="diag-box role-client" x="155" y="20" width="120" height="50"/><text class="diag-label" x="215" y="50" style="font-size:11px">API Gateway</text></g>
+
+          <path class="diag-arrow-path" d="M215,70 L215,105" marker-end="url(#lcHldArrow)"/>
+          <g data-tip="Validates and persists the submission, enqueues the job"><rect class="diag-box" x="150" y="105" width="130" height="46"/><text class="diag-label" x="215" y="128" style="font-size:11px">Submit Svc</text></g>
+          <path class="diag-arrow-path" d="M215,151 L215,185" marker-end="url(#lcHldArrow)"/>
+          <g data-tip="Submission + Problem metadata"><rect class="diag-box role-db" x="150" y="185" width="130" height="46"/><text class="diag-label" x="215" y="208" style="font-size:11px">Postgres</text></g>
+
+          <path class="diag-arrow-path" d="M280,128 L360,128" marker-end="url(#lcHldArrow)"/>
+          <g data-tip="Buffers contest-start bursts, decouples submit from execution"><rect class="diag-box role-async" x="360" y="105" width="120" height="46"/><text class="diag-label" x="420" y="128" style="font-size:11px">Kafka</text></g>
+
+          <path class="diag-arrow-path" d="M480,128 L555,128" marker-end="url(#lcHldArrow)"/>
+          <g data-tip="Autoscaled pool, one sandbox per test case run"><rect class="diag-box" x="555" y="105" width="140" height="46"/><text class="diag-label" x="625" y="123" style="font-size:11px">Judge Workers</text><text class="diag-sublabel" x="625" y="138" style="font-size:8.5px">gVisor sandboxes</text></g>
+
+          <path class="diag-arrow-path" d="M625,151 L625,185" marker-end="url(#lcHldArrow)"/>
+          <g data-tip="Per-test-case verdicts, runtime, memory"><rect class="diag-box role-db" x="555" y="185" width="140" height="46"/><text class="diag-label" x="625" y="208" style="font-size:11px">ClickHouse</text></g>
+
+          <path class="diag-arrow-path" d="M555,128 L420,240 L280,240" marker-end="url(#lcHldArrow)" stroke-dasharray="3 3"/>
+          <g data-tip="Fans the final verdict back to the client's open socket"><rect class="diag-box role-cdn" x="150" y="240" width="130" height="46"/><text class="diag-label" x="215" y="263" style="font-size:11px">WS Gateway</text></g>
+          <path class="diag-arrow-path" d="M150,263 L120,263 L120,70" marker-end="url(#lcHldArrow)" stroke-dasharray="3 3"/>
+        </svg>
+        <div class="diag-legend">
+          <div class="diag-legend-item"><span class="diag-legend-dot role-client"></span>Client / gateway</div>
+          <div class="diag-legend-item"><span class="diag-legend-dot role-async"></span>Kafka — burst absorption</div>
+          <div class="diag-legend-item"><span class="diag-legend-dot role-db"></span>Postgres + ClickHouse</div>
+          <div class="diag-legend-item"><span class="diag-legend-dot role-cdn"></span>WS Gateway — pushes final verdicts</div>
+        </div>
+      </div>
+
+      <table class="def-table">
+        <thead><tr><th>Component</th><th>Role</th><th>Tech + why</th></tr></thead>
+        <tbody>
+          <tr><td>Submit Svc</td><td>Validates and persists a submission, enqueues the job</td><td>Stateless pods — because it does no execution itself, just intake; tradeoff is it can't reject obviously-bad code without a slow static check, so it defers to the sandbox.</td></tr>
+          <tr><td>Kafka</td><td>Buffers submission jobs</td><td>Log-based queue — because contest-start traffic can spike 100x steady-state in seconds and workers can't scale that fast; tradeoff is added latency during backlog drains.</td></tr>
+          <tr><td>Judge Workers</td><td>Runs each test case inside an isolated sandbox</td><td>gVisor (userspace kernel) over raw containers — because untrusted code needs a real security boundary, not just namespace isolation; tradeoff is ~2-3x syscall overhead vs bare Docker.</td></tr>
+          <tr><td>ClickHouse</td><td>Stores per-test-case results</td><td>Column store — because the query pattern is "pass rate / runtime distribution across millions of case results"; tradeoff is poor fit for the single "did this submission pass" point read, which is why that rolls up onto Postgres.</td></tr>
+          <tr><td>WS Gateway</td><td>Delivers live status back to the browser</td><td>Persistent connection pool — because a submission's grading window (1-10s) is short enough that push beats poll; tradeoff is stateful infra that needs sticky routing per submission_id.</td></tr>
+        </tbody>
+      </table>
+
+      <h3 style="font-size:13px;color:var(--text);margin:1.25rem 0 0.6rem;font-weight:600">Scaling levers — cheapest to most complex</h3>
+      <ol class="levers-list">
+        <li><strong>Autoscale judge worker pool on queue depth</strong><span class="cost">near-zero complexity</span></li>
+        <li><strong>Pre-warm a pool of idle sandboxes</strong> ahead of scheduled contests<span class="cost">low complexity, cuts cold-start latency</span></li>
+        <li><strong>Partition Kafka by language</strong> so a slow-to-start runtime (e.g. JVM) doesn't head-of-line block others<span class="cost">medium complexity</span></li>
+        <li><strong>Parallelize test cases within a single submission</strong> across multiple workers<span class="cost">medium complexity</span></li>
+        <li><strong>Dedicated worker pools per trust tier</strong> (contest vs practice vs untrusted new accounts)<span class="cost">high complexity — last resort</span></li>
+      </ol>
+
+      <table class="grid-table">
+        <thead><tr><th>Bottleneck</th><th>Triggers at</th><th>Exact fix</th></tr></thead>
+        <tbody>
+          <tr><td>Judge worker pool saturated</td><td>Queue depth grows unbounded at contest start</td><td class="fix">Pre-warmed sandbox pool + aggressive autoscaling triggered on queue depth, not CPU</td></tr>
+          <tr><td>Slow-runtime head-of-line blocking</td><td>JVM/compiled-language cold starts stall the queue</td><td class="fix">Partition the queue by language so Python submissions don't wait behind Java compiles</td></tr>
+          <tr><td>Single submission hogs a worker</td><td>Infinite loop or fork bomb in submitted code</td><td class="fix">Host-enforced hard wall-clock timeout + cgroup memory/CPU caps that kill the sandbox, not just the process</td></tr>
+        </tbody>
+      </table>
+
+      <div class="dial-wrap">
+        <div class="dial-title">Sandbox isolation strength vs spin-up latency</div>
+        <div class="dial-track"><div class="dial-marker" style="left:70%"></div></div>
+        <div class="dial-labels"><span class="end-left">Fast (raw container)</span><span class="end-right">Safe (microVM)</span></div>
+      </div>
+      <div class="dial-wrap">
+        <div class="dial-title">Result delivery: push vs poll</div>
+        <div class="dial-track"><div class="dial-marker" style="left:15%"></div></div>
+        <div class="dial-labels"><span class="end-left">WebSocket push</span><span class="end-right">Client polling</span></div>
+      </div>
+    </section>
+
+    <section id="step6-deepdive-sandbox">
+      <div class="step-pill">Step 6 of 6 — Deep Dives</div>
+      <h2>Deep dive: sandbox isolation layers</h2>
+      <p style="font-size:13px;color:#999;margin-bottom:0.75rem">Untrusted code gets four stacked layers of containment — any single layer failing shouldn't compromise the host.</p>
+
+      <div class="diagram-wrap">
+        <svg viewBox="0 0 700 260" xmlns="http://www.w3.org/2000/svg">
+          <g data-tip="Bare metal or VM running the judge worker fleet"><rect class="diag-box role-db" x="20" y="20" width="660" height="220" rx="6"/><text class="diag-label" x="350" y="40" style="font-size:11px">Host OS</text></g>
+          <g data-tip="Isolated filesystem, network namespace with no egress"><rect class="diag-box role-client" x="60" y="60" width="580" height="165" rx="6"/><text class="diag-label" x="350" y="80" style="font-size:11px">Container (no network, read-only rootfs)</text></g>
+          <g data-tip="gVisor intercepts syscalls in userspace — the untrusted code never talks to the real kernel directly"><rect class="diag-box role-cache" x="100" y="100" width="500" height="115" rx="6"/><text class="diag-label" x="350" y="120" style="font-size:11px">gVisor userspace kernel</text></g>
+          <g data-tip="Denies dangerous syscalls outright — ptrace, mount, reboot, raw sockets"><rect class="diag-box role-async" x="140" y="140" width="420" height="70" rx="6"/><text class="diag-label" x="350" y="160" style="font-size:11px">seccomp-bpf syscall filter</text></g>
+          <g data-tip="cgroups enforce the numbers that actually stop abuse"><rect class="diag-box" x="180" y="180" width="340" height="25" rx="4"/><text class="diag-label" x="350" y="197" style="font-size:10px">cgroup limits: 2s CPU · 256MB mem · 64 procs</text></g>
+        </svg>
+        <div class="diag-legend">
+          <div class="diag-legend-item"><span class="diag-legend-dot role-db"></span>Host OS — never directly reachable</div>
+          <div class="diag-legend-item"><span class="diag-legend-dot role-client"></span>Container — filesystem + network isolation</div>
+          <div class="diag-legend-item"><span class="diag-legend-dot role-cache"></span>gVisor — intercepts every syscall</div>
+          <div class="diag-legend-item"><span class="diag-legend-dot role-async"></span>seccomp + cgroups — the hard numeric caps</div>
+        </div>
+      </div>
+
+      <ol class="flow-steps-list">
+        <li><span>Container boundary</span> — read-only root filesystem, no network namespace at all, so exfiltration and outbound abuse are structurally impossible, not just blocked by policy</li>
+        <li><span>gVisor userspace kernel</span> — reimplements the Linux syscall surface in userspace, so even a kernel exploit in the submitted code hits gVisor's sandbox, not the real host kernel</li>
+        <li><span>seccomp-bpf filter</span> — denies an explicit blocklist of dangerous syscalls (ptrace, mount, reboot, clone with CLONE_NEWUSER) before gVisor even has to interpret them</li>
+        <li><span>cgroup resource caps</span> — 2s CPU time, 256MB memory, 64 max processes/threads — enforced by the host scheduler, so a spinning process gets killed even if application-level timeouts fail</li>
+        <li><span>Sandbox teardown</span> — every sandbox is destroyed after one submission's run, never reused across tenants, so no state or memory leaks between users</li>
+      </ol>
+
+      <div class="callout warn">The timeout must be enforced by the host (cgroup wall-clock + CPU quota), never by a timer inside the submitted code's own process — an infinite loop or intentionally hostile submission will never call its own cleanup code.</div>
+    </section>
+
+    <section id="step6-deepdive-parallelism">
+      <h2>Deep dive: test case runner parallelism</h2>
+      <p style="font-size:13px;color:#999;margin-bottom:0.75rem">A single submission with 100 test cases can't run them serially against a 10s p99 target — they fan out to independent sandboxes and results aggregate back.</p>
+
+      <ol class="flow-steps-list">
+        <li><span>Judge worker claims the job</span> — reads the test case bundle manifest for the problem (count, inputs, expected outputs)</li>
+        <li><span>Fan out N sandboxes in parallel</span> — one sandbox per test case, up to a per-submission concurrency cap (typically 10-20 at once) to avoid one submission monopolizing the worker's local resources</li>
+        <li><span>Each sandbox runs independently</span> — own CPU/memory/wall-clock caps, one case's TLE doesn't affect siblings</li>
+        <li><span>Results stream back as each case finishes</span> — the WS gateway can push "42/100 passed" incrementally rather than waiting for all 100</li>
+        <li><span>Aggregation rule: first failure can short-circuit</span> — for a straight pass/fail verdict, stop dispatching remaining cases once one fails, saving compute; contest judges instead run all cases for partial-credit scoring</li>
+      </ol>
+
+      <div class="callout warn">Short-circuiting on first failure is a product decision, not just an optimization — LeetCode-style practice mode wants a fast fail signal, but a scored contest needs every test case's result for tie-breaking and partial credit, so it must run to completion regardless of an early failure.</div>
+
+      <table class="grid-table">
+        <thead><tr><th>Scenario</th><th>User impact</th><th>Detection signal</th><th>Mitigation</th></tr></thead>
+        <tbody>
+          <tr><td>Infinite loop in submitted code</td><td class="impact">Would hang a worker indefinitely</td><td class="detect">cgroup wall-clock cap hit</td><td class="fix">Host kills the sandbox at 2s regardless of internal state; verdict returns TLE</td></tr>
+          <tr><td>Fork bomb / thread explosion</td><td class="impact">Could exhaust worker host resources</td><td class="detect">cgroup pids.max threshold hit</td><td class="fix">Process count hard-capped at 64; excess forks fail to spawn, sandbox killed</td></tr>
+          <tr><td>Kafka backlog at contest start</td><td class="impact">Submission status stuck at "queued" longer than expected</td><td class="detect">Consumer lag alert, queue depth spike</td><td class="fix">Pre-warmed worker autoscaling on queue depth; UI shows an honest queue position rather than a fake spinner</td></tr>
+          <tr><td>Judge worker crashes mid-execution</td><td class="impact">Submission appears stuck at "running"</td><td class="detect">Missed heartbeat from worker to orchestrator</td><td class="fix">Orchestrator requeues the job after a heartbeat timeout; job processing is idempotent per test case</td></tr>
+          <tr><td>Malicious code attempts network egress</td><td class="impact">None — structurally blocked</td><td class="detect">seccomp denial log entry (informational, not urgent)</td><td class="fix">No network namespace exists in the sandbox at all, so the syscall fails regardless of policy correctness</td></tr>
+        </tbody>
+      </table>
+    </section>
+
+    <section id="interview-moves">
+      <h2>Interview moves</h2>
+      <ul class="moves-list">
+        <li><span class="move-num">01</span><div><strong>"The core challenge here isn't the CRUD around problems and submissions — it's safely executing code I don't trust, so I want to spend most of our time on the sandbox"</strong> — names the real hard problem before diving into architecture</div></li>
+        <li><span class="move-num">02</span><div><strong>"I'd put a queue between submission and execution — at contest start, submissions can spike 100x steady-state in seconds, and workers physically can't scale that fast"</strong> — justifies the async architecture with a concrete number</div></li>
+        <li><span class="move-num">03</span><div><strong>"Every resource limit — CPU, memory, wall-clock — has to be enforced by the host via cgroups, never trusted to code running inside the sandbox"</strong> — shows you understand who the adversary actually is</div></li>
+        <li><span class="move-num">04</span><div><strong>"I'd fan out a submission's test cases to run in parallel across sandboxes rather than serially, since 100 sequential runs would blow past our latency target"</strong> — catches an obvious latency trap before being asked</div></li>
+        <li><span class="move-num">05</span><div><strong>"Whether to short-circuit on the first failing test case is a product decision — fast feedback for practice mode, but a scored contest needs every case's result for partial credit"</strong> — reframes an implementation detail as a requirements question</div></li>
+        <li><span class="move-num">06</span><div><strong>"gVisor over raw Docker here — a container alone shares the host kernel, and that's not a strong enough boundary for code I don't trust at all"</strong> — justifies a specific, correct technology choice with the actual reason</div></li>
+      </ul>
+    </section>
+
+    <section id="follow-ups">
+      <h2>Follow-up questions</h2>
+      <div class="qa-block">
+        <div class="qa-q">Why not just use Docker containers without gVisor?</div>
+        <div class="qa-a">Containers share the host kernel — a container-escape kernel exploit compromises the host directly. gVisor intercepts syscalls in userspace, so an exploit hits gVisor's sandboxed kernel instead.</div>
+      </div>
+      <div class="qa-block">
+        <div class="qa-q">How do you keep sandbox spin-up latency low without compromising isolation?</div>
+        <div class="qa-a">Pre-warm a pool of idle, already-isolated sandboxes ahead of demand (especially before scheduled contests) so a submission claims one instead of paying the ~150ms cold-start cost per request.</div>
+      </div>
+      <div class="qa-block">
+        <div class="qa-q">How do you support multiple languages without N different judge images?</div>
+        <div class="qa-a">One base sandbox image per language runtime, selected at dispatch time; compiled languages (Java, C++) get a separate compile step with its own timeout before the run step even starts.</div>
+      </div>
+      <div class="qa-block">
+        <div class="qa-q">How do you prevent a user from submitting the same solution thousands of times to game the leaderboard?</div>
+        <div class="qa-a">Rate limit submissions per user per problem (e.g. one every few seconds), and hash-dedupe identical source against a user's own recent submissions to short-circuit obvious repeats.</div>
+      </div>
+      <div class="qa-block">
+        <div class="qa-q">What happens if the judge worker fleet is completely saturated during a flash-contest spike?</div>
+        <div class="qa-a">Submissions queue in Kafka and the UI shows an honest queue position rather than fabricating progress; autoscaling adds workers on queue depth, and pre-warmed capacity absorbs the first burst before scale-up lands.</div>
+      </div>
+      <div class="qa-block">
+        <div class="qa-q">How do you stop test case data from leaking to users through the submitted code's output?</div>
+        <div class="qa-a">The sandbox only returns stdout/stderr up to a size cap and a pass/fail verdict — raw expected-output test data is never mounted anywhere the submitted process can read it directly.</div>
+      </div>
+    </section>
+
+  </main>
+  <script src="../../assets/nav.js"></script>
+</body>
+</html>

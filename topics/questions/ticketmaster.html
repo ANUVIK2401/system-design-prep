@@ -1,0 +1,476 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Design Ticketmaster — SD Prep</title>
+  <link rel="stylesheet" href="../../assets/style.css">
+</head>
+<body>
+  <aside id="sidebar"></aside>
+  <main>
+
+    <header class="page-head">
+      <div class="pill">Questions</div>
+      <h1>Design Ticketmaster</h1>
+      <p class="sub">Tests whether you can solve distributed locking under extreme write contention — millions of people fighting over the same 20,000 seats in the same 60 seconds.</p>
+      <div class="meta-row">
+        <span class="badge green">40-50 min interview</span>
+        <span class="badge blue">Hard</span>
+      </div>
+    </header>
+
+    <div class="flash-card">
+      <div class="flash-label">Say this in the first 2 minutes</div>
+      <ul>
+        <li>The core insight: this isn't a CRUD problem, it's a distributed locking problem — the hard part is preventing two people from both "successfully" reserving the same seat</li>
+        <li>Key scale number to anchor on: a single stadium on-sale can see 3-5M waiting-room requests in the first 60 seconds for 20,000 seats — a 200:1+ contention ratio</li>
+        <li>Primary tradeoff being probed: pessimistic locking (simple, safe, contends hard) vs optimistic locking (scales better, needs conflict retry UX)</li>
+        <li>Component most candidates forget: a TTL-based hold expiry — if a lock never releases on abandoned checkout, seats die forever</li>
+        <li>Failure mode most candidates skip: double-booking during a lock-service failover — must be architecturally impossible, not just unlikely</li>
+      </ul>
+    </div>
+
+    <section id="step1-requirements">
+      <div class="step-pill">Step 1 of 6 — Requirements</div>
+      <h2>Requirements</h2>
+
+      <div class="goal-arc-wrap">
+        <div class="goal-arc-row functional">
+          <div class="goal-arc-seg">1</div><div class="goal-arc-seg">2</div><div class="goal-arc-seg">3</div><div class="goal-arc-seg">4</div><div class="goal-arc-seg">5</div><div class="goal-arc-seg inactive">6</div>
+        </div>
+        <div class="goal-arc-label"><span>Arc 1 (steps 1-5) — <strong>Satisfy Functional Requirements</strong></span></div>
+        <div class="goal-arc-row nonfunctional" style="margin-top:8px">
+          <div class="goal-arc-seg">1</div><div class="goal-arc-seg">2</div><div class="goal-arc-seg">3</div><div class="goal-arc-seg">4</div><div class="goal-arc-seg">5</div><div class="goal-arc-seg">6</div>
+        </div>
+        <div class="goal-arc-label"><span>Arc 2 (all 6 steps) — <strong>Satisfy Non-Functional Requirements</strong></span></div>
+      </div>
+
+      <div class="compare-grid">
+        <div class="compare-card good">
+          <div class="compare-label">Functional</div>
+          <ul>
+            <li>Browse events, view an interactive seat map with live availability</li>
+            <li>Hold a seat (or group of seats) for a short checkout window</li>
+            <li>Complete payment and convert a hold into a confirmed reservation</li>
+            <li>Release a hold automatically if checkout is abandoned or times out</li>
+          </ul>
+        </div>
+        <div class="compare-card bad">
+          <div class="compare-label">Non-Functional</div>
+          <ul>
+            <li>Zero double-booking — the seat map's correctness beats every other property</li>
+            <li>Survive a thundering-herd spike: 3-5M requests/60s for one on-sale event</li>
+            <li>Seat map view stays &lt;200ms p99 even under peak load</li>
+            <li>Hold-to-confirm consistency is strong; browse-availability can be a few seconds stale</li>
+          </ul>
+        </div>
+      </div>
+
+      <div class="callout warn"><strong>What NOT to build:</strong> dynamic/surge pricing engines, a resale/secondary marketplace, venue seating-chart design tools, or a recommendation feed. This is seat inventory + locking + checkout only.</div>
+
+      <div class="stat-grid">
+        <div class="stat-card"><div class="stat-val">3-5M</div><div class="stat-label">requests in first 60s of a hot on-sale</div></div>
+        <div class="stat-card"><div class="stat-val">20k</div><div class="stat-label">seats in a large stadium event</div></div>
+        <div class="stat-card"><div class="stat-val">8 min</div><div class="stat-label">hold TTL before auto-release</div></div>
+        <div class="stat-card"><div class="stat-val">250:1</div><div class="stat-label">peak demand-to-inventory ratio</div></div>
+      </div>
+    </section>
+
+    <section id="step2-entities">
+      <div class="step-pill">Step 2 of 6 — Core Entities</div>
+      <h2>Core entities</h2>
+      <p style="font-size:13px;color:#999;margin-bottom:0.75rem">Four entities across two stores — the hot lock state lives in Redis, everything durable lives in Postgres.</p>
+
+      <div class="entity-grid">
+        <div class="entity-box">
+          <div class="entity-head"><span class="entity-name">Event</span><span class="entity-store pg">Postgres</span></div>
+          <div class="entity-fields">
+            <div class="entity-field"><span class="fname pk">id</span><span class="ftype">BIGINT</span></div>
+            <div class="entity-field"><span class="fname idx">venue_id</span><span class="ftype">BIGINT → Venue.id</span></div>
+            <div class="entity-field"><span class="fname">on_sale_at</span><span class="ftype">TIMESTAMP</span></div>
+            <div class="entity-field"><span class="fname">status</span><span class="ftype">ENUM(scheduled, on_sale, sold_out)</span></div>
+          </div>
+          <div class="entity-why">Because event metadata is low-write, read-heavy, and needs relational joins to venue/seat-map data. Tradeoff: not built for the write throughput of seat state itself, which is why that lives elsewhere.</div>
+        </div>
+
+        <div class="entity-box">
+          <div class="entity-head"><span class="entity-name">Seat</span><span class="entity-store pg">Postgres</span></div>
+          <div class="entity-fields">
+            <div class="entity-field"><span class="fname pk">id</span><span class="ftype">BIGINT</span></div>
+            <div class="entity-field"><span class="fname idx">event_id</span><span class="ftype">BIGINT → Event.id</span></div>
+            <div class="entity-field"><span class="fname">section, row, seat_num</span><span class="ftype">VARCHAR</span></div>
+            <div class="entity-field"><span class="fname">status</span><span class="ftype">ENUM(available, held, reserved)</span></div>
+            <div class="entity-field"><span class="fname">price_cents</span><span class="ftype">INT</span></div>
+          </div>
+          <div class="entity-why">Because status is the durable source of truth and must survive a Redis failure — but every hot check/set during the on-sale rush hits Redis first, never this table directly. Tradeoff: two systems to keep in sync.</div>
+        </div>
+
+        <div class="entity-box">
+          <div class="entity-head"><span class="entity-name">SeatLock</span><span class="entity-store redis">Redis</span></div>
+          <div class="entity-fields">
+            <div class="entity-field"><span class="fname pk">seat_id</span><span class="ftype">key</span></div>
+            <div class="entity-field"><span class="fname">hold_token</span><span class="ftype">UUID value</span></div>
+            <div class="entity-field"><span class="fname">ttl</span><span class="ftype">480s expiry</span></div>
+          </div>
+          <div class="entity-why">Because a SETNX-with-TTL is a single atomic operation that both claims the seat and guarantees self-cleanup — no cron job needed to sweep abandoned holds. Tradeoff: Redis becomes a hard dependency on the write path, so it must be highly available, not just fast.</div>
+        </div>
+
+        <div class="entity-box">
+          <div class="entity-head"><span class="entity-name">Reservation</span><span class="entity-store pg">Postgres</span></div>
+          <div class="entity-fields">
+            <div class="entity-field"><span class="fname pk">id</span><span class="ftype">BIGINT</span></div>
+            <div class="entity-field"><span class="fname idx">user_id</span><span class="ftype">BIGINT</span></div>
+            <div class="entity-field"><span class="fname idx">seat_ids</span><span class="ftype">BIGINT[]</span></div>
+            <div class="entity-field"><span class="fname">payment_status</span><span class="ftype">ENUM(pending, paid, failed)</span></div>
+          </div>
+          <div class="entity-why">Because a confirmed purchase needs ACID guarantees and an audit trail (refunds, disputes, support). Tradeoff: writes here only happen after payment succeeds, so it's never on the hot contention path.</div>
+        </div>
+      </div>
+
+      <div class="callout info">Primary key: <code>Seat.id</code>. Critical index: <code>UNIQUE INDEX on (event_id, section, row, seat_num)</code> — the seat map render is a range scan on this index, and it must stay a covering index so it never touches the row-level lock state.</div>
+    </section>
+
+    <section id="step3-api">
+      <div class="step-pill">Step 3 of 6 — API / Interface</div>
+      <h2>API design</h2>
+      <p style="font-size:13px;color:#999;margin-bottom:0.75rem">Four endpoints — view availability, hold, confirm, and release. Hold and confirm are the two that must be airtight.</p>
+
+      <div class="api-card">
+        <div class="api-line"><span class="api-method get">GET</span><span class="api-path">/api/v1/events/{event_id}/seats</span><span class="api-auth">Auth: required</span></div>
+        <div class="api-io">
+          <div class="api-io-block"><div class="api-io-label">Request</div><div class="api-io-body">path param only</div></div>
+          <div class="api-io-block"><div class="api-io-label">Response</div><div class="api-io-body">[{ seat_id, section, row, seat_num, status, price_cents }]</div></div>
+        </div>
+      </div>
+
+      <div class="api-card">
+        <div class="api-line"><span class="api-method post">POST</span><span class="api-path">/api/v1/seats/hold</span><span class="api-auth">Auth: required</span></div>
+        <div class="api-io">
+          <div class="api-io-block"><div class="api-io-label">Request</div><div class="api-io-body">{ event_id, seat_ids[] }</div></div>
+          <div class="api-io-block"><div class="api-io-label">Response</div><div class="api-io-body">{ hold_token, expires_at } or 409 Conflict if any seat unavailable</div></div>
+        </div>
+      </div>
+
+      <div class="api-card">
+        <div class="api-line"><span class="api-method post">POST</span><span class="api-path">/api/v1/reservations/confirm</span><span class="api-auth">Auth: required</span></div>
+        <div class="api-io">
+          <div class="api-io-block"><div class="api-io-label">Request</div><div class="api-io-body">{ hold_token, payment_method_id }</div></div>
+          <div class="api-io-block"><div class="api-io-label">Response</div><div class="api-io-body">{ reservation_id, status } or 410 Gone if hold expired</div></div>
+        </div>
+      </div>
+
+      <div class="api-card">
+        <div class="api-line"><span class="api-method delete">DELETE</span><span class="api-path">/api/v1/seats/hold/{hold_token}</span><span class="api-auth">Auth: required</span></div>
+        <div class="api-io">
+          <div class="api-io-block"><div class="api-io-label">Request</div><div class="api-io-body">path param only</div></div>
+          <div class="api-io-block"><div class="api-io-label">Response</div><div class="api-io-body">HTTP 204, seats immediately return to available</div></div>
+        </div>
+      </div>
+    </section>
+
+    <section id="step4-dataflow">
+      <div class="step-pill">Step 4 of 6 — Data Flow</div>
+      <h2>Data flow</h2>
+      <p style="font-size:13px;color:#999;margin-bottom:0.75rem">Read path (mint) is a simple map render. Write path (blue) is where the whole problem lives — a distributed lock acquire before anything else happens.</p>
+
+      <div class="diagram-wrap" data-paths='{"read":{"boxes":["r-client","r-svc","r-cache","r-db"],"arrows":["r1","r2","r3"]},"write":{"boxes":["w-client","w-svc","w-lock","w-db"],"arrows":["w1","w2","w3"]}}'>
+        <svg viewBox="0 0 740 220" xmlns="http://www.w3.org/2000/svg">
+          <defs>
+            <marker id="tmR" markerWidth="8" markerHeight="8" refX="6" refY="3" orient="auto"><path d="M0,0 L6,3 L0,6 Z" fill="var(--accent)"/></marker>
+            <marker id="tmW" markerWidth="8" markerHeight="8" refX="6" refY="3" orient="auto"><path d="M0,0 L6,3 L0,6 Z" fill="var(--blue)"/></marker>
+          </defs>
+
+          <text class="diag-sublabel" x="150" y="14" style="font-size:10px;fill:var(--accent)">READ PATH — seat map view</text>
+          <circle class="diag-dot diag-flow-dot" r="3.5" style="offset-path: path('M10,24 L120,24 L120,24 L280,24 L280,24 L440,24 L440,24 L570,24')"></circle>
+          <g data-target="step6-deepdive-holdstate" data-id="r-client" data-tip="Loads the interactive seat map for an event"><rect class="diag-box role-client" x="10" y="24" width="110" height="46"/><text class="diag-label" x="65" y="52" style="font-size:11px">Client</text></g>
+          <path class="diag-arrow-path" data-id="r1" d="M120,47 L165,47" marker-end="url(#tmR)"/>
+          <g data-target="step2-entities" data-id="r-svc" data-tip="Stateless read service — merges Postgres rows with Redis lock state"><rect class="diag-box" x="165" y="24" width="115" height="46"/><text class="diag-label" x="222" y="47" style="font-size:11px">Seat Map Svc</text><text class="diag-sublabel" x="222" y="62" style="font-size:8.5px">stateless</text></g>
+          <path class="diag-arrow-path" data-id="r2" d="M280,47 L325,47" marker-end="url(#tmR)"/>
+          <g data-target="step6-deepdive-holdstate" data-id="r-cache" data-tip="Fast check of which seats are currently held"><rect class="diag-box role-cache" x="325" y="24" width="115" height="46"/><text class="diag-label" x="382" y="47" style="font-size:11px">Redis</text><text class="diag-sublabel" x="382" y="62" style="font-size:8.5px">lock state</text></g>
+          <path class="diag-arrow-path" data-id="r3" d="M440,47 L485,47" marker-end="url(#tmR)"/>
+          <g data-target="step2-entities" data-id="r-db" data-tip="Base seat rows — layout, price, durable status"><rect class="diag-box role-db" x="485" y="24" width="115" height="46"/><text class="diag-label" x="542" y="47" style="font-size:11px">Postgres</text></g>
+
+          <text class="diag-sublabel" x="150" y="105" style="font-size:10px;fill:var(--blue)">WRITE PATH — hold a seat</text>
+          <g data-target="step6-deepdive-locking" data-id="w-client" data-tip="Selects seats and requests a checkout hold"><rect class="diag-box role-client" x="10" y="115" width="110" height="46"/><text class="diag-label" x="65" y="143" style="font-size:11px">Client</text></g>
+          <path class="diag-arrow-path" data-id="w1" d="M120,138 L165,138" marker-end="url(#tmW)"/>
+          <g data-target="step6-deepdive-locking" data-id="w-svc" data-tip="Validates the request, then attempts the lock acquire"><rect class="diag-box" x="165" y="115" width="115" height="46"/><text class="diag-label" x="222" y="143" style="font-size:11px">Reservation Svc</text></g>
+          <path class="diag-arrow-path" data-id="w2" d="M280,138 L325,138" marker-end="url(#tmW)"/>
+          <g data-target="step6-deepdive-locking" data-id="w-lock" data-tip="SET seat_id hold_token NX EX 480 — atomic claim-and-expire"><rect class="diag-box role-cache" x="325" y="115" width="115" height="46"/><text class="diag-label" x="382" y="138" style="font-size:11px">Redis</text><text class="diag-sublabel" x="382" y="153" style="font-size:8.5px">SETNX + TTL</text></g>
+          <path class="diag-arrow-path" data-id="w3" d="M440,138 L485,138" marker-end="url(#tmW)"/>
+          <text class="diag-sublabel" x="462" y="128" style="font-size:9px">on confirm</text>
+          <g data-target="step2-entities" data-id="w-db" data-tip="Only written to on confirm — hold itself never touches Postgres"><rect class="diag-box role-db" x="485" y="115" width="115" height="46"/><text class="diag-label" x="542" y="138" style="font-size:11px">Postgres</text></g>
+
+          <text class="diag-sublabel" x="150" y="188" style="font-size:10px;fill:var(--amber)">ASYNC — abandoned holds self-expire, no worker needed</text>
+          <g data-target="step6-deepdive-holdstate" data-id="ttl" data-tip="Redis TTL fires, key vanishes, seat becomes available again automatically"><rect class="diag-box role-async" x="10" y="192" width="200" height="20"/><text class="diag-label" x="110" y="205" style="font-size:9.5px">Redis TTL expiry → seat free</text></g>
+        </svg>
+        <div class="diag-legend">
+          <div class="diag-legend-item"><span class="diag-legend-dot role-cache"></span>Read path — merges durable state with live locks</div>
+          <div class="diag-legend-item"><span class="diag-legend-dot role-client"></span>Write path — atomic lock acquire is the whole game</div>
+          <div class="diag-legend-item"><span class="diag-legend-dot role-async"></span>TTL expiry — self-healing, no cleanup job required</div>
+        </div>
+      </div>
+
+      <ol class="flow-steps-list">
+        <li><span>Client requests a hold on N seats</span> — one API call, all-or-nothing</li>
+        <li><span>Reservation Svc attempts SETNX on every seat_id</span> — atomic per-seat, in a fixed lock order to avoid deadlock</li>
+        <li><span>Any seat fails to lock → roll back all acquired locks</span> — returns 409, nothing partially held</li>
+        <li><span>All locks acquired → hold_token + 8-minute TTL returned</span> — checkout page opens with a visible countdown</li>
+        <li><span>Confirm within TTL → Postgres write + Redis locks deleted</span> — or TTL fires and seats silently return to available</li>
+      </ol>
+    </section>
+
+    <section id="step5-hld">
+      <div class="step-pill">Step 5 of 6 — High-Level Design</div>
+      <h2>High-level design</h2>
+      <p style="font-size:13px;color:#999;margin-bottom:0.75rem">Full system: seat map reads, the locking write path, payment, and a waiting room that shields Redis from the initial thundering herd.</p>
+
+      <div class="diagram-wrap">
+        <svg viewBox="0 0 780 300" xmlns="http://www.w3.org/2000/svg">
+          <defs><marker id="tmHldArrow" markerWidth="8" markerHeight="8" refX="6" refY="3" orient="auto"><path d="M0,0 L6,3 L0,6 Z" fill="var(--border2)"/></marker></defs>
+          <g data-tip="Millions of clients hitting refresh at on-sale time"><rect class="diag-box role-client" x="10" y="20" width="110" height="50"/><text class="diag-label" x="65" y="50" style="font-size:11px">Clients</text></g>
+          <path class="diag-arrow-path" d="M120,45 L155,45" marker-end="url(#tmHldArrow)"/>
+          <g data-tip="Queues clients, admits at a controlled rate matching downstream capacity"><rect class="diag-box role-async" x="155" y="20" width="120" height="50"/><text class="diag-label" x="215" y="42" style="font-size:11px">Waiting Room</text><text class="diag-sublabel" x="215" y="57" style="font-size:8.5px">token bucket admit</text></g>
+          <path class="diag-arrow-path" d="M275,45 L310,45" marker-end="url(#tmHldArrow)"/>
+          <g data-tip="Auth, rate limiting, routing"><rect class="diag-box role-client" x="310" y="20" width="120" height="50"/><text class="diag-label" x="370" y="50" style="font-size:11px">API Gateway</text></g>
+
+          <path class="diag-arrow-path" d="M340,70 L340,105" marker-end="url(#tmHldArrow)"/>
+          <g data-tip="Read-only, merges Postgres + Redis"><rect class="diag-box" x="230" y="105" width="130" height="46"/><text class="diag-label" x="295" y="128" style="font-size:11px">Seat Map Svc</text><text class="diag-sublabel" x="295" y="143" style="font-size:8.5px">stateless</text></g>
+          <g data-tip="Owns the lock acquire/release lifecycle"><rect class="diag-box" x="380" y="105" width="130" height="46"/><text class="diag-label" x="445" y="128" style="font-size:11px">Reservation Svc</text><text class="diag-sublabel" x="445" y="143" style="font-size:8.5px">stateless</text></g>
+
+          <path class="diag-arrow-path" d="M295,151 L295,185" marker-end="url(#tmHldArrow)"/>
+          <g data-tip="Distributed lock state — SETNX with TTL per seat"><rect class="diag-box role-cache" x="215" y="185" width="150" height="46"/><text class="diag-label" x="290" y="208" style="font-size:11px">Redis Cluster</text></g>
+          <path class="diag-arrow-path" d="M445,151 L445,185" marker-end="url(#tmHldArrow)" stroke-dasharray="3 3"/>
+          <g data-tip="Durable seat status, reservations, primary + replicas"><rect class="diag-box role-db" x="395" y="185" width="130" height="46"/><text class="diag-label" x="460" y="208" style="font-size:11px">Postgres</text></g>
+          <path class="diag-arrow-path" d="M365,208 L395,208" marker-end="url(#tmHldArrow)" stroke-dasharray="3 3"/>
+
+          <path class="diag-arrow-path" d="M510,128 L620,128" marker-end="url(#tmHldArrow)"/>
+          <g data-tip="Charges the card only after locks are confirmed held"><rect class="diag-box role-async" x="620" y="105" width="140" height="46"/><text class="diag-label" x="690" y="128" style="font-size:11px">Payment Svc</text></g>
+          <path class="diag-arrow-path" d="M690,151 L690,185" marker-end="url(#tmHldArrow)"/>
+          <g data-tip="External processor — Stripe/Braintree"><rect class="diag-box role-db" x="620" y="185" width="140" height="46"/><text class="diag-label" x="690" y="208" style="font-size:11px">Payment Gateway</text></g>
+
+          <path class="diag-arrow-path" d="M460,231 L460,255" marker-end="url(#tmHldArrow)"/>
+          <g data-tip="Confirmation emails, calendar invites — off the critical path"><rect class="diag-box role-async" x="380" y="255" width="160" height="40"/><text class="diag-label" x="460" y="278" style="font-size:11px">Notification Queue</text></g>
+        </svg>
+        <div class="diag-legend">
+          <div class="diag-legend-item"><span class="diag-legend-dot role-client"></span>Clients + gateway</div>
+          <div class="diag-legend-item"><span class="diag-legend-dot role-async"></span>Waiting Room, Payment, Notifications</div>
+          <div class="diag-legend-item"><span class="diag-legend-dot role-cache"></span>Redis — the distributed lock</div>
+          <div class="diag-legend-item"><span class="diag-legend-dot role-db"></span>Postgres — durable state</div>
+        </div>
+      </div>
+
+      <table class="def-table">
+        <thead><tr><th>Component</th><th>Role</th><th>Tech + why</th></tr></thead>
+        <tbody>
+          <tr><td>Waiting Room</td><td>Admits clients into the booking flow at a controlled rate</td><td>Token-bucket admission queue — because 3-5M simultaneous requests would melt any downstream tier regardless of how it's built; tradeoff is added perceived wait time for legitimate users.</td></tr>
+          <tr><td>Redis Cluster</td><td>Holds the distributed per-seat lock with TTL</td><td>In-memory KV with atomic SETNX — because the entire correctness guarantee rests on one operation being atomic and sub-millisecond; tradeoff is Redis becomes a hard single point of failure on the write path, so it needs Sentinel/Cluster HA.</td></tr>
+          <tr><td>Reservation Svc</td><td>Orchestrates lock acquire, payment, and confirm</td><td>Stateless service, horizontally scaled — because it can be replaced or restarted mid-flow without losing lock state (that lives in Redis, not the process); tradeoff is every operation needs to be idempotent.</td></tr>
+          <tr><td>Postgres</td><td>Durable seat status and reservation records</td><td>Relational store with row-level constraints — because a confirmed sale needs ACID guarantees for refunds/audits; tradeoff is it's deliberately kept off the hot contention path.</td></tr>
+          <tr><td>Payment Gateway</td><td>Charges the card only after locks are confirmed</td><td>External processor (Stripe-style) — because PCI compliance and fraud detection are not worth building in-house; tradeoff is an external network call sits inside the confirm flow's latency budget.</td></tr>
+        </tbody>
+      </table>
+
+      <h3 style="font-size:13px;color:var(--text);margin:1.25rem 0 0.6rem;font-weight:600">Scaling levers — cheapest to most complex</h3>
+      <ol class="levers-list">
+        <li><strong>Add Postgres read replicas for seat map browsing</strong><span class="cost">near-zero complexity</span></li>
+        <li><strong>Tighten the waiting-room admit rate to match measured Redis throughput</strong><span class="cost">low complexity, biggest lever for a hot on-sale</span></li>
+        <li><strong>Shard Redis by event_id</strong> so one event's contention can't starve others<span class="cost">medium complexity</span></li>
+        <li><strong>Move seat map reads onto a denormalized cache refreshed every 2-3s</strong><span class="cost">medium complexity</span></li>
+        <li><strong>Pre-warm dedicated Redis + service capacity ahead of a known on-sale time</strong><span class="cost">high complexity — operational, not architectural</span></li>
+      </ol>
+
+      <table class="grid-table">
+        <thead><tr><th>Bottleneck</th><th>Triggers at</th><th>Exact fix</th></tr></thead>
+        <tbody>
+          <tr><td>Redis lock contention</td><td>Lock acquire p99 &gt;50ms</td><td class="fix">Shard by event_id; move to per-event Redis instances for the largest on-sales</td></tr>
+          <tr><td>Thundering herd at on-sale start</td><td>Request rate spikes 250x baseline in &lt;10s</td><td class="fix">Waiting room admits at a fixed rate; everyone else queues client-side</td></tr>
+          <tr><td>Payment gateway latency</td><td>Confirm p99 &gt;3s, holds expiring mid-checkout</td><td class="fix">Extend TTL once payment is submitted; async webhook confirms instead of blocking</td></tr>
+        </tbody>
+      </table>
+
+      <div class="dial-wrap">
+        <div class="dial-title">Locking strategy: pessimistic vs optimistic</div>
+        <div class="dial-track"><div class="dial-marker" style="left:25%"></div></div>
+        <div class="dial-labels"><span class="end-left">Pessimistic (Redis lock)</span><span class="end-right">Optimistic (version check)</span></div>
+      </div>
+      <div class="dial-wrap">
+        <div class="dial-title">Seat availability consistency</div>
+        <div class="dial-track"><div class="dial-marker" style="left:15%"></div></div>
+        <div class="dial-labels"><span class="end-left">Strong (lock state)</span><span class="end-right">Eventual (browse view)</span></div>
+      </div>
+    </section>
+
+    <section id="step6-deepdive-locking">
+      <div class="step-pill">Step 6 of 6 — Deep Dives</div>
+      <h2>Deep dive: optimistic vs pessimistic locking</h2>
+      <p style="font-size:13px;color:#999;margin-bottom:0.75rem">The single most important decision in this design — and the one most candidates never explicitly justify.</p>
+      <div class="flow-cmp-grid">
+        <div class="flow-cmp-col hit">
+          <div class="flow-cmp-title">✓ Pessimistic — Redis SETNX lock</div>
+          <svg viewBox="0 0 340 140" xmlns="http://www.w3.org/2000/svg">
+            <defs><marker id="tmPessArrow" markerWidth="8" markerHeight="8" refX="6" refY="3" orient="auto"><path d="M0,0 L6,3 L0,6 Z" fill="var(--accent)"/></marker></defs>
+            <path class="tm-pess-arrow-1" d="M85,35 L200,35" stroke="var(--accent)" stroke-width="2" marker-end="url(#tmPessArrow)" fill="none"/>
+            <path class="tm-pess-arrow-2" d="M85,75 L200,75" stroke="var(--amber)" stroke-width="2" stroke-dasharray="4 3" marker-end="url(#tmPessArrow)" fill="none"/>
+            <circle class="diag-dot diag-flow-dot" r="3" style="offset-path: path('M85,35 L200,35')"></circle>
+            <rect class="diag-box role-client" x="5" y="15" width="80" height="40" data-tip="First request to arrive"></rect>
+            <text class="diag-label" x="45" y="39" style="font-size:10px">User A</text>
+            <rect class="diag-box role-client" x="5" y="60" width="80" height="40" data-tip="Arrives microseconds later"></rect>
+            <text class="diag-label" x="45" y="84" style="font-size:10px">User B</text>
+            <g data-tip="SETNX is atomic — only one caller can ever win">
+              <rect class="diag-box role-cache" x="200" y="30" width="130" height="50" rx="6"></rect>
+              <text class="diag-label" x="265" y="50" style="font-weight:600;font-size:11px">Redis lock</text>
+              <text class="diag-sublabel" x="265" y="65" style="fill:var(--accent);font-size:9px">A wins, B rejected instantly</text>
+            </g>
+            <text x="170" y="115" text-anchor="middle" font-size="10" fill="var(--accent)" font-family="Inter,sans-serif">B never sees a stale success — rejected in &lt;5ms</text>
+          </svg>
+          <button class="flow-cmp-replay" data-replay="tm-pess-arrow-1,tm-pess-arrow-2">▸ Replay</button>
+        </div>
+        <div class="flow-cmp-col miss">
+          <div class="flow-cmp-title">✗ Optimistic — version-check on write</div>
+          <svg viewBox="0 0 380 140" xmlns="http://www.w3.org/2000/svg">
+            <defs><marker id="tmOptArrow" markerWidth="8" markerHeight="8" refX="6" refY="3" orient="auto"><path d="M0,0 L6,3 L0,6 Z" fill="var(--amber)"/></marker></defs>
+            <path class="tm-opt-arrow-1" d="M85,25 L230,25" stroke="var(--amber)" stroke-width="2" marker-end="url(#tmOptArrow)" fill="none"/>
+            <path class="tm-opt-arrow-2" d="M85,55 L230,55" stroke="var(--amber)" stroke-width="2" marker-end="url(#tmOptArrow)" fill="none"/>
+            <path class="tm-opt-arrow-3" d="M230,80 L85,105" stroke="var(--amber)" stroke-width="2" stroke-dasharray="4 3" marker-end="url(#tmOptArrow)" fill="none"/>
+            <circle class="diag-dot diag-flow-dot" r="3" style="offset-path: path('M85,25 L230,25')"></circle>
+            <rect class="diag-box role-client" x="5" y="10" width="80" height="35" data-tip="Reads version=1, writes version=2"></rect>
+            <text class="diag-label" x="45" y="31" style="font-size:10px">User A</text>
+            <rect class="diag-box role-client" x="5" y="45" width="80" height="35" data-tip="Also reads version=1, writes version=2"></rect>
+            <text class="diag-label" x="45" y="66" style="font-size:10px">User B</text>
+            <g data-tip="Both read the same version — only the first write wins, the second gets a version conflict AFTER doing full work">
+              <rect class="diag-box role-cache" x="230" y="15" width="140" height="50" rx="6"></rect>
+              <text class="diag-label" x="300" y="35" style="font-weight:600;font-size:11px">DB row, version=1</text>
+              <text class="diag-sublabel" x="300" y="50" style="fill:var(--amber);font-size:9px">A commits, B's write rejected</text>
+            </g>
+            <text x="170" y="128" text-anchor="middle" font-size="10" fill="var(--amber)" font-family="Inter,sans-serif">B did full checkout UX before discovering the conflict</text>
+          </svg>
+          <button class="flow-cmp-replay" data-replay="tm-opt-arrow-1,tm-opt-arrow-2,tm-opt-arrow-3">▸ Replay</button>
+        </div>
+      </div>
+      <div class="callout warn">Optimistic locking scales beautifully when contention is rare — but a hot on-sale is the opposite of rare contention. Retrying failed writes at 250:1 demand-to-inventory ratio just means most users pay the full cost of checkout UX before being told "sorry, taken." Pessimistic locking rejects instantly instead, which is why this design defaults to it for the hold step.</div>
+      <script>
+      (function(){
+        document.querySelectorAll('.flow-cmp-replay').forEach(function(btn){
+          if (btn.dataset.bound) return;
+          btn.dataset.bound = '1';
+          btn.addEventListener('click', function(){
+            var classes = btn.dataset.replay.split(',');
+            var svg = btn.previousElementSibling;
+            classes.forEach(function(cls){
+              var path = svg.querySelector('.' + cls);
+              if (!path) return;
+              var len = path.getTotalLength ? path.getTotalLength() : 100;
+              path.style.strokeDasharray = len;
+              path.style.strokeDashoffset = len;
+              path.getBoundingClientRect();
+              path.style.transition = 'stroke-dashoffset 0.5s ease';
+              path.style.strokeDashoffset = 0;
+            });
+          });
+        });
+      })();
+      </script>
+    </section>
+
+    <section id="step6-deepdive-holdstate">
+      <h2>Deep dive: seat hold state machine</h2>
+      <p style="font-size:13px;color:#999;margin-bottom:0.75rem">Every seat moves through exactly four states — the transitions, not the states themselves, are where bugs hide.</p>
+
+      <div class="diagram-wrap">
+        <svg viewBox="0 0 700 170" xmlns="http://www.w3.org/2000/svg">
+          <defs><marker id="tmStateArrow" markerWidth="8" markerHeight="8" refX="6" refY="3" orient="auto"><path d="M0,0 L6,3 L0,6 Z" fill="var(--border2)"/></marker></defs>
+
+          <g data-tip="Default state, visible on seat map as bookable"><rect class="diag-box role-db" x="10" y="60" width="130" height="50" rx="8"/><text class="diag-label" x="75" y="90" style="font-size:11px">Available</text></g>
+          <path class="diag-arrow-path" d="M140,80 L215,80" marker-end="url(#tmStateArrow)"/>
+          <text class="diag-sublabel" x="177" y="70" style="font-size:8.5px">SETNX succeeds</text>
+
+          <g data-tip="Redis lock exists with active TTL, not yet paid"><rect class="diag-box role-cache" x="215" y="60" width="130" height="50" rx="8"/><text class="diag-label" x="280" y="90" style="font-size:11px">Held</text></g>
+
+          <path class="diag-arrow-path" d="M345,70 L420,30" marker-end="url(#tmStateArrow)"/>
+          <text class="diag-sublabel" x="390" y="35" style="font-size:8.5px">payment succeeds</text>
+          <g data-tip="Postgres write committed, Redis lock deleted"><rect class="diag-box role-async" x="420" y="10" width="140" height="50" rx="8"/><text class="diag-label" x="490" y="40" style="font-size:11px">Reserved</text></g>
+
+          <path class="diag-arrow-path" d="M345,95 L420,130" marker-end="url(#tmStateArrow)"/>
+          <text class="diag-sublabel" x="385" y="128" style="font-size:8.5px">TTL expires or user cancels</text>
+          <g data-tip="TTL fires or explicit DELETE — no distinct storage state, just absence of a lock"><rect class="diag-box role-db" x="420" y="105" width="140" height="50" rx="8"/><text class="diag-label" x="490" y="135" style="font-size:11px">Released</text></g>
+
+          <path class="diag-arrow-path" d="M490,105 C490,-10 75,-10 75,60" marker-end="url(#tmStateArrow)" fill="none"/>
+          <text class="diag-sublabel" x="280" y="8" style="font-size:8.5px">back to Available — same seat, new lock cycle</text>
+
+          <path class="diag-arrow-path" d="M560,35 C630,35 630,150 490,150" marker-end="url(#tmStateArrow)" fill="none" stroke-dasharray="3 3"/>
+          <text class="diag-sublabel" x="600" y="95" style="font-size:8.5px">refund</text>
+        </svg>
+        <div class="diag-legend">
+          <div class="diag-legend-item"><span class="diag-legend-dot role-db"></span>Available / Released — no active Redis key</div>
+          <div class="diag-legend-item"><span class="diag-legend-dot role-cache"></span>Held — Redis key with live TTL</div>
+          <div class="diag-legend-item"><span class="diag-legend-dot role-async"></span>Reserved — durable, Postgres source of truth</div>
+        </div>
+      </div>
+
+      <ol class="flow-steps-list">
+        <li><span>Available → Held</span> — atomic SETNX in Redis; seat map reflects this within one poll cycle</li>
+        <li><span>Held → Reserved</span> — only fires after the payment gateway confirms the charge; Postgres write and Redis delete happen in the same request</li>
+        <li><span>Held → Released</span> — TTL expiry (no action needed) or explicit cancel; either way the Redis key simply stops existing</li>
+        <li><span>Released → Available</span> — there's no separate storage state for this; absence of a Redis key already means available</li>
+        <li><span>Reserved → Released</span> — a refund path, gated behind support tooling, not exposed on the hot path at all</li>
+      </ol>
+
+      <div class="callout warn">The dangerous transition is Held → Reserved: if the payment call succeeds but the Postgres write fails (or times out) before the Redis lock is deleted, the seat can appear inconsistently sold. Fix: wrap the Postgres commit and Redis delete in a single idempotent operation keyed by hold_token, and make the payment webhook retry-safe so a retried confirm can't double-charge.</div>
+
+      <table class="grid-table">
+        <thead><tr><th>Scenario</th><th>User impact</th><th>Detection signal</th><th>Mitigation</th></tr></thead>
+        <tbody>
+          <tr><td>Redis primary fails mid-lock-acquire</td><td class="impact">In-flight holds may be lost, seats briefly show available incorrectly</td><td class="detect">Redis failover event + hold-acquire error rate spike</td><td class="fix">Sentinel/Cluster promotes a replica in &lt;10s; Reservation Svc retries the SETNX against the new primary</td></tr>
+          <tr><td>Payment succeeds but confirm write fails</td><td class="impact">User charged but seat not reserved</td><td class="detect">Payment webhook count &gt; confirmed reservation count</td><td class="fix">Idempotent confirm keyed by hold_token; reconciliation job matches payments to reservations hourly</td></tr>
+          <tr><td>TTL fires while user is mid-payment-form</td><td class="impact">Seat released, then a race lets someone else grab it before this user submits</td><td class="detect">Confirm attempts against an already-expired hold_token</td><td class="fix">Extend TTL by 90s the moment payment submission begins, before calling the gateway</td></tr>
+          <tr><td>Thundering herd bypasses the waiting room</td><td class="impact">Redis lock-acquire latency spikes, legitimate holds start timing out</td><td class="detect">SETNX p99 latency alert</td><td class="fix">Hard rate limit at the gateway independent of the waiting room; shed load with 503 rather than let Redis degrade</td></tr>
+          <tr><td>Two seats in one order lock in different order across two retries</td><td class="impact">Deadlock between two multi-seat holds competing for overlapping seats</td><td class="detect">Lock-acquire timeout rate rising for multi-seat orders</td><td class="fix">Always acquire locks in a fixed, sorted seat_id order across every request</td></tr>
+        </tbody>
+      </table>
+    </section>
+
+    <section id="interview-moves">
+      <h2>Interview moves</h2>
+      <ul class="moves-list">
+        <li><span class="move-num">01</span><div><strong>"The core problem here isn't the seat map, it's distributed locking under extreme contention — I want to design the lock first"</strong> — immediately signals you've identified the actual hard problem, not the decoy</div></li>
+        <li><span class="move-num">02</span><div><strong>"At 250:1 demand-to-inventory, optimistic locking would mean most users discover a conflict after doing real work — I'm going pessimistic with a Redis SETNX"</strong> — justifies a specific tradeoff with a specific number</div></li>
+        <li><span class="move-num">03</span><div><strong>"Every hold needs a TTL, or one abandoned checkout tab kills a seat forever — this has to be self-healing, not dependent on a cleanup job"</strong> — shows you think about failure modes unprompted</div></li>
+        <li><span class="move-num">04</span><div><strong>"I'd put a waiting room in front of the booking flow so the thundering herd never even reaches Redis directly"</strong> — demonstrates layered defense, not just a single strong component</div></li>
+        <li><span class="move-num">05</span><div><strong>"When acquiring locks for multiple seats in one order, I always sort seat_ids first to avoid a classic deadlock between two overlapping multi-seat holds"</strong> — a concrete correctness detail most candidates miss entirely</div></li>
+        <li><span class="move-num">06</span><div><strong>"The Held → Reserved transition is the one place a bug causes real money damage, so I'd make the Postgres write and Redis delete a single idempotent operation keyed by hold_token"</strong> — pinpoints the exact risky transition and states the fix precisely</div></li>
+      </ul>
+    </section>
+
+    <section id="follow-ups">
+      <h2>Follow-up questions</h2>
+      <div class="qa-block">
+        <div class="qa-q">Why not just use a Postgres row lock (SELECT ... FOR UPDATE) instead of Redis?</div>
+        <div class="qa-a">It works at low contention, but holding a transaction open across an 8-minute checkout window would exhaust connection pools instantly at this scale. Redis decouples the lock lifetime from any DB transaction.</div>
+      </div>
+      <div class="qa-block">
+        <div class="qa-q">How do you handle a group of friends trying to sit together?</div>
+        <div class="qa-a">The hold API accepts an array of seat_ids and locks all-or-nothing — if any seat in the group fails to lock, every acquired lock in that request is rolled back immediately.</div>
+      </div>
+      <div class="qa-block">
+        <div class="qa-q">What stops a bot from holding thousands of seats and never checking out?</div>
+        <div class="qa-a">Per-user rate limits on hold requests, CAPTCHA at the waiting-room entry, and a max-seats-per-hold cap (typically 8) enforced server-side before the lock is even attempted.</div>
+      </div>
+      <div class="qa-block">
+        <div class="qa-q">How would you extend this to support 10x the scale (a global on-sale)?</div>
+        <div class="qa-a">Shard Redis by event_id so hot events don't starve others, run per-region waiting rooms, and pre-provision dedicated capacity ahead of any known high-demand on-sale time.</div>
+      </div>
+      <div class="qa-block">
+        <div class="qa-q">How do you keep the seat map view from showing stale availability?</div>
+        <div class="qa-a">Short polling (2-3s) or a lightweight WebSocket push on state change; the view is allowed to be a few seconds stale since the lock itself is the real source of truth at hold time.</div>
+      </div>
+      <div class="qa-block">
+        <div class="qa-q">What happens if the payment gateway times out but may have actually charged the card?</div>
+        <div class="qa-a">Never assume failure on timeout — poll the gateway's idempotency-keyed status endpoint before releasing the hold, so a slow success can't result in a charged-but-unseated customer.</div>
+      </div>
+    </section>
+
+  </main>
+  <script src="../../assets/nav.js"></script>
+</body>
+</html>

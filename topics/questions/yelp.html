@@ -1,0 +1,509 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Design Yelp — SD Prep</title>
+  <link rel="stylesheet" href="../../assets/style.css">
+</head>
+<body>
+  <aside id="sidebar"></aside>
+  <main>
+
+    <header class="page-head">
+      <div class="pill">Questions</div>
+      <h1>Design Yelp</h1>
+      <p class="sub">Tests whether you treat "search nearby businesses" as a geo-indexing and ranking problem first, and reviews as ordinary CRUD second.</p>
+      <div class="meta-row">
+        <span class="badge green">30-40 min interview</span>
+        <span class="badge blue">Medium</span>
+      </div>
+    </header>
+
+    <div class="flash-card">
+      <div class="flash-label">Say this in the first 2 minutes</div>
+      <ul>
+        <li>The core insight: geo search + ranking is the hard part of this system, reviews and business profiles are standard CRUD on top</li>
+        <li>Key scale number to anchor on: 12M businesses indexed, ~8k search QPS average with 5-10x spikes in dense metros at peak hours</li>
+        <li>Primary tradeoff being probed: a precomputed geo index (fast reads, stale on writes) vs querying live (always fresh, slow at scale)</li>
+        <li>Component most candidates forget: search ranking is a multi-signal blend — distance alone produces bad results next to a 2.1-star business</li>
+        <li>Failure mode most candidates skip: a dense downtown core can have 50x the business density of a suburb, breaking uniform-grid geo indexes</li>
+      </ul>
+    </div>
+
+    <section id="step1-requirements">
+      <div class="step-pill">Step 1 of 6 — Requirements</div>
+      <h2>Requirements</h2>
+
+      <div class="goal-arc-wrap">
+        <div class="goal-arc-row functional">
+          <div class="goal-arc-seg">1</div><div class="goal-arc-seg">2</div><div class="goal-arc-seg">3</div><div class="goal-arc-seg">4</div><div class="goal-arc-seg">5</div><div class="goal-arc-seg inactive">6</div>
+        </div>
+        <div class="goal-arc-label"><span>Arc 1 (steps 1-5) — <strong>Satisfy Functional Requirements</strong></span></div>
+        <div class="goal-arc-row nonfunctional" style="margin-top:8px">
+          <div class="goal-arc-seg">1</div><div class="goal-arc-seg">2</div><div class="goal-arc-seg">3</div><div class="goal-arc-seg">4</div><div class="goal-arc-seg">5</div><div class="goal-arc-seg">6</div>
+        </div>
+        <div class="goal-arc-label"><span>Arc 2 (all 6 steps) — <strong>Satisfy Non-Functional Requirements</strong></span></div>
+      </div>
+
+      <div class="compare-grid">
+        <div class="compare-card good">
+          <div class="compare-label">Functional</div>
+          <ul>
+            <li>Search businesses by category/keyword near a location</li>
+            <li>View a business profile — hours, photos, rating, reviews</li>
+            <li>Leave a review with a star rating and text</li>
+            <li>Business owners create and edit their business listing</li>
+          </ul>
+        </div>
+        <div class="compare-card bad">
+          <div class="compare-label">Non-Functional</div>
+          <ul>
+            <li>12M businesses indexed, ~8k search QPS average</li>
+            <li>Search latency &lt;200ms p99, including ranking</li>
+            <li>99.9% availability for search and reads; writes can tolerate less</li>
+            <li>Search results eventually consistent — a new review can lag minutes, not hours</li>
+          </ul>
+        </div>
+      </div>
+
+      <div class="callout warn"><strong>What NOT to build:</strong> real-time table reservations, food delivery/ordering, ad auction/bidding platform, or a review-fraud ML pipeline in depth. This is search + profile + reviews only — mention fraud detection exists, don't design it.</div>
+
+      <div class="stat-grid">
+        <div class="stat-card"><div class="stat-val">12M</div><div class="stat-label">businesses indexed</div></div>
+        <div class="stat-card"><div class="stat-val">~8k/s</div><div class="stat-label">search QPS (avg, peaks 5-10x)</div></div>
+        <div class="stat-card"><div class="stat-val">~1.5k/s</div><div class="stat-label">new reviews/sec (global peak)</div></div>
+        <div class="stat-card"><div class="stat-val">&lt;200ms</div><div class="stat-label">search p99 target</div></div>
+      </div>
+    </section>
+
+    <section id="step2-entities">
+      <div class="step-pill">Step 2 of 6 — Core Entities</div>
+      <h2>Core entities</h2>
+      <p style="font-size:13px;color:#999;margin-bottom:0.75rem">Business profile and reviews are relational; the geo index is a separate derived structure optimized purely for radius queries.</p>
+
+      <div class="entity-grid">
+        <div class="entity-box">
+          <div class="entity-head"><span class="entity-name">Business</span><span class="entity-store pg">Postgres</span></div>
+          <div class="entity-fields">
+            <div class="entity-field"><span class="fname pk">business_id</span><span class="ftype">UUID</span></div>
+            <div class="entity-field"><span class="fname">name, category</span><span class="ftype">TEXT</span></div>
+            <div class="entity-field"><span class="fname idx">lat, lng</span><span class="ftype">DOUBLE PRECISION</span></div>
+            <div class="entity-field"><span class="fname">avg_rating</span><span class="ftype">NUMERIC(2,1), denormalized</span></div>
+            <div class="entity-field"><span class="fname">hours, phone</span><span class="ftype">JSONB</span></div>
+          </div>
+          <div class="entity-why">Because a business listing needs strong consistency on ownership edits and structured fields for filtering — a relational store fits. Tradeoff: lat/lng columns alone can't serve a fast radius query at 12M rows, hence the separate geo index.</div>
+        </div>
+
+        <div class="entity-box">
+          <div class="entity-head"><span class="entity-name">Review</span><span class="entity-store pg">Postgres</span></div>
+          <div class="entity-fields">
+            <div class="entity-field"><span class="fname pk">review_id</span><span class="ftype">UUID</span></div>
+            <div class="entity-field"><span class="fname idx">business_id</span><span class="ftype">UUID → Business</span></div>
+            <div class="entity-field"><span class="fname">user_id, stars</span><span class="ftype">UUID, SMALLINT</span></div>
+            <div class="entity-field"><span class="fname">text, created_at</span><span class="ftype">TEXT, TIMESTAMP</span></div>
+          </div>
+          <div class="entity-why">Because reviews are ordinary write-once, read-many CRUD with a strict one-review-per-user-per-business constraint — a relational store with a unique index enforces that cheaply. Tradeoff: aggregate rating recompute needs a background job, not a live join, at high review volume.</div>
+        </div>
+
+        <div class="entity-box">
+          <div class="entity-head"><span class="entity-name">GeoIndexEntry</span><span class="entity-store cass">Elasticsearch</span></div>
+          <div class="entity-fields">
+            <div class="entity-field"><span class="fname pk">business_id</span><span class="ftype">keyword</span></div>
+            <div class="entity-field"><span class="fname idx">geo_point</span><span class="ftype">geo_point field</span></div>
+            <div class="entity-field"><span class="fname">category, avg_rating</span><span class="ftype">keyword, float — denormalized</span></div>
+            <div class="entity-field"><span class="fname">review_count</span><span class="ftype">int — denormalized</span></div>
+          </div>
+          <div class="entity-why">Because search needs a combined geo-radius filter, keyword match, and rank score in one query — a search engine with native geo queries beats a hand-rolled quadtree service for this workload. Tradeoff: it's a read-optimized copy, updated async, so it can briefly lag the source of truth.</div>
+        </div>
+
+        <div class="entity-box">
+          <div class="entity-head"><span class="entity-name">RatingSummary</span><span class="entity-store redis">Redis</span></div>
+          <div class="entity-fields">
+            <div class="entity-field"><span class="fname pk">business_id</span><span class="ftype">hash key</span></div>
+            <div class="entity-field"><span class="fname">avg_rating, count</span><span class="ftype">float, int</span></div>
+          </div>
+          <div class="entity-why">Because the profile page reads avg_rating on every view — caching the aggregate avoids a COUNT/AVG query per page load. Tradeoff: invalidated and recomputed async after each new review, so it's momentarily stale.</div>
+        </div>
+      </div>
+
+      <div class="callout info">Primary key: <code>Business.business_id</code>. Critical index: the Elasticsearch <code>geo_point</code> field on <code>GeoIndexEntry</code> — every search query starts with a geo-distance filter, and it must never fall back to a full scan.</div>
+    </section>
+
+    <section id="step3-api">
+      <div class="step-pill">Step 3 of 6 — API / Interface</div>
+      <h2>API design</h2>
+      <p style="font-size:13px;color:#999;margin-bottom:0.75rem">Four endpoints — search, profile read, review write, and business listing write. All request-response, no persistent connections needed.</p>
+
+      <div class="api-card">
+        <div class="api-line"><span class="api-method get">GET</span><span class="api-path">/api/v1/search?lat&amp;lng&amp;q&amp;category&amp;radius_km</span><span class="api-auth">Auth: optional</span></div>
+        <div class="api-io">
+          <div class="api-io-block"><div class="api-io-label">Request</div><div class="api-io-body">query params only, radius_km defaults to 5</div></div>
+          <div class="api-io-block"><div class="api-io-label">Response</div><div class="api-io-body">{ results: [{ business_id, name, distance_km, avg_rating, category }], next_cursor }</div></div>
+        </div>
+      </div>
+
+      <div class="api-card">
+        <div class="api-line"><span class="api-method get">GET</span><span class="api-path">/api/v1/businesses/{id}</span><span class="api-auth">Auth: none</span></div>
+        <div class="api-io">
+          <div class="api-io-block"><div class="api-io-label">Request</div><div class="api-io-body">path param only</div></div>
+          <div class="api-io-block"><div class="api-io-label">Response</div><div class="api-io-body">{ name, hours, avg_rating, photos, top_reviews[5] }</div></div>
+        </div>
+      </div>
+
+      <div class="api-card">
+        <div class="api-line"><span class="api-method post">POST</span><span class="api-path">/api/v1/businesses/{id}/reviews</span><span class="api-auth">Auth: required (user)</span></div>
+        <div class="api-io">
+          <div class="api-io-block"><div class="api-io-label">Request</div><div class="api-io-body">{ stars, text }</div></div>
+          <div class="api-io-block"><div class="api-io-label">Response</div><div class="api-io-body">201 on success, 409 if user already reviewed this business</div></div>
+        </div>
+      </div>
+
+      <div class="api-card">
+        <div class="api-line"><span class="api-method post">POST</span><span class="api-path">/api/v1/businesses</span><span class="api-auth">Auth: required (owner)</span></div>
+        <div class="api-io">
+          <div class="api-io-block"><div class="api-io-label">Request</div><div class="api-io-body">{ name, category, lat, lng, hours, phone }</div></div>
+          <div class="api-io-block"><div class="api-io-label">Response</div><div class="api-io-body">{ business_id } — triggers async geo-index write</div></div>
+        </div>
+      </div>
+    </section>
+
+    <section id="step4-dataflow">
+      <div class="step-pill">Step 4 of 6 — Data Flow</div>
+      <h2>Data flow</h2>
+      <p style="font-size:13px;color:#999;margin-bottom:0.75rem">Search reads (mint) hit the geo index directly; business/review writes (blue) land in Postgres first, then propagate to the index async.</p>
+
+      <div class="diagram-wrap" data-paths='{"read":{"boxes":["r-client","r-svc","r-cache","r-geo"],"arrows":["r1","r2","r3"]},"write":{"boxes":["w-client","w-svc","w-db","w-queue","w-geo"],"arrows":["w1","w2","w3","w4"]}}'>
+        <svg viewBox="0 0 740 220" xmlns="http://www.w3.org/2000/svg">
+          <defs>
+            <marker id="ypR" markerWidth="8" markerHeight="8" refX="6" refY="3" orient="auto"><path d="M0,0 L6,3 L0,6 Z" fill="var(--accent)"/></marker>
+            <marker id="ypW" markerWidth="8" markerHeight="8" refX="6" refY="3" orient="auto"><path d="M0,0 L6,3 L0,6 Z" fill="var(--blue)"/></marker>
+          </defs>
+
+          <text class="diag-sublabel" x="150" y="14" style="font-size:10px;fill:var(--accent)">READ PATH — search</text>
+          <circle class="diag-dot diag-flow-dot" r="3.5" style="offset-path: path('M10,24 L130,24 L130,24 L280,24 L280,24 L430,24')"></circle>
+          <g data-target="step6-deepdive-geoindex" data-id="r-client" data-tip="User searches 'coffee near me'"><rect class="diag-box role-client" x="10" y="24" width="120" height="46"/><text class="diag-label" x="70" y="52" style="font-size:11px">Client</text></g>
+          <path class="diag-arrow-path" data-id="r1" d="M130,47 L165,47" marker-end="url(#ypR)"/>
+          <g data-target="step6-deepdive-ranking" data-id="r-svc" data-tip="Parses query, builds geo + keyword filter, applies ranking"><rect class="diag-box" x="165" y="24" width="115" height="46"/><text class="diag-label" x="222" y="47" style="font-size:11px">Search Svc</text><text class="diag-sublabel" x="222" y="62" style="font-size:8.5px">ranks results</text></g>
+          <path class="diag-arrow-path" data-id="r2" d="M280,47 L315,47" marker-end="url(#ypR)"/>
+          <g data-target="step6-deepdive-ranking" data-id="r-cache" data-tip="Caches hot queries — popular category near a popular geohash cell"><rect class="diag-box role-cache" x="315" y="24" width="110" height="46"/><text class="diag-label" x="370" y="47" style="font-size:11px">Redis</text></g>
+          <path class="diag-arrow-path" data-id="r3" d="M425,47 L460,47" marker-end="url(#ypR)"/>
+          <text class="diag-sublabel" x="442" y="37" style="font-size:9px">miss</text>
+          <g data-target="step6-deepdive-geoindex" data-id="r-geo" data-tip="Geo-radius + keyword + rank query, source of truth for search"><rect class="diag-box role-db" x="460" y="24" width="130" height="46"/><text class="diag-label" x="525" y="47" style="font-size:11px">Elasticsearch</text></g>
+
+          <text class="diag-sublabel" x="150" y="105" style="font-size:10px;fill:var(--blue)">WRITE PATH — new business / review</text>
+          <g data-target="step2-entities" data-id="w-client" data-tip="Owner edits listing or user posts a review"><rect class="diag-box role-client" x="10" y="115" width="120" height="46"/><text class="diag-label" x="70" y="143" style="font-size:11px">Client</text></g>
+          <path class="diag-arrow-path" data-id="w1" d="M130,138 L165,138" marker-end="url(#ypW)"/>
+          <g data-target="step2-entities" data-id="w-svc" data-tip="Validates input, enforces one-review-per-user constraint"><rect class="diag-box" x="165" y="115" width="115" height="46"/><text class="diag-label" x="222" y="143" style="font-size:11px">Write Svc</text></g>
+          <path class="diag-arrow-path" data-id="w2" d="M280,138 L315,138" marker-end="url(#ypW)"/>
+          <g data-target="step2-entities" data-id="w-db" data-tip="Source of truth — ACID commit"><rect class="diag-box role-db" x="315" y="115" width="110" height="46"/><text class="diag-label" x="370" y="143" style="font-size:11px">Postgres</text></g>
+          <path class="diag-arrow-path" data-id="w3" d="M425,138 L460,138" marker-end="url(#ypW)"/>
+          <g data-target="step6-deepdive-geoindex" data-id="w-queue" data-tip="Change event queued for async reindex, decoupled from the write's response"><rect class="diag-box role-async" x="460" y="115" width="100" height="46"/><text class="diag-label" x="510" y="138" style="font-size:11px">Kafka</text></g>
+          <path class="diag-arrow-path" data-id="w4" d="M560,138 L595,138" marker-end="url(#ypW)"/>
+          <g data-target="step6-deepdive-geoindex" data-id="w-geo" data-tip="Reindexer consumes the event, upserts the geo document"><rect class="diag-box role-db" x="595" y="115" width="130" height="46"/><text class="diag-label" x="660" y="143" style="font-size:11px">Elasticsearch</text></g>
+        </svg>
+        <div class="diag-legend">
+          <div class="diag-legend-item"><span class="diag-legend-dot role-cache"></span>Read path — cache then geo index</div>
+          <div class="diag-legend-item"><span class="diag-legend-dot role-client"></span>Write path — strong consistency in Postgres first</div>
+          <div class="diag-legend-item"><span class="diag-legend-dot role-async"></span>Reindex — decoupled, eventually consistent</div>
+        </div>
+      </div>
+
+      <ol class="flow-steps-list">
+        <li><span>Client searches by location + keyword</span> — hits Search Svc with lat/lng, radius, category</li>
+        <li><span>Redis checked for a hot query cache</span> — keyed on geohash cell + category + query text</li>
+        <li><span>Cache miss → Elasticsearch geo query</span> — filters by radius, scores by the ranking blend</li>
+        <li><span>Business/review writes land in Postgres first</span> — the transactional source of truth, response returns immediately</li>
+        <li><span>Change event flows through Kafka to reindex</span> — search results reflect the update within seconds, not synchronously</li>
+      </ol>
+    </section>
+
+    <section id="step5-hld">
+      <div class="step-pill">Step 5 of 6 — High-Level Design</div>
+      <h2>High-level design</h2>
+      <p style="font-size:13px;color:#999;margin-bottom:0.75rem">Full system: search, profile, and review flows together with the async reindexing pipeline that keeps them in sync.</p>
+
+      <div class="diagram-wrap">
+        <svg viewBox="0 0 780 300" xmlns="http://www.w3.org/2000/svg">
+          <defs><marker id="ypHldArrow" markerWidth="8" markerHeight="8" refX="6" refY="3" orient="auto"><path d="M0,0 L6,3 L0,6 Z" fill="var(--border2)"/></marker></defs>
+
+          <g data-tip="Search, profile views, and review submissions all originate here"><rect class="diag-box role-client" x="10" y="20" width="110" height="50"/><text class="diag-label" x="65" y="50" style="font-size:11px">Clients</text></g>
+          <path class="diag-arrow-path" d="M120,45 L155,45" marker-end="url(#ypHldArrow)"/>
+          <g data-tip="Auth, rate limiting, routing"><rect class="diag-box role-client" x="155" y="20" width="120" height="50"/><text class="diag-label" x="215" y="50" style="font-size:11px">API Gateway</text></g>
+
+          <path class="diag-arrow-path" d="M215,70 L215,105" marker-end="url(#ypHldArrow)"/>
+          <g data-tip="Geo + keyword filter, ranking blend"><rect class="diag-box" x="150" y="105" width="130" height="46"/><text class="diag-label" x="215" y="128" style="font-size:11px">Search Svc</text><text class="diag-sublabel" x="215" y="143" style="font-size:8.5px">stateless</text></g>
+          <path class="diag-arrow-path" d="M280,128 L400,105" marker-end="url(#ypHldArrow)"/>
+          <g data-tip="Business writes, review writes"><rect class="diag-box" x="400" y="80" width="130" height="46"/><text class="diag-label" x="465" y="103" style="font-size:11px">Write Svc</text><text class="diag-sublabel" x="465" y="118" style="font-size:8.5px">stateless</text></g>
+
+          <path class="diag-arrow-path" d="M215,151 L215,185" marker-end="url(#ypHldArrow)"/>
+          <g data-tip="Hot query cache, rating summary cache"><rect class="diag-box role-cache" x="150" y="185" width="130" height="46"/><text class="diag-label" x="215" y="208" style="font-size:11px">Redis</text></g>
+          <path class="diag-arrow-path" d="M215,231 L215,255" marker-end="url(#ypHldArrow)" stroke-dasharray="3 3"/>
+          <g data-tip="Geo-radius + keyword + rank query engine"><rect class="diag-box role-db" x="150" y="255" width="130" height="40"/><text class="diag-label" x="215" y="279" style="font-size:11px">Elasticsearch</text></g>
+
+          <path class="diag-arrow-path" d="M465,126 L465,185" marker-end="url(#ypHldArrow)"/>
+          <g data-tip="Business, Review — transactional source of truth"><rect class="diag-box role-db" x="400" y="185" width="130" height="46"/><text class="diag-label" x="465" y="208" style="font-size:11px">Postgres</text></g>
+
+          <path class="diag-arrow-path" d="M530,208 L590,208" marker-end="url(#ypHldArrow)"/>
+          <g data-tip="Change-data-capture events for reindexing"><rect class="diag-box role-async" x="590" y="185" width="120" height="46"/><text class="diag-label" x="650" y="208" style="font-size:11px">Kafka</text></g>
+          <path class="diag-arrow-path" d="M650,231 L650,255 L280,275" marker-end="url(#ypHldArrow)"/>
+          <g data-tip="Consumes CDC events, upserts geo documents"><rect class="diag-box role-async" x="590" y="255" width="120" height="40"/><text class="diag-label" x="650" y="279" style="font-size:11px">Reindexer</text></g>
+        </svg>
+        <div class="diag-legend">
+          <div class="diag-legend-item"><span class="diag-legend-dot role-client"></span>Client / gateway</div>
+          <div class="diag-legend-item"><span class="diag-legend-dot role-cache"></span>Redis — hot query + rating cache</div>
+          <div class="diag-legend-item"><span class="diag-legend-dot role-db"></span>Postgres + Elasticsearch</div>
+          <div class="diag-legend-item"><span class="diag-legend-dot role-async"></span>Kafka + Reindexer — keeps search eventually consistent</div>
+        </div>
+      </div>
+
+      <table class="def-table">
+        <thead><tr><th>Component</th><th>Role</th><th>Tech + why</th></tr></thead>
+        <tbody>
+          <tr><td>Search Svc</td><td>Builds geo filter, executes ranked query</td><td>Stateless service in front of Elasticsearch — because ranking logic (distance decay, rating, recency) needs to live outside the index itself for easy iteration; tradeoff is an extra network hop vs querying ES directly.</td></tr>
+          <tr><td>Elasticsearch</td><td>Geo-radius + keyword + rank query engine</td><td>Inverted index with native geo_point support — because it combines full-text relevance and geo-distance scoring in one query; tradeoff is operational complexity of running and resharding a cluster.</td></tr>
+          <tr><td>Postgres</td><td>Transactional source of truth</td><td>Relational store with unique constraints — because business ownership and one-review-per-user rules need real ACID guarantees; tradeoff is it cannot serve the search query pattern directly at this scale.</td></tr>
+          <tr><td>Kafka + Reindexer</td><td>Propagates writes into the search index</td><td>Log-based CDC pipeline — because it decouples index freshness from write latency, so a slow reindex never blocks a review submission; tradeoff is search results can lag the source of truth by seconds.</td></tr>
+        </tbody>
+      </table>
+
+      <h3 style="font-size:13px;color:var(--text);margin:1.25rem 0 0.6rem;font-weight:600">Scaling levers — cheapest to most complex</h3>
+      <ol class="levers-list">
+        <li><strong>Add Redis + Postgres read replicas</strong><span class="cost">near-zero complexity</span></li>
+        <li><strong>Cache hot search queries by geohash cell + category</strong><span class="cost">low complexity, high payoff in dense metros</span></li>
+        <li><strong>Add Elasticsearch replica shards</strong> for read throughput<span class="cost">medium complexity</span></li>
+        <li><strong>Scale Kafka consumer group partitions</strong> for reindex throughput<span class="cost">medium complexity</span></li>
+        <li><strong>Geo-shard Elasticsearch by region</strong> so a metro's index fits in memory<span class="cost">high complexity — last resort</span></li>
+      </ol>
+
+      <table class="grid-table">
+        <thead><tr><th>Bottleneck</th><th>Triggers at</th><th>Exact fix</th></tr></thead>
+        <tbody>
+          <tr><td>Elasticsearch query latency</td><td>p99 &gt;200ms during peak search hours</td><td class="fix">Add replica shards; cache the top N hottest queries in Redis</td></tr>
+          <tr><td>Dense downtown core</td><td>One metro core has 50x the business density of a suburb</td><td class="fix">Variable-depth geo cells (quadtree-style) instead of a uniform grid in that region</td></tr>
+          <tr><td>Reindex consumer lag</td><td>New reviews/listings take &gt;60s to appear in search</td><td class="fix">Scale out consumer partitions; batch ES bulk upserts larger</td></tr>
+        </tbody>
+      </table>
+
+      <div class="dial-wrap">
+        <div class="dial-title">Search index freshness vs write throughput</div>
+        <div class="dial-track"><div class="dial-marker" style="left:80%"></div></div>
+        <div class="dial-labels"><span class="end-left">Strong</span><span class="end-right">Eventual (seconds)</span></div>
+      </div>
+      <div class="dial-wrap">
+        <div class="dial-title">Business/review write consistency</div>
+        <div class="dial-track"><div class="dial-marker" style="left:15%"></div></div>
+        <div class="dial-labels"><span class="end-left">Strong</span><span class="end-right">Eventual</span></div>
+      </div>
+    </section>
+
+    <section id="step6-deepdive-geoindex">
+      <div class="step-pill">Step 6 of 6 — Deep Dives</div>
+      <h2>Deep dive: quadtree vs geohash for the geo index</h2>
+      <p style="font-size:13px;color:#999;margin-bottom:0.75rem">Both turn a 2D radius query into a fast lookup — they differ in how they handle uneven business density across a city.</p>
+
+      <div class="flow-cmp-grid">
+        <div class="flow-cmp-col hit">
+          <div class="flow-cmp-title">Quadtree — adapts to density</div>
+          <svg viewBox="0 0 300 200" xmlns="http://www.w3.org/2000/svg" id="quadtreeGrid">
+            <g id="quadCells"></g>
+          </svg>
+          <button class="flow-cmp-replay" id="quadSplitBtn" style="width:auto;padding:6px 14px">▸ Simulate downtown density</button>
+        </div>
+        <div class="flow-cmp-col miss">
+          <div class="flow-cmp-title">Geohash — uniform grid</div>
+          <svg viewBox="0 0 300 200" xmlns="http://www.w3.org/2000/svg" id="geohashGridYelp">
+            <g id="geoCellsYelp"></g>
+          </svg>
+          <button class="flow-cmp-replay" id="geoLoadBtn" style="width:auto;padding:6px 14px">▸ Simulate downtown density</button>
+        </div>
+      </div>
+
+      <script>
+      (function(){
+        function buildUniformGrid(svgId, groupId, cols, rows) {
+          var svg = document.getElementById(svgId);
+          if (!svg) return null;
+          var g = document.getElementById(groupId);
+          var cellW = 280 / cols, cellH = 180 / rows, offX = 10, offY = 10;
+          var cells = [];
+          for (var r = 0; r < rows; r++) {
+            for (var c = 0; c < cols; c++) {
+              var x = offX + c * cellW, y = offY + r * cellH;
+              var rect = document.createElementNS('http://www.w3.org/2000/svg', 'rect');
+              rect.setAttribute('x', x); rect.setAttribute('y', y);
+              rect.setAttribute('width', cellW - 2); rect.setAttribute('height', cellH - 2);
+              rect.setAttribute('rx', 2);
+              rect.setAttribute('fill', 'var(--surface)');
+              rect.setAttribute('stroke', 'var(--border2)');
+              rect.setAttribute('stroke-width', '1');
+              g.appendChild(rect);
+              cells.push({ el: rect, r: r, c: c });
+            }
+          }
+          return cells;
+        }
+
+        // Geohash side: fixed uniform grid, downtown cell just gets visually overloaded (dots)
+        var geoCells = buildUniformGrid('geohashGridYelp', 'geoCellsYelp', 6, 5);
+        var geoBtn = document.getElementById('geoLoadBtn');
+        if (geoBtn) {
+          geoBtn.addEventListener('click', function(){
+            geoCells.forEach(function(ce){ ce.el.setAttribute('fill', 'var(--surface)'); });
+            var svg = document.getElementById('geohashGridYelp');
+            var existingDots = svg.querySelectorAll('.load-dot');
+            existingDots.forEach(function(d){ d.remove(); });
+            var downtown = geoCells.find(function(ce){ return ce.r === 2 && ce.c === 3; });
+            if (downtown) {
+              downtown.el.setAttribute('fill', '#1a1400');
+              downtown.el.setAttribute('stroke', 'var(--amber)');
+              var bbox = { x: parseFloat(downtown.el.getAttribute('x')), y: parseFloat(downtown.el.getAttribute('y')), w: parseFloat(downtown.el.getAttribute('width')), h: parseFloat(downtown.el.getAttribute('height')) };
+              for (var i = 0; i < 24; i++) {
+                var dot = document.createElementNS('http://www.w3.org/2000/svg', 'circle');
+                dot.setAttribute('class', 'load-dot');
+                dot.setAttribute('cx', bbox.x + 4 + Math.random() * (bbox.w - 8));
+                dot.setAttribute('cy', bbox.y + 4 + Math.random() * (bbox.h - 8));
+                dot.setAttribute('r', 1.4);
+                dot.setAttribute('fill', 'var(--amber)');
+                svg.appendChild(dot);
+              }
+              var label = document.createElementNS('http://www.w3.org/2000/svg', 'text');
+              label.setAttribute('class', 'load-dot');
+              label.setAttribute('x', bbox.x + bbox.w / 2);
+              label.setAttribute('y', bbox.y - 6);
+              label.setAttribute('text-anchor', 'middle');
+              label.setAttribute('font-size', '8');
+              label.setAttribute('fill', 'var(--amber)');
+              label.textContent = '1 cell, 50x businesses';
+              svg.appendChild(label);
+            }
+          });
+        }
+
+        // Quadtree side: same starting grid, but downtown cell recursively subdivides
+        var quadCells = buildUniformGrid('quadtreeGrid', 'quadCells', 6, 5);
+        var quadBtn = document.getElementById('quadSplitBtn');
+        if (quadBtn) {
+          quadBtn.addEventListener('click', function(){
+            quadCells.forEach(function(ce){ ce.el.setAttribute('fill', 'var(--surface)'); ce.el.setAttribute('stroke', 'var(--border2)'); });
+            var svg = document.getElementById('quadtreeGrid');
+            var existing = svg.querySelectorAll('.split-rect,.split-label');
+            existing.forEach(function(d){ d.remove(); });
+            var downtown = quadCells.find(function(ce){ return ce.r === 2 && ce.c === 3; });
+            if (downtown) {
+              var x = parseFloat(downtown.el.getAttribute('x'));
+              var y = parseFloat(downtown.el.getAttribute('y'));
+              var w = parseFloat(downtown.el.getAttribute('width'));
+              var h = parseFloat(downtown.el.getAttribute('height'));
+              downtown.el.setAttribute('opacity', '0');
+              [0, 1].forEach(function(sr){
+                [0, 1].forEach(function(sc){
+                  var sub = document.createElementNS('http://www.w3.org/2000/svg', 'rect');
+                  sub.setAttribute('class', 'split-rect');
+                  sub.setAttribute('x', x + sc * w / 2);
+                  sub.setAttribute('y', y + sr * h / 2);
+                  sub.setAttribute('width', w / 2 - 1);
+                  sub.setAttribute('height', h / 2 - 1);
+                  sub.setAttribute('rx', 2);
+                  sub.setAttribute('fill', '#08200f');
+                  sub.setAttribute('stroke', 'var(--accent)');
+                  sub.setAttribute('stroke-width', '1');
+                  svg.appendChild(sub);
+                });
+              });
+              var label = document.createElementNS('http://www.w3.org/2000/svg', 'text');
+              label.setAttribute('class', 'split-label');
+              label.setAttribute('x', x + w / 2);
+              label.setAttribute('y', y - 6);
+              label.setAttribute('text-anchor', 'middle');
+              label.setAttribute('font-size', '8');
+              label.setAttribute('fill', 'var(--accent)');
+              label.textContent = '4 cells, splits again if still dense';
+              svg.appendChild(label);
+            }
+          });
+        }
+      })();
+      </script>
+
+      <table class="def-table">
+        <thead><tr><th>Approach</th><th>When it wins</th><th>Tradeoff</th></tr></thead>
+        <tbody>
+          <tr><td>Quadtree</td><td>Uneven density — dense downtown cores next to sparse suburbs, which is exactly a city's business distribution</td><td>More complex to implement and rebalance; tree traversal is slower than a string-prefix lookup</td></tr>
+          <tr><td>Geohash</td><td>Simplicity and uniform load — easy to shard by prefix, trivial to reason about, works well when density is roughly even</td><td>A single dense cell becomes a hotspot with no built-in way to subdivide it further</td></tr>
+        </tbody>
+      </table>
+      <div class="callout info">In practice: Elasticsearch's <code>geo_point</code> uses a geohash-like structure internally, but the engine shards and balances automatically — most teams don't hand-roll either structure. The interview signal is knowing <em>why</em> density matters, not implementing a quadtree from scratch.</div>
+    </section>
+
+    <section id="step6-deepdive-ranking">
+      <h2>Deep dive: search ranking signals</h2>
+      <p style="font-size:13px;color:#999;margin-bottom:0.75rem">Distance alone produces bad results — a 4.8-star cafe 400m away should usually beat a 2.1-star cafe 150m away. Ranking blends four signals into one score.</p>
+
+      <ol class="flow-steps-list">
+        <li><span>Geo filter narrows the candidate set</span> — Elasticsearch geo-radius query returns everything within the search radius first, typically a few hundred to a few thousand businesses</li>
+        <li><span>Distance decay score</span> — closer businesses score higher, but the curve flattens past ~1km so distance stops dominating once "nearby enough"</li>
+        <li><span>Star rating score</span> — average rating weighted by review count, so a single 5-star review doesn't outrank a business with 500 reviews at 4.6</li>
+        <li><span>Review recency score</span> — a business with recent reviews signals it's currently open and active, a small boost over one with reviews from 3 years ago</li>
+        <li><span>Text relevance score</span> — keyword match against name, category, and review text (BM25-style), only applied when the query has search terms</li>
+        <li><span>Weighted blend produces final rank</span> — <code>score = w1·distance_decay + w2·rating_score + w3·recency + w4·relevance</code>, weights tuned per query type (browse vs keyword search)</li>
+      </ol>
+
+      <div class="callout warn">Weighting is context-dependent: a "pizza near me" query should weight distance heavily since intent is clearly proximity-driven; a "best pizza in [neighborhood]" query should weight rating and relevance more heavily since the user already named a location.</div>
+
+      <table class="grid-table">
+        <thead><tr><th>Scenario</th><th>User impact</th><th>Detection signal</th><th>Mitigation</th></tr></thead>
+        <tbody>
+          <tr><td>Elasticsearch cluster degraded</td><td class="impact">Search latency spikes or times out</td><td class="detect">Query latency p99 alert, node health check failures</td><td class="fix">Fall back to a cached "top businesses near this geohash cell" result set; auto-scale ES nodes</td></tr>
+          <tr><td>Reindex pipeline stalls</td><td class="impact">New businesses/reviews invisible in search for minutes+</td><td class="detect">Kafka consumer lag climbing on the reindex topic</td><td class="fix">Scale reindexer consumers; page on-call if lag exceeds 5 minutes</td></tr>
+          <tr><td>Rating cache goes stale</td><td class="impact">Profile page shows outdated star rating briefly</td><td class="detect">Redis TTL expiry mismatch vs actual review write timestamp</td><td class="fix">Short TTL (~5 min) plus explicit cache invalidation fired on every new review</td></tr>
+          <tr><td>Review bombing (coordinated fake reviews)</td><td class="impact">A business's rating swings sharply in a short window</td><td class="detect">Anomalous review velocity + rating delta on a single business</td><td class="fix">Rate-limit reviews per user/IP, flag for fraud review, exclude flagged reviews from avg_rating pending review</td></tr>
+          <tr><td>Hot downtown geo cell</td><td class="impact">Search queries in dense metro cores are slower than suburbs</td><td class="detect">Per-region query latency breakdown shows an outlier cell</td><td class="fix">Finer-grained subdivision (quadtree-style) for that region only</td></tr>
+        </tbody>
+      </table>
+    </section>
+
+    <section id="interview-moves">
+      <h2>Interview moves</h2>
+      <ul class="moves-list">
+        <li><span class="move-num">01</span><div><strong>"Before I design anything, let me split this into two problems — geo search is the hard part, business profiles and reviews are standard CRUD"</strong> — states the core insight unprompted and sets scope</div></li>
+        <li><span class="move-num">02</span><div><strong>"I wouldn't run a geo-radius query against Postgres at 12M rows — I'd maintain a dedicated search index that's async-updated from the source of truth"</strong> — names the read/write split explicitly</div></li>
+        <li><span class="move-num">03</span><div><strong>"Ranking can't be distance-only — a 2-star business next door shouldn't outrank a 4.8-star business three blocks away, so I'd blend distance, rating, recency, and relevance"</strong> — shows the ranking is a designed system, not an afterthought</div></li>
+        <li><span class="move-num">04</span><div><strong>"A uniform geohash grid breaks down in a dense downtown core — I'd want variable-depth cells there, closer to a quadtree, while suburbs stay coarse"</strong> — proactively surfaces the density problem</div></li>
+        <li><span class="move-num">05</span><div><strong>"Reviews go straight into Postgres for strong consistency on the one-review-per-user rule, then flow into the search index async — a slow reindex should never block a review submission"</strong> — separates write correctness from read freshness</div></li>
+        <li><span class="move-num">06</span><div><strong>"I'd flag review-bombing as a real failure mode — a sudden spike in reviews with an extreme rating delta on one business should be rate-limited and queued for fraud review, not trusted immediately"</strong> — demonstrates abuse-case thinking unprompted</div></li>
+      </ul>
+    </section>
+
+    <section id="follow-ups">
+      <h2>Follow-up questions</h2>
+      <div class="qa-block">
+        <div class="qa-q">How do you handle autocomplete/typeahead for the search box?</div>
+        <div class="qa-a">A separate trie or Elasticsearch completion suggester over business names and categories, served from an in-memory cache — a different latency budget than full search.</div>
+      </div>
+      <div class="qa-block">
+        <div class="qa-q">How would you support filtering by "open now"?</div>
+        <div class="qa-a">Store structured hours as a JSONB field, evaluate against the request's local time server-side, and add it as a post-filter after the geo/rank query rather than indexing every possible time slot.</div>
+      </div>
+      <div class="qa-block">
+        <div class="qa-q">How do you prevent duplicate business listings for the same physical location?</div>
+        <div class="qa-a">Fuzzy-match name + geo-proximity + phone number at creation time, flag likely duplicates for manual merge rather than auto-rejecting, since false positives block legitimate new businesses.</div>
+      </div>
+      <div class="qa-block">
+        <div class="qa-q">How would this change to support 10x the scale?</div>
+        <div class="qa-a">Geo-shard Elasticsearch by region so each shard's working set fits in memory, add more Redis cache capacity for hot queries, and move to variable-depth cells more broadly, not just downtown cores.</div>
+      </div>
+      <div class="qa-block">
+        <div class="qa-q">Why not compute avg_rating live with a JOIN instead of denormalizing it?</div>
+        <div class="qa-a">A profile page and every search result would need a COUNT/AVG aggregate over potentially thousands of reviews — denormalizing into a cached summary makes that a point read instead.</div>
+      </div>
+      <div class="qa-block">
+        <div class="qa-q">How do you rank sponsored/ad businesses without making search feel untrustworthy?</div>
+        <div class="qa-a">Keep organic ranking signals untouched, inject sponsored results into clearly labeled slots, and cap how much an ad boost can override a very low organic rating.</div>
+      </div>
+    </section>
+
+  </main>
+  <script src="../../assets/nav.js"></script>
+</body>
+</html>

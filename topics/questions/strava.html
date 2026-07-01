@@ -1,0 +1,422 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Design Strava — SD Prep</title>
+  <link rel="stylesheet" href="../../assets/style.css">
+</head>
+<body>
+  <aside id="sidebar"></aside>
+  <main>
+
+    <header class="page-head">
+      <div class="pill">Questions</div>
+      <h1>Design Strava</h1>
+      <p class="sub">Tests whether you can turn noisy GPS streams into clean segment times and live leaderboards without falling into the trap of treating this as just another CRUD app.</p>
+      <div class="meta-row">
+        <span class="badge green">30-40 min interview</span>
+        <span class="badge blue">Medium</span>
+      </div>
+    </header>
+
+    <div class="flash-card">
+      <div class="flash-label">Say this in the first 2 minutes</div>
+      <ul>
+        <li>The core insight: this is a write-heavy time-series + geospatial problem, not a social-feed problem — GPS ingestion and segment matching dominate the design</li>
+        <li>Key scale number to anchor on: a single activity can carry 3,000-10,000 GPS points, and raw tracks are append-only, never updated in place</li>
+        <li>Primary tradeoff being probed: exact segment matching (expensive, precise) vs approximate spatial-index matching (cheap, tolerant of GPS noise)</li>
+        <li>Component most candidates forget: a spatial index (geohash/R-tree) for segment matching — without it, matching degrades to a full scan per activity</li>
+        <li>Failure mode most candidates skip: leaderboard re-rank storms when a popular segment gets thousands of new times in a single morning commute window</li>
+      </ul>
+    </div>
+
+    <section id="step1-requirements">
+      <div class="step-pill">Step 1 of 6 — Requirements</div>
+      <h2>Requirements</h2>
+
+      <div class="goal-arc-wrap">
+        <div class="goal-arc-row functional">
+          <div class="goal-arc-seg">1</div><div class="goal-arc-seg">2</div><div class="goal-arc-seg">3</div><div class="goal-arc-seg">4</div><div class="goal-arc-seg">5</div><div class="goal-arc-seg inactive">6</div>
+        </div>
+        <div class="goal-arc-label"><span>Arc 1 (steps 1-5) — <strong>Satisfy Functional Requirements</strong></span></div>
+        <div class="goal-arc-row nonfunctional" style="margin-top:8px">
+          <div class="goal-arc-seg">1</div><div class="goal-arc-seg">2</div><div class="goal-arc-seg">3</div><div class="goal-arc-seg">4</div><div class="goal-arc-seg">5</div><div class="goal-arc-seg">6</div>
+        </div>
+        <div class="goal-arc-label"><span>Arc 2 (all 6 steps) — <strong>Satisfy Non-Functional Requirements</strong></span></div>
+      </div>
+
+      <div class="compare-grid">
+        <div class="compare-card good">
+          <div class="compare-label">Functional</div>
+          <ul>
+            <li>Upload a GPS-tracked activity (run, ride) after recording</li>
+            <li>Match the activity against known segments and compute segment times</li>
+            <li>Maintain per-segment leaderboards (all-time, this-year, following)</li>
+            <li>Show a social feed of followed athletes' recent activities with kudos/comments</li>
+          </ul>
+        </div>
+        <div class="compare-card bad">
+          <div class="compare-label">Non-Functional</div>
+          <ul>
+            <li>~15M activities uploaded/day, each with thousands of GPS points</li>
+            <li>Segment matching completes within seconds of upload, not real-time</li>
+            <li>Leaderboard reads &lt;100ms p99 — read-heavy, tolerates eventual consistency</li>
+            <li>Activity uploads durable and never lost, even if downstream processing lags</li>
+          </ul>
+        </div>
+      </div>
+
+      <div class="callout warn"><strong>What NOT to build:</strong> live tracking / real-time location sharing during an activity, route planning or turn-by-turn navigation, or a full e-commerce/gear-shop integration. This is upload → match → rank → feed only.</div>
+
+      <div class="stat-grid">
+        <div class="stat-card"><div class="stat-val">~15M/day</div><div class="stat-label">activities uploaded</div></div>
+        <div class="stat-card"><div class="stat-val">~5-10k</div><div class="stat-label">GPS points per activity</div></div>
+        <div class="stat-card"><div class="stat-val">&lt;5s</div><div class="stat-label">segment match latency, post-upload</div></div>
+        <div class="stat-card"><div class="stat-val">&lt;100ms</div><div class="stat-label">leaderboard read p99</div></div>
+      </div>
+    </section>
+
+    <section id="step2-entities">
+      <div class="step-pill">Step 2 of 6 — Core Entities</div>
+      <h2>Core entities</h2>
+      <p style="font-size:13px;color:#999;margin-bottom:0.75rem">Four entities across three stores, split by write pattern — activity metadata, raw GPS blobs, matched segment efforts, and leaderboard state each behave differently.</p>
+
+      <div class="entity-grid">
+        <div class="entity-box">
+          <div class="entity-head"><span class="entity-name">Activity</span><span class="entity-store pg">Postgres</span></div>
+          <div class="entity-fields">
+            <div class="entity-field"><span class="fname pk">id</span><span class="ftype">BIGINT (Snowflake)</span></div>
+            <div class="entity-field"><span class="fname idx">athlete_id</span><span class="ftype">BIGINT → Athlete.id</span></div>
+            <div class="entity-field"><span class="fname">type</span><span class="ftype">ENUM(run, ride, swim)</span></div>
+            <div class="entity-field"><span class="fname">distance_m</span><span class="ftype">INTEGER</span></div>
+            <div class="entity-field"><span class="fname">gps_blob_key</span><span class="ftype">VARCHAR → S3 object key</span></div>
+          </div>
+          <div class="entity-why">Because metadata is small, structured, and queried relationally (by athlete, by date, by type) — Postgres fits. Tradeoff: the raw GPS payload itself must live elsewhere or this table bloats fast.</div>
+        </div>
+
+        <div class="entity-box">
+          <div class="entity-head"><span class="entity-name">GpsTrack</span><span class="entity-store s3">S3</span></div>
+          <div class="entity-fields">
+            <div class="entity-field"><span class="fname pk">activity_id</span><span class="ftype">object key prefix</span></div>
+            <div class="entity-field"><span class="fname">points</span><span class="ftype">compressed polyline (lat, lng, elev, ts)</span></div>
+          </div>
+          <div class="entity-why">Because a track is an immutable, write-once blob of 5-10k points — object storage is far cheaper than a row-oriented DB for this access pattern. Tradeoff: no partial reads without decompressing the whole blob.</div>
+        </div>
+
+        <div class="entity-box">
+          <div class="entity-head"><span class="entity-name">SegmentEffort</span><span class="entity-store cass">Cassandra</span></div>
+          <div class="entity-fields">
+            <div class="entity-field"><span class="fname pk">segment_id</span><span class="ftype">partition key</span></div>
+            <div class="entity-field"><span class="fname idx">elapsed_time_s</span><span class="ftype">clustering key, INT</span></div>
+            <div class="entity-field"><span class="fname">athlete_id</span><span class="ftype">BIGINT</span></div>
+            <div class="entity-field"><span class="fname">activity_id</span><span class="ftype">BIGINT</span></div>
+          </div>
+          <div class="entity-why">Because writes are append-only and the read pattern is "give me the fastest N efforts for this segment" — a wide-column store with segment_id as partition key makes that a sequential scan within a partition. Tradeoff: cross-segment queries (an athlete's all efforts) need a second table keyed by athlete_id.</div>
+        </div>
+
+        <div class="entity-box">
+          <div class="entity-head"><span class="entity-name">LeaderboardEntry</span><span class="entity-store redis">Redis</span></div>
+          <div class="entity-fields">
+            <div class="entity-field"><span class="fname pk">segment:{id}</span><span class="ftype">sorted set key</span></div>
+            <div class="entity-field"><span class="fname">member</span><span class="ftype">athlete_id</span></div>
+            <div class="entity-field"><span class="fname">score</span><span class="ftype">elapsed_time_s</span></div>
+          </div>
+          <div class="entity-why">Because leaderboard reads need &lt;100ms p99 and "top N" / "my rank" are O(log N) operations on a sorted set — Cassandra alone can't serve that fast enough for hot segments. Tradeoff: Redis is a derived cache, so it must be rebuildable from SegmentEffort if lost.</div>
+        </div>
+      </div>
+
+      <div class="callout info">Primary key: <code>Activity.id</code> (Snowflake). Critical index: composite <code>(segment_id, elapsed_time_s)</code> on SegmentEffort — every leaderboard rebuild and "top N" query depends on this ordering.</div>
+    </section>
+
+    <section id="step3-api">
+      <div class="step-pill">Step 3 of 6 — API / Interface</div>
+      <h2>API design</h2>
+      <p style="font-size:13px;color:#999;margin-bottom:0.75rem">Four endpoints — upload, fetch activity, segment leaderboard, and the social feed.</p>
+
+      <div class="api-card">
+        <div class="api-line"><span class="api-method post">POST</span><span class="api-path">/api/v1/activities</span><span class="api-auth">Auth: required</span></div>
+        <div class="api-io">
+          <div class="api-io-block"><div class="api-io-label">Request</div><div class="api-io-body">{ type, gps_points[], started_at }</div></div>
+          <div class="api-io-block"><div class="api-io-label">Response</div><div class="api-io-body">HTTP 202 { activity_id, status: "processing" }</div></div>
+        </div>
+      </div>
+
+      <div class="api-card">
+        <div class="api-line"><span class="api-method get">GET</span><span class="api-path">/api/v1/activities/{id}</span><span class="api-auth">Auth: required (owner or follower)</span></div>
+        <div class="api-io">
+          <div class="api-io-block"><div class="api-io-label">Request</div><div class="api-io-body">path param only</div></div>
+          <div class="api-io-block"><div class="api-io-label">Response</div><div class="api-io-body">{ distance_m, elapsed_time_s, segment_efforts[], polyline_url }</div></div>
+        </div>
+      </div>
+
+      <div class="api-card">
+        <div class="api-line"><span class="api-method get">GET</span><span class="api-path">/api/v1/segments/{id}/leaderboard</span><span class="api-auth">Auth: optional</span></div>
+        <div class="api-io">
+          <div class="api-io-block"><div class="api-io-label">Request</div><div class="api-io-body">?scope=all_time|following&limit=25</div></div>
+          <div class="api-io-block"><div class="api-io-label">Response</div><div class="api-io-body">{ entries: [{ rank, athlete_id, elapsed_time_s }] }</div></div>
+        </div>
+      </div>
+
+      <div class="api-card">
+        <div class="api-line"><span class="api-method get">GET</span><span class="api-path">/api/v1/feed</span><span class="api-auth">Auth: required</span></div>
+        <div class="api-io">
+          <div class="api-io-block"><div class="api-io-label">Request</div><div class="api-io-body">?cursor=&limit=20</div></div>
+          <div class="api-io-block"><div class="api-io-label">Response</div><div class="api-io-body">{ activities: [{ athlete, type, distance_m, kudos_count }], next_cursor }</div></div>
+        </div>
+      </div>
+    </section>
+
+    <section id="step4-dataflow">
+      <div class="step-pill">Step 4 of 6 — Data Flow</div>
+      <h2>Data flow</h2>
+      <p style="font-size:13px;color:#999;margin-bottom:0.75rem">Write path (blue) accepts the raw track and returns immediately; the read path (mint) serves leaderboards from Redis; matching happens fully async and never blocks the upload response.</p>
+
+      <div class="diagram-wrap" data-paths='{"read":{"boxes":["r-client","r-svc","r-cache","r-cass"],"arrows":["r1","r2","r3"]},"write":{"boxes":["w-client","w-svc","w-s3","w-pg"],"arrows":["w1","w2","w3"]}}'>
+        <svg viewBox="0 0 740 220" xmlns="http://www.w3.org/2000/svg">
+          <defs>
+            <marker id="stR" markerWidth="8" markerHeight="8" refX="6" refY="3" orient="auto"><path d="M0,0 L6,3 L0,6 Z" fill="var(--accent)"/></marker>
+            <marker id="stW" markerWidth="8" markerHeight="8" refX="6" refY="3" orient="auto"><path d="M0,0 L6,3 L0,6 Z" fill="var(--blue)"/></marker>
+          </defs>
+
+          <text class="diag-sublabel" x="150" y="14" style="font-size:10px;fill:var(--accent)">READ PATH — leaderboard</text>
+          <circle class="diag-dot diag-flow-dot" r="3.5" style="offset-path: path('M10,24 L120,24 L120,24 L280,24 L280,24 L440,24')"></circle>
+          <g data-target="step6-deepdive-leaderboard" data-id="r-client" data-tip="App requesting a segment's leaderboard"><rect class="diag-box role-client" x="10" y="24" width="100" height="46"/><text class="diag-label" x="60" y="52" style="font-size:11px">Client</text></g>
+          <path class="diag-arrow-path" data-id="r1" d="M110,47 L165,47" marker-end="url(#stR)"/>
+          <g data-target="step6-deepdive-leaderboard" data-id="r-svc" data-tip="Stateless API layer, no business logic beyond auth"><rect class="diag-box" x="165" y="24" width="115" height="46"/><text class="diag-label" x="222" y="47" style="font-size:11px">Leaderboard Svc</text><text class="diag-sublabel" x="222" y="62" style="font-size:8.5px">stateless</text></g>
+          <path class="diag-arrow-path" data-id="r2" d="M280,47 L335,47" marker-end="url(#stR)"/>
+          <g data-target="step6-deepdive-leaderboard" data-id="r-cache" data-tip="ZRANGE top N — sub-5ms, this is the hot path"><rect class="diag-box role-cache" x="335" y="24" width="105" height="46"/><text class="diag-label" x="387" y="47" style="font-size:11px">Redis</text><text class="diag-sublabel" x="387" y="62" style="font-size:8.5px">ZSET</text></g>
+          <path class="diag-arrow-path" data-id="r3" d="M440,47 L475,47" marker-end="url(#stR)"/>
+          <text class="diag-sublabel" x="457" y="37" style="font-size:9px">miss</text>
+          <g data-target="step2-entities" data-id="r-cass" data-tip="Rebuild source if a Redis ZSET is cold or evicted"><rect class="diag-box role-db" x="475" y="24" width="120" height="46"/><text class="diag-label" x="535" y="47" style="font-size:11px">Cassandra</text></g>
+
+          <text class="diag-sublabel" x="150" y="105" style="font-size:10px;fill:var(--blue)">WRITE PATH — upload</text>
+          <g data-target="step2-entities" data-id="w-client" data-tip="Watch/app finishes recording and uploads the GPS track"><rect class="diag-box role-client" x="10" y="115" width="100" height="46"/><text class="diag-label" x="60" y="143" style="font-size:11px">Client</text></g>
+          <path class="diag-arrow-path" data-id="w1" d="M110,138 L145,138" marker-end="url(#stW)"/>
+          <g data-target="step2-entities" data-id="w-svc" data-tip="Validates payload, mints activity_id, accepts synchronously"><rect class="diag-box" x="145" y="115" width="120" height="46"/><text class="diag-label" x="205" y="143" style="font-size:11px">Upload Svc</text></g>
+          <path class="diag-arrow-path" data-id="w2" d="M265,138 L300,138" marker-end="url(#stW)"/>
+          <g data-target="step2-entities" data-id="w-s3" data-tip="Compressed polyline stored as an immutable blob"><rect class="diag-box role-db" x="300" y="115" width="110" height="46"/><text class="diag-label" x="355" y="143" style="font-size:11px">S3</text></g>
+          <path class="diag-arrow-path" data-id="w3" d="M265,150 L265,175 L455,175 L455,150" marker-end="url(#stW)"/>
+          <g data-target="step2-entities" data-id="w-pg" data-tip="Metadata row written, 202 returned to client before matching runs"><rect class="diag-box role-db" x="400" y="115" width="120" height="46"/><text class="diag-label" x="460" y="143" style="font-size:11px">Postgres</text></g>
+
+          <text class="diag-sublabel" x="150" y="200" style="font-size:10px;fill:var(--amber)">ASYNC PATH — matching + leaderboard, never blocks the upload response</text>
+          <g data-target="step6-deepdive-matching" data-id="matcher" data-tip="Upload Svc enqueues a matching job after the 202 is already sent"><rect class="diag-box role-async" x="10" y="204" width="170" height="20"/><text class="diag-label" x="95" y="217" style="font-size:9.5px">Queue → Segment Matcher → ZADD</text></g>
+        </svg>
+        <div class="diag-legend">
+          <div class="diag-legend-item"><span class="diag-legend-dot role-cache"></span>Read path — Redis sorted set first</div>
+          <div class="diag-legend-item"><span class="diag-legend-dot role-client"></span>Write path — durable, returns before matching</div>
+          <div class="diag-legend-item"><span class="diag-legend-dot role-async"></span>Matching — fully decoupled, seconds not milliseconds</div>
+        </div>
+      </div>
+
+      <ol class="flow-steps-list">
+        <li><span>Client uploads raw GPS track</span> — Upload Svc validates and mints an activity_id</li>
+        <li><span>Track written to S3, metadata to Postgres</span> — both durable before responding</li>
+        <li><span>202 returned immediately</span> — client sees "processing," never waits on matching</li>
+        <li><span>Matching job enqueued</span> — spatial index snaps the track against nearby known segments</li>
+        <li><span>Segment efforts written to Cassandra, then ZADD into Redis</span> — leaderboard updates within seconds, not on the critical path</li>
+      </ol>
+    </section>
+
+    <section id="step5-hld">
+      <div class="step-pill">Step 5 of 6 — High-Level Design</div>
+      <h2>High-level design</h2>
+      <p style="font-size:13px;color:#999;margin-bottom:0.75rem">Full system: upload, matching, leaderboard, and social feed paths together with every supporting component.</p>
+
+      <div class="diagram-wrap">
+        <svg viewBox="0 0 780 300" xmlns="http://www.w3.org/2000/svg">
+          <defs><marker id="stHldArrow" markerWidth="8" markerHeight="8" refX="6" refY="3" orient="auto"><path d="M0,0 L6,3 L0,6 Z" fill="var(--border2)"/></marker></defs>
+          <g data-tip="Mobile app / GPS watch sync client"><rect class="diag-box role-client" x="10" y="20" width="110" height="50"/><text class="diag-label" x="65" y="50" style="font-size:11px">Clients</text></g>
+          <path class="diag-arrow-path" d="M120,45 L155,45" marker-end="url(#stHldArrow)"/>
+          <g data-tip="Auth, rate limiting, routing"><rect class="diag-box role-client" x="155" y="20" width="120" height="50"/><text class="diag-label" x="215" y="50" style="font-size:11px">API Gateway</text></g>
+
+          <path class="diag-arrow-path" d="M215,70 L215,105" marker-end="url(#stHldArrow)"/>
+          <g data-tip="Stateless"><rect class="diag-box" x="90" y="105" width="130" height="46"/><text class="diag-label" x="155" y="128" style="font-size:11px">Upload Svc</text><text class="diag-sublabel" x="155" y="143" style="font-size:8.5px">stateless</text></g>
+          <g data-tip="Stateless, serves reads only"><rect class="diag-box" x="240" y="105" width="140" height="46"/><text class="diag-label" x="310" y="128" style="font-size:11px">Leaderboard Svc</text><text class="diag-sublabel" x="310" y="143" style="font-size:8.5px">stateless</text></g>
+
+          <path class="diag-arrow-path" d="M155,151 L155,185" marker-end="url(#stHldArrow)"/>
+          <g data-tip="Immutable compressed polylines"><rect class="diag-box role-db" x="90" y="185" width="130" height="46"/><text class="diag-label" x="155" y="208" style="font-size:11px">S3</text></g>
+          <path class="diag-arrow-path" d="M155,151 L60,151 L60,185" marker-end="url(#stHldArrow)" stroke-dasharray="3 3"/>
+          <g data-tip="Activity + athlete metadata"><rect class="diag-box role-db" x="10" y="185" width="90" height="46"/><text class="diag-label" x="55" y="208" style="font-size:10px">Postgres</text></g>
+
+          <path class="diag-arrow-path" d="M310,151 L310,185" marker-end="url(#stHldArrow)"/>
+          <g data-tip="ZRANGE top N, sub-5ms hot path"><rect class="diag-box role-cache" x="245" y="185" width="130" height="46"/><text class="diag-label" x="310" y="208" style="font-size:11px">Redis</text></g>
+
+          <path class="diag-arrow-path" d="M155,151 L440,151 L440,185" marker-end="url(#stHldArrow)" stroke-dasharray="3 3"/>
+          <g data-tip="Upload Svc enqueues a matching job after responding"><rect class="diag-box role-async" x="390" y="105" width="130" height="46"/><text class="diag-label" x="455" y="128" style="font-size:11px">Match Queue</text></g>
+          <path class="diag-arrow-path" d="M455,151 L455,185" marker-end="url(#stHldArrow)"/>
+          <g data-tip="Spatial index lookup + geometric snapping"><rect class="diag-box role-async" x="390" y="185" width="130" height="46"/><text class="diag-label" x="455" y="203" style="font-size:11px">Segment Matcher</text><text class="diag-sublabel" x="455" y="218" style="font-size:8.5px">geohash/R-tree</text></g>
+          <path class="diag-arrow-path" d="M455,231 L455,240 L560,240" marker-end="url(#stHldArrow)"/>
+          <g data-tip="Ordered efforts per segment, partition key = segment_id"><rect class="diag-box role-db" x="560" y="215" width="140" height="46"/><text class="diag-label" x="630" y="238" style="font-size:11px">Cassandra</text><text class="diag-sublabel" x="630" y="253" style="font-size:8.5px">SegmentEffort</text></g>
+          <path class="diag-arrow-path" d="M560,238 L420,238 L420,231" marker-end="url(#stHldArrow)" stroke-dasharray="3 3"/>
+
+          <path class="diag-arrow-path" d="M520,128 L555,128" marker-end="url(#stHldArrow)"/>
+          <g data-tip="Kudos, comments, followed-athlete activity stream"><rect class="diag-box role-async" x="555" y="105" width="130" height="46"/><text class="diag-label" x="620" y="128" style="font-size:11px">Feed Fan-out</text></g>
+        </svg>
+        <div class="diag-legend">
+          <div class="diag-legend-item"><span class="diag-legend-dot role-client"></span>Client / gateway</div>
+          <div class="diag-legend-item"><span class="diag-legend-dot role-db"></span>Postgres + S3 + Cassandra — durable stores</div>
+          <div class="diag-legend-item"><span class="diag-legend-dot role-cache"></span>Redis — leaderboard sorted sets</div>
+          <div class="diag-legend-item"><span class="diag-legend-dot role-async"></span>Match queue + matcher + feed fan-out</div>
+        </div>
+      </div>
+
+      <table class="def-table">
+        <thead><tr><th>Component</th><th>Role</th><th>Tech + why</th></tr></thead>
+        <tbody>
+          <tr><td>Upload Svc</td><td>Accepts GPS track, writes S3 + Postgres, enqueues matching</td><td>Stateless service — because it needs to scale horizontally with upload volume; tradeoff is all state pushed to S3/Postgres, adding a network hop per upload.</td></tr>
+          <tr><td>Segment Matcher</td><td>Snaps a noisy GPS track onto known segments</td><td>Geohash/R-tree spatial index — because candidate segments must be found in a bounded region, not a full table scan; tradeoff is index maintenance cost as new segments are created.</td></tr>
+          <tr><td>Cassandra</td><td>Stores ordered segment efforts, source of truth for rankings</td><td>Wide-column store partitioned by segment_id — because "top N for this segment" is a sequential read within one partition; tradeoff is cross-segment athlete queries need a second table.</td></tr>
+          <tr><td>Redis</td><td>Serves live leaderboard reads</td><td>Sorted set (ZSET) — because ZADD/ZRANGE/ZRANK are all O(log N), fast enough for &lt;100ms p99; tradeoff is it's a rebuildable cache, not the durable source.</td></tr>
+        </tbody>
+      </table>
+
+      <h3 style="font-size:13px;color:var(--text);margin:1.25rem 0 0.6rem;font-weight:600">Scaling levers — cheapest to most complex</h3>
+      <ol class="levers-list">
+        <li><strong>Add Postgres + Cassandra read replicas</strong><span class="cost">near-zero complexity</span></li>
+        <li><strong>Shard Redis leaderboards by segment_id hash</strong><span class="cost">low complexity, isolates hot segments</span></li>
+        <li><strong>Scale matching queue consumers horizontally</strong><span class="cost">medium complexity</span></li>
+        <li><strong>Pre-aggregate "this year" / "this month" leaderboard windows</strong> instead of computing on read<span class="cost">medium complexity</span></li>
+        <li><strong>Geo-partition the spatial index by region</strong> as segment count grows<span class="cost">high complexity — last resort</span></li>
+      </ol>
+
+      <table class="grid-table">
+        <thead><tr><th>Bottleneck</th><th>Triggers at</th><th>Exact fix</th></tr></thead>
+        <tbody>
+          <tr><td>Matching queue backlog</td><td>Consumer lag grows during peak commute hours</td><td class="fix">Auto-scale matcher workers on queue depth; batch spatial index lookups</td></tr>
+          <tr><td>Hot segment leaderboard writes</td><td>A popular climb gets 1000s of ZADDs in one morning</td><td class="fix">Buffer ZADDs per segment and flush in small batches instead of one write per effort</td></tr>
+          <tr><td>Cassandra partition hotspot</td><td>One segment_id partition grows far larger than peers</td><td class="fix">Add a time-bucket suffix to segment_id partition key to split by month/year</td></tr>
+        </tbody>
+      </table>
+
+      <div class="dial-wrap">
+        <div class="dial-title">Segment matching: precision vs speed</div>
+        <div class="dial-track"><div class="dial-marker" style="left:70%"></div></div>
+        <div class="dial-labels"><span class="end-left">Exact geometric match</span><span class="end-right">Approximate spatial-index match</span></div>
+      </div>
+      <div class="dial-wrap">
+        <div class="dial-title">Leaderboard consistency</div>
+        <div class="dial-track"><div class="dial-marker" style="left:85%"></div></div>
+        <div class="dial-labels"><span class="end-left">Strong</span><span class="end-right">Eventual</span></div>
+      </div>
+    </section>
+
+    <section id="step6-deepdive-matching">
+      <div class="step-pill">Step 6 of 6 — Deep Dives</div>
+      <h2>Deep dive: segment matching algorithm</h2>
+      <p style="font-size:13px;color:#999;margin-bottom:0.75rem">Raw GPS points are noisy — matching snaps them onto a canonical segment path using a spatial index instead of comparing against every known segment.</p>
+
+      <div class="diagram-wrap">
+        <svg viewBox="0 0 620 200" xmlns="http://www.w3.org/2000/svg">
+          <defs><marker id="stMatchArrow" markerWidth="8" markerHeight="8" refX="6" refY="3" orient="auto"><path d="M0,0 L6,3 L0,6 Z" fill="var(--border2)"/></marker></defs>
+          <text class="diag-sublabel" x="20" y="18" style="font-size:10px;fill:var(--amber)">RAW GPS TRACK — noisy, ~5-10k points</text>
+          <polyline points="20,60 60,45 100,65 140,50 180,68 220,52 260,66 300,48" fill="none" stroke="var(--amber)" stroke-width="2" stroke-dasharray="3 3"/>
+          <circle cx="20" cy="60" r="3" fill="var(--amber)"/><circle cx="60" cy="45" r="3" fill="var(--amber)"/><circle cx="100" cy="65" r="3" fill="var(--amber)"/><circle cx="140" cy="50" r="3" fill="var(--amber)"/><circle cx="180" cy="68" r="3" fill="var(--amber)"/><circle cx="220" cy="52" r="3" fill="var(--amber)"/><circle cx="260" cy="66" r="3" fill="var(--amber)"/><circle cx="300" cy="48" r="3" fill="var(--amber)"/>
+
+          <text class="diag-sublabel" x="360" y="18" style="font-size:10px;fill:var(--accent)">CANDIDATE LOOKUP</text>
+          <g data-tip="Geohash cells the track passes through are queried for nearby segments"><rect class="diag-box role-cache" x="360" y="35" width="130" height="46" rx="6"/><text class="diag-label" x="425" y="58" style="font-size:11px">Spatial Index</text><text class="diag-sublabel" x="425" y="72" style="font-size:8.5px">geohash/R-tree</text></g>
+          <path class="diag-arrow-path" d="M300,58 L360,58" marker-end="url(#stMatchArrow)"/>
+          <path class="diag-arrow-path" d="M490,58 L525,58" marker-end="url(#stMatchArrow)"/>
+          <g data-tip="2-3 candidate segments near this bounding box"><rect class="diag-box" x="525" y="35" width="80" height="46" rx="6"/><text class="diag-label" x="565" y="53" style="font-size:10px">Candidates</text><text class="diag-sublabel" x="565" y="68" style="font-size:8.5px">2-3 segments</text></g>
+
+          <text class="diag-sublabel" x="20" y="120" style="font-size:10px;fill:var(--accent)">SNAPPED RESULT — matched to canonical segment path</text>
+          <path d="M20,160 L300,140" fill="none" stroke="var(--border2)" stroke-width="4" stroke-linecap="round"/>
+          <path d="M20,160 L300,140" fill="none" stroke="var(--accent)" stroke-width="1.5" stroke-dasharray="2 2"/>
+          <circle cx="20" cy="160" r="3" fill="var(--accent)"/><circle cx="300" cy="140" r="3" fill="var(--accent)"/>
+          <text x="160" y="185" text-anchor="middle" font-size="10" fill="var(--accent)" font-family="Inter,sans-serif">Frechet-distance check confirms best-fit candidate, rejects the rest</text>
+        </svg>
+      </div>
+
+      <ol class="flow-steps-list">
+        <li><span>Bucket track points into geohash cells</span> — bounds the search to segments physically near the route</li>
+        <li><span>Query spatial index for candidate segments</span> — returns a handful, not every segment in the system</li>
+        <li><span>Run a curve-similarity check per candidate</span> — Frechet distance (or similar) scores how closely the noisy track follows each candidate's canonical path</li>
+        <li><span>Accept the best-fit match above a distance threshold</span> — reject candidates that don't clear it, avoiding false positives on parallel roads</li>
+        <li><span>Compute elapsed time from the snapped entry/exit points</span> — not the raw first/last GPS timestamps, which can be off by a few seconds</li>
+      </ol>
+      <div class="callout warn">GPS drift near tunnels, tree cover, or urban canyons is the real failure mode: a track can appear to cut through a building. The curve-similarity threshold exists specifically to reject a false match rather than award an impossible segment time.</div>
+    </section>
+
+    <section id="step6-deepdive-leaderboard">
+      <h2>Deep dive: leaderboard update flow</h2>
+      <p style="font-size:13px;color:#999;margin-bottom:0.75rem">Once a segment effort is computed, the leaderboard must re-rank without ever making the athlete wait on it.</p>
+
+      <div class="diagram-wrap">
+        <svg viewBox="0 0 700 150" xmlns="http://www.w3.org/2000/svg">
+          <defs><marker id="stLbArrow" markerWidth="8" markerHeight="8" refX="6" refY="3" orient="auto"><path d="M0,0 L6,3 L0,6 Z" fill="var(--border2)"/></marker></defs>
+          <g data-tip="Matcher confirms this activity completed a known segment"><rect class="diag-box role-async" x="10" y="45" width="120" height="46"/><text class="diag-label" x="70" y="68" style="font-size:11px">Segment Matcher</text><text class="diag-sublabel" x="70" y="83" style="font-size:8.5px">effort computed</text></g>
+          <path class="diag-arrow-path" d="M130,68 L165,68" marker-end="url(#stLbArrow)"/>
+          <g data-tip="Durable write, source of truth for this effort"><rect class="diag-box role-db" x="165" y="45" width="120" height="46"/><text class="diag-label" x="225" y="68" style="font-size:11px">Cassandra</text><text class="diag-sublabel" x="225" y="83" style="font-size:8.5px">SegmentEffort</text></g>
+          <path class="diag-arrow-path" d="M285,68 L320,68" marker-end="url(#stLbArrow)"/>
+          <g data-tip="ZADD segment:{id} elapsed_time_s athlete_id"><rect class="diag-box role-cache" x="320" y="45" width="120" height="46"/><text class="diag-label" x="380" y="63" style="font-size:11px">Redis ZADD</text><text class="diag-sublabel" x="380" y="78" style="font-size:8.5px">O(log N)</text></g>
+          <path class="diag-arrow-path" d="M440,68 L475,68" marker-end="url(#stLbArrow)"/>
+          <g data-tip="Sorted set auto-reorders — no separate re-rank pass needed"><rect class="diag-box" x="475" y="45" width="120" height="46"/><text class="diag-label" x="535" y="63" style="font-size:11px">Rank Updated</text><text class="diag-sublabel" x="535" y="78" style="font-size:8.5px">ZRANK O(log N)</text></g>
+          <path class="diag-arrow-path" d="M595,68 L630,68" marker-end="url(#stLbArrow)"/>
+          <g data-tip="Only fires if the athlete's new rank crosses a notable threshold"><rect class="diag-box role-async" x="630" y="45" width="60" height="46"/><text class="diag-label" x="660" y="63" style="font-size:9px">Notify</text><text class="diag-sublabel" x="660" y="78" style="font-size:7.5px">if top-10</text></g>
+        </svg>
+      </div>
+
+      <ol class="flow-steps-list">
+        <li><span>Matcher computes elapsed_time_s for the segment</span> — happens seconds after upload, fully async</li>
+        <li><span>Write to Cassandra first</span> — durable source of truth, survives a Redis restart</li>
+        <li><span>ZADD into the segment's Redis sorted set</span> — O(log N), the set stays sorted automatically, no batch re-rank job needed</li>
+        <li><span>ZRANK gives the athlete's live position</span> — same O(log N) cost whether the set has 100 or 100,000 entries</li>
+        <li><span>Conditional notification fires</span> — only if the new rank cracks the top 10, avoiding notification spam on low-traffic segments</li>
+      </ol>
+
+      <table class="grid-table">
+        <thead><tr><th>Scenario</th><th>User impact</th><th>Detection signal</th><th>Mitigation</th></tr></thead>
+        <tbody>
+          <tr><td>Redis leaderboard node down</td><td class="impact">Leaderboard reads fail or return stale data</td><td class="detect">ZRANGE error rate spike</td><td class="fix">Rebuild the sorted set from Cassandra on the fly; serve from a replica in the meantime</td></tr>
+          <tr><td>Matching queue backlog during peak hours</td><td class="impact">Segment times appear minutes late, not seconds</td><td class="detect">Consumer lag alert on match queue</td><td class="fix">Auto-scale matcher workers; surface "processing" status in the app instead of failing silently</td></tr>
+          <tr><td>False segment match from GPS drift</td><td class="impact">Athlete awarded an impossible time (e.g. tunnel shortcut)</td><td class="detect">Elapsed time far below physically possible pace for that segment</td><td class="fix">Reject matches below a minimum-plausible-speed threshold; flag for manual review</td></tr>
+          <tr><td>Hot segment write storm</td><td class="impact">Redis CPU spikes, other segments' reads slow down</td><td class="detect">Per-key command rate on segment:{id} exceeds baseline 10x</td><td class="fix">Buffer and batch ZADDs per segment instead of one write per finished activity</td></tr>
+          <tr><td>Cassandra partition growth on a legendary segment</td><td class="impact">Leaderboard rebuild for that segment gets slow</td><td class="detect">Partition size metric crosses configured threshold</td><td class="fix">Add a time-bucket suffix to the partition key to split by year</td></tr>
+        </tbody>
+      </table>
+    </section>
+
+    <section id="interview-moves">
+      <h2>Interview moves</h2>
+      <ul class="moves-list">
+        <li><span class="move-num">01</span><div><strong>"This is really a write-heavy time-series and geospatial problem wearing a social-app costume — I'll design the ingestion and matching pipeline first"</strong> — reframes the problem correctly before diving into CRUD</div></li>
+        <li><span class="move-num">02</span><div><strong>"I'll return a 202 the instant the track is durably stored, and run segment matching fully async — the athlete shouldn't wait seconds for their upload to complete"</strong> — separates the durable write from the expensive computation</div></li>
+        <li><span class="move-num">03</span><div><strong>"Raw GPS is noisy, so matching isn't a database lookup — it's a spatial index query followed by a curve-similarity check to reject false positives"</strong> — shows awareness that this isn't a simple point-lookup problem</div></li>
+        <li><span class="move-num">04</span><div><strong>"Redis sorted sets give me ZADD and ZRANK in O(log N), so I never need a separate batch re-rank job — the leaderboard is always sorted"</strong> — picks the right data structure for the access pattern, not just "cache it"</div></li>
+        <li><span class="move-num">05</span><div><strong>"A legendary climb near a major city could get thousands of efforts in one morning — I'd batch ZADDs per segment rather than writing on every single finish"</strong> — anticipates a hot-key problem unprompted</div></li>
+        <li><span class="move-num">06</span><div><strong>"Cassandra stays the source of truth and Redis is a rebuildable cache — if I lose the sorted set, I can regenerate it from segment_id partition scans"</strong> — states a concrete recovery story instead of assuming the cache never fails</div></li>
+      </ul>
+    </section>
+
+    <section id="follow-ups">
+      <h2>Follow-up questions</h2>
+      <div class="qa-block">
+        <div class="qa-q">How do you handle an athlete uploading a manually-edited or spoofed GPS file?</div>
+        <div class="qa-a">Apply plausibility checks (max speed for activity type, elevation consistency) at matching time and flag outliers for review rather than blocking the upload outright.</div>
+      </div>
+      <div class="qa-block">
+        <div class="qa-q">Why Cassandra for segment efforts instead of Postgres?</div>
+        <div class="qa-a">Writes are append-only and reads are "ordered scan within one partition" — Cassandra's partition model fits that natively without the row-lock contention a relational table would see at this write volume.</div>
+      </div>
+      <div class="qa-block">
+        <div class="qa-q">How would you support "following" leaderboards, not just all-time?</div>
+        <div class="qa-a">Maintain a separate Redis sorted set per (segment_id, athlete's follow-graph) is too expensive — instead fetch the all-time top N, filter client-side against the follow list, and fall back to a targeted ZSCORE lookup for followed athletes not in that page.</div>
+      </div>
+      <div class="qa-block">
+        <div class="qa-q">What happens if two athletes finish a segment with the exact same elapsed time?</div>
+        <div class="qa-a">Redis ZSET breaks ties lexicographically by member, which is arbitrary — add a secondary tiebreaker (earlier activity timestamp wins) enforced at write time before the ZADD.</div>
+      </div>
+      <div class="qa-block">
+        <div class="qa-q">How do you keep the spatial index from growing unbounded as new segments are created?</div>
+        <div class="qa-a">Geo-partition the index by region/city so a lookup only touches the local shard, and archive segments with near-zero traffic out of the hot index into cold storage.</div>
+      </div>
+      <div class="qa-block">
+        <div class="qa-q">How would you scale this to 10x the daily upload volume?</div>
+        <div class="qa-a">Shard the match queue and Cassandra by segment_id hash, add more matcher workers scaled on queue depth, and pre-bucket hot segments' Redis keys across multiple nodes.</div>
+      </div>
+    </section>
+
+  </main>
+  <script src="../../assets/nav.js"></script>
+</body>
+</html>

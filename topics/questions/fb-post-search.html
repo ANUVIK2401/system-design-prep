@@ -1,0 +1,412 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Design Facebook Post Search — SD Prep</title>
+  <link rel="stylesheet" href="../../assets/style.css">
+</head>
+<body>
+  <aside id="sidebar"></aside>
+  <main>
+
+    <header class="page-head">
+      <div class="pill">Questions</div>
+      <h1>Design Facebook Post Search</h1>
+      <p class="sub">Tests whether you can build a near-real-time search index while enforcing per-viewer privacy — the hard part isn't full-text search, it's never showing a post to someone who can't see it.</p>
+      <div class="meta-row">
+        <span class="badge green">30-40 min interview</span>
+        <span class="badge blue">Medium</span>
+      </div>
+    </header>
+
+    <div class="flash-card">
+      <div class="flash-label">Say this in the first 2 minutes</div>
+      <ul>
+        <li>The core insight: this isn't a full-text search problem, it's a privacy-filtered full-text search problem — the ACL check is the hard part, not the tokenizer</li>
+        <li>Key scale number to anchor on: 500M posts/day created, but search must reflect a new post within ~5-10 seconds or results feel stale</li>
+        <li>Primary tradeoff being probed: filter privacy at index time (fast, can go stale on ACL changes) vs at query time (always correct, costs latency)</li>
+        <li>Component most candidates forget: a durable event stream (Kafka) between the post service and the indexer, so indexing never blocks post creation</li>
+        <li>Failure mode most candidates skip: what happens when a post's audience changes (public → friends-only) after it's already indexed</li>
+      </ul>
+    </div>
+
+    <section id="step1-requirements">
+      <div class="step-pill">Step 1 of 6 — Requirements</div>
+      <h2>Requirements</h2>
+
+      <div class="goal-arc-wrap">
+        <div class="goal-arc-row functional">
+          <div class="goal-arc-seg">1</div><div class="goal-arc-seg">2</div><div class="goal-arc-seg">3</div><div class="goal-arc-seg">4</div><div class="goal-arc-seg">5</div><div class="goal-arc-seg inactive">6</div>
+        </div>
+        <div class="goal-arc-label"><span>Arc 1 (steps 1-5) — <strong>Satisfy Functional Requirements</strong></span></div>
+        <div class="goal-arc-row nonfunctional" style="margin-top:8px">
+          <div class="goal-arc-seg">1</div><div class="goal-arc-seg">2</div><div class="goal-arc-seg">3</div><div class="goal-arc-seg">4</div><div class="goal-arc-seg">5</div><div class="goal-arc-seg">6</div>
+        </div>
+        <div class="goal-arc-label"><span>Arc 2 (all 6 steps) — <strong>Satisfy Non-Functional Requirements</strong></span></div>
+      </div>
+
+      <div class="compare-grid">
+        <div class="compare-card good">
+          <div class="compare-label">Functional</div>
+          <ul>
+            <li>Search posts by keyword and return relevance-ranked results</li>
+            <li>Index a new post's text within seconds of creation</li>
+            <li>Only return posts the searching user is allowed to see</li>
+            <li>Support basic filters — author, date range, post type</li>
+          </ul>
+        </div>
+        <div class="compare-card bad">
+          <div class="compare-label">Non-Functional</div>
+          <ul>
+            <li>500M posts/day created, ~10B searchable posts in the index</li>
+            <li>Indexing lag &lt;10s p99 from post creation to searchable</li>
+            <li>Search latency &lt;200ms p99 including privacy filtering</li>
+            <li>Zero privacy leaks — a false negative (missed result) beats a false positive (leaked post)</li>
+          </ul>
+        </div>
+      </div>
+
+      <div class="callout warn"><strong>What NOT to build:</strong> semantic/vector search, comment or photo search, typeahead/autocomplete, or a ranking ML pipeline with personalization signals. This is keyword search over post text with correct privacy enforcement only.</div>
+
+      <div class="stat-grid">
+        <div class="stat-card"><div class="stat-val">~6k/s</div><div class="stat-label">post creation rate (avg)</div></div>
+        <div class="stat-card"><div class="stat-val">~40k/s</div><div class="stat-label">search query rate (peak)</div></div>
+        <div class="stat-card"><div class="stat-val">&lt;10s</div><div class="stat-label">indexing lag target, p99</div></div>
+        <div class="stat-card"><div class="stat-val">~10B</div><div class="stat-label">documents in the live index</div></div>
+      </div>
+    </section>
+
+    <section id="step2-entities">
+      <div class="step-pill">Step 2 of 6 — Core Entities</div>
+      <h2>Core entities</h2>
+      <p style="font-size:13px;color:#999;margin-bottom:0.75rem">Three entities: the source-of-truth post, the search-optimized index entry, and the privacy scope that gates every query.</p>
+
+      <div class="entity-grid">
+        <div class="entity-box">
+          <div class="entity-head"><span class="entity-name">Post</span><span class="entity-store pg">Postgres</span></div>
+          <div class="entity-fields">
+            <div class="entity-field"><span class="fname pk">id</span><span class="ftype">BIGINT (Snowflake)</span></div>
+            <div class="entity-field"><span class="fname idx">author_id</span><span class="ftype">BIGINT</span></div>
+            <div class="entity-field"><span class="fname">text</span><span class="ftype">TEXT</span></div>
+            <div class="entity-field"><span class="fname">visibility</span><span class="ftype">ENUM(public, friends, custom)</span></div>
+            <div class="entity-field"><span class="fname">created_at</span><span class="ftype">TIMESTAMP</span></div>
+          </div>
+          <div class="entity-why">Because a post is a transactional write with strong durability needs and moderate volume (6k/s) — a relational store fits and stays the single source of truth. Tradeoff: not queryable for full-text at this scale.</div>
+        </div>
+
+        <div class="entity-box">
+          <div class="entity-head"><span class="entity-name">IndexEntry</span><span class="entity-store cass">Elasticsearch</span></div>
+          <div class="entity-fields">
+            <div class="entity-field"><span class="fname pk">post_id</span><span class="ftype">keyword</span></div>
+            <div class="entity-field"><span class="fname idx">text</span><span class="ftype">analyzed text (inverted index)</span></div>
+            <div class="entity-field"><span class="fname idx">author_id</span><span class="ftype">keyword</span></div>
+            <div class="entity-field"><span class="fname">visible_to</span><span class="ftype">keyword[] — denormalized ACL snapshot</span></div>
+            <div class="entity-field"><span class="fname">created_at</span><span class="ftype">date</span></div>
+          </div>
+          <div class="entity-why">Because relevance-ranked keyword search over billions of documents needs an inverted index, which Postgres full-text search doesn't scale to at this volume. Tradeoff: a second, eventually-consistent copy of the data that can drift from Postgres.</div>
+        </div>
+
+        <div class="entity-box">
+          <div class="entity-head"><span class="entity-name">PrivacyScope</span><span class="entity-store redis">Redis</span></div>
+          <div class="entity-fields">
+            <div class="entity-field"><span class="fname pk">user_id</span><span class="ftype">BIGINT</span></div>
+            <div class="entity-field"><span class="fname">friend_ids</span><span class="ftype">Set&lt;BIGINT&gt;, cached</span></div>
+            <div class="entity-field"><span class="fname">blocked_ids</span><span class="ftype">Set&lt;BIGINT&gt;, cached</span></div>
+          </div>
+          <div class="entity-why">Because query-time privacy filtering needs the searching user's social graph on every request — caching it in Redis avoids a graph-DB round trip per search. Tradeoff: cache can be briefly stale after a friend/block change.</div>
+        </div>
+      </div>
+
+      <div class="callout info">Primary key: <code>Post.id</code> (Snowflake). Critical index: <code>IndexEntry.text</code> inverted index plus a filter on <code>visible_to</code> — every query must intersect the term match with the viewer's allowed audience before ranking.</div>
+    </section>
+
+    <section id="step3-api">
+      <div class="step-pill">Step 3 of 6 — API / Interface</div>
+      <h2>API design</h2>
+      <p style="font-size:13px;color:#999;margin-bottom:0.75rem">Three endpoints — create, search, and delete. Indexing itself is never a direct API call; it's driven by events.</p>
+
+      <div class="api-card">
+        <div class="api-line"><span class="api-method post">POST</span><span class="api-path">/api/v1/posts</span><span class="api-auth">Auth: required</span></div>
+        <div class="api-io">
+          <div class="api-io-block"><div class="api-io-label">Request</div><div class="api-io-body">{ text, visibility, custom_audience? }</div></div>
+          <div class="api-io-block"><div class="api-io-label">Response</div><div class="api-io-body">{ post_id, created_at } — 201, indexing happens async</div></div>
+        </div>
+      </div>
+
+      <div class="api-card">
+        <div class="api-line"><span class="api-method get">GET</span><span class="api-path">/api/v1/search</span><span class="api-auth">Auth: required</span></div>
+        <div class="api-io">
+          <div class="api-io-block"><div class="api-io-label">Request</div><div class="api-io-body">?q=&author_id=&since=&cursor=</div></div>
+          <div class="api-io-block"><div class="api-io-label">Response</div><div class="api-io-body">{ results[], next_cursor } — pre-filtered to viewer's audience</div></div>
+        </div>
+      </div>
+
+      <div class="api-card">
+        <div class="api-line"><span class="api-method delete">DELETE</span><span class="api-path">/api/v1/posts/{post_id}</span><span class="api-auth">Auth: required (owner)</span></div>
+        <div class="api-io">
+          <div class="api-io-block"><div class="api-io-label">Request</div><div class="api-io-body">path param only</div></div>
+          <div class="api-io-block"><div class="api-io-label">Response</div><div class="api-io-body">HTTP 204, emits a delete event that tombstones the index entry</div></div>
+        </div>
+      </div>
+
+      <div class="api-card">
+        <div class="api-line"><span class="api-method put">PUT</span><span class="api-path">/api/v1/posts/{post_id}/visibility</span><span class="api-auth">Auth: required (owner)</span></div>
+        <div class="api-io">
+          <div class="api-io-block"><div class="api-io-label">Request</div><div class="api-io-body">{ visibility, custom_audience? }</div></div>
+          <div class="api-io-block"><div class="api-io-label">Response</div><div class="api-io-body">HTTP 200, emits a re-index event to refresh visible_to</div></div>
+        </div>
+      </div>
+    </section>
+
+    <section id="step4-dataflow">
+      <div class="step-pill">Step 4 of 6 — Data Flow</div>
+      <h2>Data flow</h2>
+      <p style="font-size:13px;color:#999;margin-bottom:0.75rem">Write path (blue) — post created and streamed to the indexer — and read path (mint) — a search query filtered by privacy before ranking.</p>
+
+      <div class="diagram-wrap" data-paths='{"write":{"boxes":["w-client","w-svc","w-db","w-kafka","w-worker","w-es"],"arrows":["w1","w2","w3","w4","w5"]},"read":{"boxes":["r-client","r-svc","r-privacy","r-es"],"arrows":["r1","r2","r3"]}}'>
+        <svg viewBox="0 0 740 220" xmlns="http://www.w3.org/2000/svg">
+          <defs>
+            <marker id="fpsW" markerWidth="8" markerHeight="8" refX="6" refY="3" orient="auto"><path d="M0,0 L6,3 L0,6 Z" fill="var(--blue)"/></marker>
+            <marker id="fpsR" markerWidth="8" markerHeight="8" refX="6" refY="3" orient="auto"><path d="M0,0 L6,3 L0,6 Z" fill="var(--accent)"/></marker>
+          </defs>
+
+          <text class="diag-sublabel" x="150" y="14" style="font-size:10px;fill:var(--blue)">WRITE PATH — post created → indexed</text>
+          <circle class="diag-dot diag-flow-dot" r="3.5" style="offset-path: path('M10,24 L120,24 L120,24 L245,24 L245,24 L360,24 L360,24 L480,24 L480,24 L600,24')"></circle>
+          <g data-target="step2-entities" data-id="w-client" data-tip="User submits a new post"><rect class="diag-box role-client" x="10" y="24" width="100" height="46"/><text class="diag-label" x="60" y="52" style="font-size:11px">Client</text></g>
+          <path class="diag-arrow-path" data-id="w1" d="M110,47 L145,47" marker-end="url(#fpsW)"/>
+          <g data-target="step2-entities" data-id="w-svc" data-tip="Validates and persists, returns 201 immediately"><rect class="diag-box" x="145" y="24" width="100" height="46"/><text class="diag-label" x="195" y="47" style="font-size:11px">Post Svc</text><text class="diag-sublabel" x="195" y="62" style="font-size:8.5px">stateless</text></g>
+          <path class="diag-arrow-path" data-id="w2" d="M245,47 L280,47" marker-end="url(#fpsW)"/>
+          <g data-target="step2-entities" data-id="w-db" data-tip="Source of truth for the post"><rect class="diag-box role-db" x="280" y="24" width="90" height="46"/><text class="diag-label" x="325" y="52" style="font-size:11px">Postgres</text></g>
+          <path class="diag-arrow-path" data-id="w3" d="M370,47 L405,47" marker-end="url(#fpsW)" stroke-dasharray="3 3"/>
+          <g data-target="step6-deepdive-invindex" data-id="w-kafka" data-tip="Post-created event streamed here after the DB commit"><rect class="diag-box role-async" x="405" y="24" width="90" height="46"/><text class="diag-label" x="450" y="47" style="font-size:11px">Kafka</text><text class="diag-sublabel" x="450" y="62" style="font-size:8.5px">post events</text></g>
+          <path class="diag-arrow-path" data-id="w4" d="M495,47 L530,47" marker-end="url(#fpsW)"/>
+          <g data-target="step6-deepdive-invindex" data-id="w-worker" data-tip="Tokenizes text, snapshots the audience, builds the doc"><rect class="diag-box role-async" x="530" y="24" width="100" height="46"/><text class="diag-label" x="580" y="47" style="font-size:11px">Index Worker</text></g>
+          <path class="diag-arrow-path" data-id="w5" d="M630,47 L665,47" marker-end="url(#fpsW)"/>
+          <g data-target="step6-deepdive-invindex" data-id="w-es" data-tip="Inverted index, sharded by post_id hash"><rect class="diag-box role-cache" x="665" y="24" width="65" height="46"/><text class="diag-label" x="697" y="47" style="font-size:10px">ES</text></g>
+
+          <text class="diag-sublabel" x="150" y="105" style="font-size:10px;fill:var(--accent)">READ PATH — search query</text>
+          <circle class="diag-dot diag-flow-dot" r="3.5" style="offset-path: path('M10,115 L120,115 L120,115 L245,115 L245,115 L390,115 L390,115 L510,115')"></circle>
+          <g data-target="step3-api" data-id="r-client" data-tip="User submits a search query"><rect class="diag-box role-client" x="10" y="115" width="100" height="46"/><text class="diag-label" x="60" y="143" style="font-size:11px">Client</text></g>
+          <path class="diag-arrow-path" data-id="r1" d="M110,138 L145,138" marker-end="url(#fpsR)"/>
+          <g data-target="step3-api" data-id="r-svc" data-tip="Parses query, orchestrates the privacy-filtered search"><rect class="diag-box" x="145" y="115" width="100" height="46"/><text class="diag-label" x="195" y="143" style="font-size:11px">Search API</text></g>
+          <path class="diag-arrow-path" data-id="r2" d="M245,138 L280,138" marker-end="url(#fpsR)"/>
+          <g data-target="step6-deepdive-privacy" data-id="r-privacy" data-tip="Fetches the viewer's friend/block sets to build the ACL filter"><rect class="diag-box role-cache" x="280" y="115" width="110" height="46"/><text class="diag-label" x="335" y="138" style="font-size:11px">Privacy Filter</text><text class="diag-sublabel" x="335" y="153" style="font-size:8.5px">Redis-backed</text></g>
+          <path class="diag-arrow-path" data-id="r3" d="M390,138 L425,138" marker-end="url(#fpsR)"/>
+          <g data-target="step6-deepdive-invindex" data-id="r-es" data-tip="Term match ANDed with viewer's audience filter, then ranked"><rect class="diag-box role-cache" x="425" y="115" width="90" height="46"/><text class="diag-label" x="470" y="143" style="font-size:11px">ES cluster</text></g>
+
+          <text class="diag-sublabel" x="150" y="188" style="font-size:10px;fill:var(--purple)">ASYNC PATH — visibility change re-indexes affected posts</text>
+          <g data-target="step6-deepdive-privacy" data-id="acl-update" data-tip="Visibility change fires the same event pipeline as a new post"><rect class="diag-box role-cdn" x="10" y="192" width="200" height="20"/><text class="diag-label" x="110" y="205" style="font-size:9.5px">Visibility change → Kafka → re-index</text></g>
+        </svg>
+        <div class="diag-legend">
+          <div class="diag-legend-item"><span class="diag-legend-dot role-async"></span>Write path — post commits, then streams to the indexer</div>
+          <div class="diag-legend-item"><span class="diag-legend-dot role-cache"></span>Read path — privacy filter applied before ranking</div>
+          <div class="diag-legend-item"><span class="diag-legend-dot role-cdn"></span>ACL changes re-enter the same pipeline as new posts</div>
+        </div>
+      </div>
+
+      <ol class="flow-steps-list">
+        <li><span>Client posts text</span> — Post Svc writes to Postgres and returns 201 immediately, indexing is not on this path</li>
+        <li><span>Post-created event streamed to Kafka</span> — fired after the DB commit, decoupling indexing latency from write latency</li>
+        <li><span>Index Worker consumes the event</span> — tokenizes text and snapshots the current audience into visible_to</li>
+        <li><span>Document written to Elasticsearch</span> — searchable within the &lt;10s lag target</li>
+        <li><span>Search request hits Privacy Filter first</span> — the viewer's friend/block sets gate the query before it ever reaches ranking</li>
+      </ol>
+    </section>
+
+    <section id="step5-hld">
+      <div class="step-pill">Step 5 of 6 — High-Level Design</div>
+      <h2>High-level design</h2>
+      <p style="font-size:13px;color:#999;margin-bottom:0.75rem">Full system: post creation, the async indexing pipeline, and privacy-filtered search together with every supporting component.</p>
+
+      <div class="diagram-wrap">
+        <svg viewBox="0 0 780 300" xmlns="http://www.w3.org/2000/svg">
+          <defs><marker id="fpsHldArrow" markerWidth="8" markerHeight="8" refX="6" refY="3" orient="auto"><path d="M0,0 L6,3 L0,6 Z" fill="var(--border2)"/></marker></defs>
+
+          <g data-tip="Both post creation and search requests originate here"><rect class="diag-box role-client" x="10" y="20" width="110" height="50"/><text class="diag-label" x="65" y="50" style="font-size:11px">Clients</text></g>
+          <path class="diag-arrow-path" d="M120,45 L155,45" marker-end="url(#fpsHldArrow)"/>
+          <g data-tip="Auth, rate limiting, routing"><rect class="diag-box role-client" x="155" y="20" width="120" height="50"/><text class="diag-label" x="215" y="50" style="font-size:11px">API Gateway</text></g>
+
+          <path class="diag-arrow-path" d="M215,70 L215,105" marker-end="url(#fpsHldArrow)"/>
+          <g data-tip="Validates, persists, returns immediately"><rect class="diag-box" x="150" y="105" width="130" height="46"/><text class="diag-label" x="215" y="128" style="font-size:11px">Post Service</text><text class="diag-sublabel" x="215" y="143" style="font-size:8.5px">stateless</text></g>
+          <path class="diag-arrow-path" d="M215,151 L215,185" marker-end="url(#fpsHldArrow)"/>
+          <g data-tip="Source of truth"><rect class="diag-box role-db" x="150" y="185" width="130" height="46"/><text class="diag-label" x="215" y="208" style="font-size:11px">Postgres</text></g>
+
+          <path class="diag-arrow-path" d="M280,128 L340,128" marker-end="url(#fpsHldArrow)" stroke-dasharray="3 3"/>
+          <g data-tip="Buffers post-created and visibility-changed events"><rect class="diag-box role-async" x="340" y="105" width="120" height="46"/><text class="diag-label" x="400" y="128" style="font-size:11px">Kafka</text><text class="diag-sublabel" x="400" y="143" style="font-size:8.5px">event stream</text></g>
+          <path class="diag-arrow-path" d="M460,128 L500,128" marker-end="url(#fpsHldArrow)"/>
+          <g data-tip="Tokenizes text, snapshots ACL, writes the doc"><rect class="diag-box role-async" x="500" y="105" width="130" height="46"/><text class="diag-label" x="565" y="128" style="font-size:11px">Indexing Worker</text></g>
+          <path class="diag-arrow-path" d="M565,151 L565,185" marker-end="url(#fpsHldArrow)"/>
+          <g data-tip="Sharded inverted index, replicated"><rect class="diag-box role-cache" x="500" y="185" width="130" height="46"/><text class="diag-label" x="565" y="208" style="font-size:11px">Elasticsearch</text></g>
+
+          <path class="diag-arrow-path" d="M275,45 L410,45 L410,105" marker-end="url(#fpsHldArrow)"/>
+          <g data-tip="Query parsing, orchestrates privacy-filtered search"><rect class="diag-box" x="345" y="240" width="130" height="46"/><text class="diag-label" x="410" y="263" style="font-size:11px">Search API</text><text class="diag-sublabel" x="410" y="278" style="font-size:8.5px">stateless</text></g>
+          <path class="diag-arrow-path" d="M410,105 L410,240" marker-end="url(#fpsHldArrow)" stroke-dasharray="3 3"/>
+          <g data-tip="Cached friend/block sets, gates every query"><rect class="diag-box role-cdn" x="190" y="240" width="130" height="46"/><text class="diag-label" x="255" y="263" style="font-size:11px">Privacy Filter</text><text class="diag-sublabel" x="255" y="278" style="font-size:8.5px">Redis-backed</text></g>
+          <path class="diag-arrow-path" d="M320,263 L345,263" marker-end="url(#fpsHldArrow)"/>
+          <path class="diag-arrow-path" d="M475,263 L565,263 L565,231" marker-end="url(#fpsHldArrow)"/>
+        </svg>
+        <div class="diag-legend">
+          <div class="diag-legend-item"><span class="diag-legend-dot role-client"></span>Client / gateway</div>
+          <div class="diag-legend-item"><span class="diag-legend-dot role-db"></span>Postgres — source of truth</div>
+          <div class="diag-legend-item"><span class="diag-legend-dot role-async"></span>Kafka + indexing worker</div>
+          <div class="diag-legend-item"><span class="diag-legend-dot role-cache"></span>Elasticsearch — inverted index</div>
+          <div class="diag-legend-item"><span class="diag-legend-dot role-cdn"></span>Privacy filter — gates every query</div>
+        </div>
+      </div>
+
+      <table class="def-table">
+        <thead><tr><th>Component</th><th>Role</th><th>Tech + why</th></tr></thead>
+        <tbody>
+          <tr><td>Post Service</td><td>Validates and persists new posts, returns immediately</td><td>Stateless service over Postgres — because writes are transactional and must never wait on indexing; tradeoff is a second async system to keep in sync.</td></tr>
+          <tr><td>Kafka</td><td>Streams post-created and visibility-changed events</td><td>Log-based queue — because it decouples indexing throughput from post-write throughput and replays cleanly if a worker crashes; tradeoff is added operational surface.</td></tr>
+          <tr><td>Indexing Worker</td><td>Tokenizes post text, snapshots audience, writes the doc</td><td>Horizontally-scaled consumer group — because indexing throughput must track post-creation bursts; tradeoff is eventual consistency between Postgres and the index.</td></tr>
+          <tr><td>Elasticsearch</td><td>Stores the inverted index, serves ranked queries</td><td>Sharded/replicated cluster — because relevance-ranked full-text search over 10B docs needs an inverted index at this scale; tradeoff is operational complexity (shard rebalancing, cluster sizing).</td></tr>
+          <tr><td>Privacy Filter</td><td>Resolves the viewer's allowed audience before ranking</td><td>Redis-cached friend/block sets — because a graph-DB call on every search would blow the 200ms budget; tradeoff is a brief staleness window after a social graph change.</td></tr>
+        </tbody>
+      </table>
+
+      <h3 style="font-size:13px;color:var(--text);margin:1.25rem 0 0.6rem;font-weight:600">Scaling levers — cheapest to most complex</h3>
+      <ol class="levers-list">
+        <li><strong>Add Elasticsearch replica shards</strong> for read throughput<span class="cost">near-zero complexity</span></li>
+        <li><strong>Scale Kafka consumer group / indexing workers</strong> horizontally<span class="cost">low complexity</span></li>
+        <li><strong>Cache hot query results</strong> (trending terms) at the Search API layer<span class="cost">medium complexity</span></li>
+        <li><strong>Increase Elasticsearch primary shard count</strong> as document volume grows<span class="cost">medium complexity — requires reindexing</span></li>
+        <li><strong>Move privacy filtering into the ES query itself</strong> via a filtered alias per audience tier<span class="cost">high complexity — last resort</span></li>
+      </ol>
+
+      <table class="grid-table">
+        <thead><tr><th>Bottleneck</th><th>Triggers at</th><th>Exact fix</th></tr></thead>
+        <tbody>
+          <tr><td>Indexing lag exceeds target</td><td>Kafka consumer lag &gt;10s sustained</td><td class="fix">Add indexing worker instances; increase Kafka partition count for parallelism</td></tr>
+          <tr><td>Elasticsearch query latency spikes</td><td>p99 search latency &gt;200ms</td><td class="fix">Add replica shards; cache Privacy Filter results more aggressively</td></tr>
+          <tr><td>Privacy Filter cache miss storm</td><td>Redis miss rate &gt;20% after a mass social-graph update</td><td class="fix">Pre-warm cache for active users; fall back to graph DB with a short circuit breaker</td></tr>
+        </tbody>
+      </table>
+
+      <div class="dial-wrap">
+        <div class="dial-title">Privacy enforcement point: index time vs query time</div>
+        <div class="dial-track"><div class="dial-marker" style="left:75%"></div></div>
+        <div class="dial-labels"><span class="end-left">Index time (fast, can go stale)</span><span class="end-right">Query time (always correct)</span></div>
+      </div>
+      <div class="dial-wrap">
+        <div class="dial-title">Search index freshness</div>
+        <div class="dial-track"><div class="dial-marker" style="left:80%"></div></div>
+        <div class="dial-labels"><span class="end-left">Strong</span><span class="end-right">Eventual</span></div>
+      </div>
+    </section>
+
+    <section id="step6-deepdive-invindex">
+      <div class="step-pill">Step 6 of 6 — Deep Dives</div>
+      <h2>Deep dive: the inverted index</h2>
+      <p style="font-size:13px;color:#999;margin-bottom:0.75rem">The data structure that makes "find every post containing this word" fast instead of a full scan across 10B rows.</p>
+
+      <div class="diagram-wrap">
+        <svg viewBox="0 0 700 210" xmlns="http://www.w3.org/2000/svg">
+          <defs><marker id="fpsInvArrow" markerWidth="8" markerHeight="8" refX="6" refY="3" orient="auto"><path d="M0,0 L6,3 L0,6 Z" fill="var(--border2)"/></marker></defs>
+
+          <g data-tip="Raw post text is tokenized into terms at index time"><rect class="diag-box role-client" x="10" y="20" width="220" height="46"/><text class="diag-label" x="120" y="43" style="font-size:11px">"launching our new dashboard"</text><text class="diag-sublabel" x="120" y="58" style="font-size:8.5px">post_id: 9931</text></g>
+          <path class="diag-arrow-path" d="M230,43 L265,43" marker-end="url(#fpsInvArrow)"/>
+          <g data-tip="Lowercased, stemmed, stopwords removed"><rect class="diag-box role-async" x="265" y="20" width="120" height="46"/><text class="diag-label" x="325" y="43" style="font-size:11px">Tokenizer</text><text class="diag-sublabel" x="325" y="58" style="font-size:8.5px">stem + lowercase</text></g>
+          <path class="diag-arrow-path" d="M385,43 L420,43" marker-end="url(#fpsInvArrow)"/>
+          <text class="diag-sublabel" x="500" y="43" style="font-size:9px">terms: launch, dashboard</text>
+
+          <text class="diag-sublabel" x="10" y="95" style="font-size:10px;fill:var(--accent)">TERM → POSTING LIST (doc_ids containing that term)</text>
+          <g data-tip="Every post mentioning 'launch' or its stem"><rect class="diag-box role-cache" x="10" y="105" width="110" height="34"/><text class="diag-label" x="65" y="127" style="font-size:11px">"launch"</text></g>
+          <path class="diag-arrow-path" d="M120,122 L155,122" marker-end="url(#fpsInvArrow)"/>
+          <g data-tip="Sorted list of post IDs, enables fast intersection with an ACL filter"><rect class="diag-box role-db" x="155" y="105" width="300" height="34"/><text class="diag-label" x="305" y="127" style="font-size:10.5px">[9931, 9877, 9812, 9701, ...]</text></g>
+
+          <g data-tip="A different query term, same structure"><rect class="diag-box role-cache" x="10" y="150" width="110" height="34"/><text class="diag-label" x="65" y="172" style="font-size:11px">"dashboard"</text></g>
+          <path class="diag-arrow-path" d="M120,167 L155,167" marker-end="url(#fpsInvArrow)"/>
+          <g data-tip="A different posting list, intersected with the first for multi-term queries"><rect class="diag-box role-db" x="155" y="150" width="300" height="34"/><text class="diag-label" x="305" y="172" style="font-size:10.5px">[9931, 9650, 9502, ...]</text></g>
+
+          <text class="diag-sublabel" x="480" y="120" style="font-size:9px" fill="var(--amber)">multi-term query = intersect</text>
+          <text class="diag-sublabel" x="480" y="135" style="font-size:9px" fill="var(--amber)">posting lists, then rank by</text>
+          <text class="diag-sublabel" x="480" y="150" style="font-size:9px" fill="var(--amber)">relevance (TF-IDF/BM25)</text>
+        </svg>
+      </div>
+
+      <ol class="flow-steps-list">
+        <li><span>Post text is tokenized</span> — lowercased, stemmed ("launching" → "launch"), stopwords dropped</li>
+        <li><span>Each term maps to a posting list</span> — a sorted list of every post_id containing that term</li>
+        <li><span>A multi-term query intersects posting lists</span> — "launch dashboard" only matches posts in both lists</li>
+        <li><span>The privacy filter ANDs against visible_to</span> — narrows the intersected set to the viewer's allowed audience before ranking</li>
+        <li><span>Surviving docs are scored and ranked</span> — BM25 (term frequency weighted by rarity) orders the final results</li>
+      </ol>
+      <div class="callout warn">The posting list is what makes privacy filtering at query time affordable: it's a set intersection (term matches ∩ viewer's audience), not a per-document ACL check against every candidate.</div>
+    </section>
+
+    <section id="step6-deepdive-privacy">
+      <h2>Deep dive: privacy filtering — index time vs query time</h2>
+      <p style="font-size:13px;color:#999;margin-bottom:0.75rem">Where you enforce "who can see this post" changes the entire correctness/latency tradeoff of the system.</p>
+
+      <div class="flow-cmp-grid">
+        <div class="flow-cmp-col miss">
+          <div class="flow-cmp-title">Filter at index time</div>
+          <p style="font-size:12.5px;color:#999;line-height:1.6">Each document stores a denormalized <code>visible_to</code> list computed when it's indexed. Queries filter against it directly — fast, no extra hop.</p>
+          <p style="font-size:12.5px;color:var(--amber);line-height:1.6"><strong>Risk:</strong> if a user's audience shrinks (friend removed, post switched to friends-only) after indexing, the stale <code>visible_to</code> keeps showing it to someone who should no longer see it — a real privacy leak until the next re-index event fires.</p>
+        </div>
+        <div class="flow-cmp-col hit">
+          <div class="flow-cmp-title">Filter at query time</div>
+          <p style="font-size:12.5px;color:#999;line-height:1.6">Every search resolves the viewer's live audience (friend/block sets) and intersects it with matched posts at query time — always reflects the current ACL state.</p>
+          <p style="font-size:12.5px;color:var(--accent);line-height:1.6"><strong>Cost:</strong> an extra Redis (or graph-DB) round trip per query, and the intersection itself adds compute versus a pre-baked field. This is the safer default for a "zero leaks" requirement.</p>
+        </div>
+      </div>
+      <div class="callout info">This system uses both: <code>visible_to</code> is denormalized into the index as a coarse pre-filter (cuts the candidate set fast), then Privacy Filter re-validates against the live friend/block cache at query time before results are returned — belt and suspenders, because a false positive here is worse than a false negative.</div>
+
+      <table class="grid-table">
+        <thead><tr><th>Scenario</th><th>User impact</th><th>Detection signal</th><th>Mitigation</th></tr></thead>
+        <tbody>
+          <tr><td>Post visibility changed after indexing</td><td class="impact">Stale visible_to briefly over- or under-shares a post</td><td class="detect">Re-index event lag &gt;10s on visibility-changed topic</td><td class="fix">Query-time Privacy Filter re-validates every result before returning it</td></tr>
+          <tr><td>Elasticsearch cluster degraded</td><td class="impact">Search unavailable or slow</td><td class="detect">Query latency p99 spike, node health check failures</td><td class="fix">Serve from replica shards; circuit-break to a "search temporarily unavailable" state rather than skip the privacy filter</td></tr>
+          <tr><td>Kafka consumer lag builds up</td><td class="impact">New posts take longer than 10s to become searchable</td><td class="detect">Consumer group lag alert on the post-events topic</td><td class="fix">Auto-scale indexing worker pool; add topic partitions</td></tr>
+          <tr><td>Redis privacy cache miss storm</td><td class="impact">Search latency spikes as filter falls back to source</td><td class="detect">Cache hit rate drop below 80%</td><td class="fix">Fall back to the social graph service with a circuit breaker; never skip the check itself</td></tr>
+          <tr><td>Delete event lost or delayed</td><td class="impact">Deleted post still appears in search results</td><td class="detect">Reconciliation job diff between Postgres and ES doc counts</td><td class="fix">Nightly reconciliation sweep tombstones orphaned index entries</td></tr>
+        </tbody>
+      </table>
+    </section>
+
+    <section id="interview-moves">
+      <h2>Interview moves</h2>
+      <ul class="moves-list">
+        <li><span class="move-num">01</span><div><strong>"The hard part here isn't full-text search, it's making sure a search result never leaks a post the viewer isn't allowed to see"</strong> — names the actual constraint being tested before diving into architecture</div></li>
+        <li><span class="move-num">02</span><div><strong>"I'll decouple indexing from post creation with Kafka so a slow indexer never adds latency to posting"</strong> — shows the instinct to isolate the write path from a downstream async system</div></li>
+        <li><span class="move-num">03</span><div><strong>"I'd rather show fewer results than leak one — so query-time privacy re-validation is non-negotiable even though it costs latency"</strong> — states a concrete, defensible priority ordering unprompted</div></li>
+        <li><span class="move-num">04</span><div><strong>"Denormalizing the audience into the index gives us a cheap pre-filter, but I still re-check against the live friend/block cache at query time"</strong> — demonstrates the index-time vs query-time tradeoff isn't binary</div></li>
+        <li><span class="move-num">05</span><div><strong>"A multi-term query is just a set intersection of posting lists — that's why the inverted index scales to billions of documents"</strong> — grounds the abstract search claim in a concrete mechanism</div></li>
+        <li><span class="move-num">06</span><div><strong>"If a post's visibility changes from public to friends-only, that has to re-enter the same indexing pipeline as a brand-new post"</strong> — catches a subtlety most candidates miss: ACL changes, not just creates/deletes, must trigger re-indexing</div></li>
+      </ul>
+    </section>
+
+    <section id="follow-ups">
+      <h2>Follow-up questions</h2>
+      <div class="qa-block">
+        <div class="qa-q">How do you rank results when many posts match the same terms?</div>
+        <div class="qa-a">BM25 (term frequency weighted by inverse document frequency) as the base signal, with recency and engagement as secondary boosts — Elasticsearch supports this natively.</div>
+      </div>
+      <div class="qa-block">
+        <div class="qa-q">What happens if the indexing worker crashes mid-batch?</div>
+        <div class="qa-a">Kafka consumer offsets aren't committed until the ES write succeeds, so the event is simply replayed on restart — indexing is idempotent by post_id.</div>
+      </div>
+      <div class="qa-block">
+        <div class="qa-q">How do you handle a user who blocks someone after their posts are already indexed?</div>
+        <div class="qa-a">The block event invalidates that pair in the Privacy Filter cache immediately; the denormalized visible_to field catches up on the next re-index sweep.</div>
+      </div>
+      <div class="qa-block">
+        <div class="qa-q">Why not just filter privacy in the Post Service before results are ever sent to Elasticsearch?</div>
+        <div class="qa-a">Filtering must happen per-viewer at query time, not per-post at write time — the same post is visible to different audiences depending on who's searching.</div>
+      </div>
+      <div class="qa-block">
+        <div class="qa-q">How would you support typo tolerance or fuzzy matching?</div>
+        <div class="qa-a">Elasticsearch's built-in fuzzy query (edit-distance matching) on the analyzed field — costs extra query latency, so it's usually a fallback when exact-match returns few results.</div>
+      </div>
+      <div class="qa-block">
+        <div class="qa-q">How do you scale this to 10x the document volume?</div>
+        <div class="qa-a">Increase Elasticsearch primary shard count (requires reindexing), add more Kafka partitions and indexing workers in lockstep, and push hot-query caching harder at the Search API layer.</div>
+      </div>
+    </section>
+
+  </main>
+  <script src="../../assets/nav.js"></script>
+</body>
+</html>

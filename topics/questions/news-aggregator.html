@@ -1,0 +1,482 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Design a News Aggregator — SD Prep</title>
+  <link rel="stylesheet" href="../../assets/style.css">
+</head>
+<body>
+  <aside id="sidebar"></aside>
+  <main>
+
+    <header class="page-head">
+      <div class="pill">Questions</div>
+      <h1>Design a News Aggregator</h1>
+      <p class="sub">Tests whether you can turn crawl scheduling and cross-source dedup into a first-class design problem instead of hand-waving "we scrape the internet."</p>
+      <div class="meta-row">
+        <span class="badge green">30-40 min interview</span>
+        <span class="badge blue">Medium</span>
+      </div>
+    </header>
+
+    <div class="flash-card">
+      <div class="flash-label">Say this in the first 2 minutes</div>
+      <ul>
+        <li>The core insight: crawl scheduling and dedup are the hard problems here, not storage — any store handles the write volume fine</li>
+        <li>Key scale number to anchor on: ~150k source feeds, ~40M new articles/day, but re-crawl checks dwarf that at ~2B fetches/day</li>
+        <li>Primary tradeoff being probed: freshness (crawl aggressively) vs crawl cost (bandwidth, politeness, source rate limits)</li>
+        <li>Component most candidates forget: a URL frontier that prioritizes re-crawls by source velocity, not a flat round-robin queue</li>
+        <li>Failure mode most candidates skip: a Bloom filter false positive silently drops a real article — must state the accepted error rate out loud</li>
+      </ul>
+    </div>
+
+    <section id="step1-requirements">
+      <div class="step-pill">Step 1 of 6 — Requirements</div>
+      <h2>Requirements</h2>
+
+      <div class="goal-arc-wrap">
+        <div class="goal-arc-row functional">
+          <div class="goal-arc-seg">1</div><div class="goal-arc-seg">2</div><div class="goal-arc-seg">3</div><div class="goal-arc-seg">4</div><div class="goal-arc-seg">5</div><div class="goal-arc-seg inactive">6</div>
+        </div>
+        <div class="goal-arc-label"><span>Arc 1 (steps 1-5) — <strong>Satisfy Functional Requirements</strong></span></div>
+        <div class="goal-arc-row nonfunctional" style="margin-top:8px">
+          <div class="goal-arc-seg">1</div><div class="goal-arc-seg">2</div><div class="goal-arc-seg">3</div><div class="goal-arc-seg">4</div><div class="goal-arc-seg">5</div><div class="goal-arc-seg">6</div>
+        </div>
+        <div class="goal-arc-label"><span>Arc 2 (all 6 steps) — <strong>Satisfy Non-Functional Requirements</strong></span></div>
+      </div>
+
+      <div class="compare-grid">
+        <div class="compare-card good">
+          <div class="compare-label">Functional</div>
+          <ul>
+            <li>Crawl a registered set of source feeds (RSS/Atom + HTML fallback) on a schedule</li>
+            <li>Deduplicate the same story reported by multiple outlets into one cluster</li>
+            <li>Rank and serve a personalized feed of recent, relevant articles</li>
+            <li>Support keyword/topic search over the last 30 days of articles</li>
+          </ul>
+        </div>
+        <div class="compare-card bad">
+          <div class="compare-label">Non-Functional</div>
+          <ul>
+            <li>150k source feeds crawled, ~40M new articles/day ingested</li>
+            <li>Breaking news surfaced in the feed within 2-5 min of publish</li>
+            <li>Feed read latency &lt;200ms p99; crawl pipeline can lag by minutes, never blocks reads</li>
+            <li>Eventual consistency on ranking/dedup; strong consistency not required anywhere</li>
+          </ul>
+        </div>
+      </div>
+
+      <div class="callout warn"><strong>What NOT to build:</strong> a full-text summarization/LLM pipeline, comment threads or social features, or a generic web-scale crawler that indexes the entire internet. This is a bounded set of known news sources, crawled, deduped, ranked, and served.</div>
+
+      <div class="stat-grid">
+        <div class="stat-card"><div class="stat-val">150k</div><div class="stat-label">registered source feeds</div></div>
+        <div class="stat-card"><div class="stat-val">~40M/day</div><div class="stat-label">new articles ingested</div></div>
+        <div class="stat-card"><div class="stat-val">~2B/day</div><div class="stat-label">re-crawl fetch checks</div></div>
+        <div class="stat-card"><div class="stat-val">~80k/s</div><div class="stat-label">feed read QPS (peak)</div></div>
+      </div>
+    </section>
+
+    <section id="step2-entities">
+      <div class="step-pill">Step 2 of 6 — Core Entities</div>
+      <h2>Core entities</h2>
+      <p style="font-size:13px;color:#999;margin-bottom:0.75rem">Four entities split by access pattern: raw content is huge and immutable, metadata is queried constantly, clusters group duplicates, and the frontier drives crawl order.</p>
+
+      <div class="entity-grid">
+        <div class="entity-box">
+          <div class="entity-head"><span class="entity-name">Article</span><span class="entity-store pg">Postgres</span></div>
+          <div class="entity-fields">
+            <div class="entity-field"><span class="fname pk">id</span><span class="ftype">BIGINT (Snowflake)</span></div>
+            <div class="entity-field"><span class="fname idx">url_hash</span><span class="ftype">CHAR(64) UNIQUE — SHA-256(canonical_url)</span></div>
+            <div class="entity-field"><span class="fname">source_id</span><span class="ftype">BIGINT → Source.id</span></div>
+            <div class="entity-field"><span class="fname">title, published_at</span><span class="ftype">TEXT, TIMESTAMP</span></div>
+            <div class="entity-field"><span class="fname idx">cluster_id</span><span class="ftype">BIGINT, nullable</span></div>
+            <div class="entity-field"><span class="fname">content_key</span><span class="ftype">VARCHAR(200) → S3 object</span></div>
+          </div>
+          <div class="entity-why">Because metadata needs indexed point lookups and range scans by time/source, while the actual HTML/text body is large and rarely touched after indexing. Tradeoff: every read of full content is a second hop to S3.</div>
+        </div>
+
+        <div class="entity-box">
+          <div class="entity-head"><span class="entity-name">RawContent</span><span class="entity-store s3">S3</span></div>
+          <div class="entity-fields">
+            <div class="entity-field"><span class="fname pk">content_key</span><span class="ftype">S3 object key</span></div>
+            <div class="entity-field"><span class="fname">raw_html</span><span class="ftype">bytes, gzip-compressed</span></div>
+            <div class="entity-field"><span class="fname">extracted_text</span><span class="ftype">bytes, gzip-compressed</span></div>
+          </div>
+          <div class="entity-why">Because 40M articles/day at ~50KB avg raw HTML is ~2TB/day — cheap blob storage with no per-object query needs beats a row-oriented DB by an order of magnitude on cost. Tradeoff: no server-side filtering, must fetch whole object.</div>
+        </div>
+
+        <div class="entity-box">
+          <div class="entity-head"><span class="entity-name">Source</span><span class="entity-store pg">Postgres</span></div>
+          <div class="entity-fields">
+            <div class="entity-field"><span class="fname pk">id</span><span class="ftype">BIGINT</span></div>
+            <div class="entity-field"><span class="fname">feed_url, domain</span><span class="ftype">TEXT</span></div>
+            <div class="entity-field"><span class="fname">avg_publish_rate</span><span class="ftype">FLOAT — articles/hour, rolling</span></div>
+            <div class="entity-field"><span class="fname">last_crawled_at</span><span class="ftype">TIMESTAMP</span></div>
+          </div>
+          <div class="entity-why">Because it's a small (150k row), low-write reference table that the frontier's priority calculation reads on every scheduling pass. Tradeoff: none significant at this size — a single Postgres instance handles it easily.</div>
+        </div>
+
+        <div class="entity-box">
+          <div class="entity-head"><span class="entity-name">SeenUrl</span><span class="entity-store redis">Redis (Bloom)</span></div>
+          <div class="entity-fields">
+            <div class="entity-field"><span class="fname">bloom_filter</span><span class="ftype">RedisBloom, ~2B capacity</span></div>
+            <div class="entity-field"><span class="fname">fp_rate</span><span class="ftype">0.1% target</span></div>
+          </div>
+          <div class="entity-why">Because checking "have we seen this URL before" needs to happen ~2B times/day at sub-millisecond latency — a probabilistic set trades a small false-positive rate for a 1000x memory reduction over a real set. Tradeoff: can wrongly skip a genuinely new article.</div>
+        </div>
+      </div>
+
+      <div class="callout info">Primary key: <code>Article.id</code> (Snowflake). Critical index: <code>UNIQUE INDEX on url_hash</code> plus a composite index on <code>(source_id, published_at)</code> — the crawl-dedup check and the feed-ranking scan both depend on these never falling back to a table scan.</div>
+    </section>
+
+    <section id="step3-api">
+      <div class="step-pill">Step 3 of 6 — API / Interface</div>
+      <h2>API design</h2>
+      <p style="font-size:13px;color:#999;margin-bottom:0.75rem">Four endpoints — feed, article detail, search, and source registration. All request-response; crawling itself is internal, not client-facing.</p>
+
+      <div class="api-card">
+        <div class="api-line"><span class="api-method get">GET</span><span class="api-path">/api/v1/feed</span><span class="api-auth">Auth: required</span></div>
+        <div class="api-io">
+          <div class="api-io-block"><div class="api-io-label">Request</div><div class="api-io-body">{ cursor?, topics[]?, limit=20 }</div></div>
+          <div class="api-io-block"><div class="api-io-label">Response</div><div class="api-io-body">{ articles: [{id, title, source, cluster_size, published_at}], next_cursor }</div></div>
+        </div>
+      </div>
+
+      <div class="api-card">
+        <div class="api-line"><span class="api-method get">GET</span><span class="api-path">/api/v1/articles/{id}</span><span class="api-auth">Auth: optional</span></div>
+        <div class="api-io">
+          <div class="api-io-block"><div class="api-io-label">Request</div><div class="api-io-body">path param only</div></div>
+          <div class="api-io-block"><div class="api-io-label">Response</div><div class="api-io-body">{ title, body, source, related_cluster_articles[] }</div></div>
+        </div>
+      </div>
+
+      <div class="api-card">
+        <div class="api-line"><span class="api-method get">GET</span><span class="api-path">/api/v1/search</span><span class="api-auth">Auth: optional</span></div>
+        <div class="api-io">
+          <div class="api-io-block"><div class="api-io-label">Request</div><div class="api-io-body">{ q, from?, to?, limit=20 }</div></div>
+          <div class="api-io-block"><div class="api-io-label">Response</div><div class="api-io-body">{ results: [{id, title, snippet, score}] } — from Elasticsearch</div></div>
+        </div>
+      </div>
+
+      <div class="api-card">
+        <div class="api-line"><span class="api-method post">POST</span><span class="api-path">/api/v1/sources</span><span class="api-auth">Auth: required (admin)</span></div>
+        <div class="api-io">
+          <div class="api-io-block"><div class="api-io-label">Request</div><div class="api-io-body">{ feed_url, initial_priority? }</div></div>
+          <div class="api-io-block"><div class="api-io-label">Response</div><div class="api-io-body">{ source_id, status: "pending_first_crawl" }</div></div>
+        </div>
+      </div>
+    </section>
+
+    <section id="step4-dataflow">
+      <div class="step-pill">Step 4 of 6 — Data Flow</div>
+      <h2>Data flow</h2>
+      <p style="font-size:13px;color:#999;margin-bottom:0.75rem">Write path (blue) is the crawl pipeline — frontier, fetch, dedup, store. Read path (mint) is the feed request, fully decoupled from crawling.</p>
+
+      <div class="diagram-wrap" data-paths='{"read":{"boxes":["r-client","r-svc","r-cache","r-db"],"arrows":["r1","r2","r3"]},"write":{"boxes":["w-frontier","w-crawler","w-bloom","w-store"],"arrows":["w1","w2","w3"]}}'>
+        <svg viewBox="0 0 740 220" xmlns="http://www.w3.org/2000/svg">
+          <defs>
+            <marker id="naR" markerWidth="8" markerHeight="8" refX="6" refY="3" orient="auto"><path d="M0,0 L6,3 L0,6 Z" fill="var(--accent)"/></marker>
+            <marker id="naW" markerWidth="8" markerHeight="8" refX="6" refY="3" orient="auto"><path d="M0,0 L6,3 L0,6 Z" fill="var(--blue)"/></marker>
+          </defs>
+
+          <text class="diag-sublabel" x="150" y="14" style="font-size:10px;fill:var(--accent)">READ PATH — fetch feed</text>
+          <circle class="diag-dot diag-flow-dot" r="3.5" style="offset-path: path('M10,24 L120,24 L120,24 L280,24 L280,24 L440,24')"></circle>
+          <g data-target="step6-deepdive-ranking" data-id="r-client" data-tip="App or web client requesting the home feed"><rect class="diag-box role-client" x="10" y="24" width="110" height="46"/><text class="diag-label" x="65" y="52" style="font-size:11px">Client</text></g>
+          <path class="diag-arrow-path" data-id="r1" d="M120,47 L155,47" marker-end="url(#naR)"/>
+          <g data-target="step6-deepdive-ranking" data-id="r-svc" data-tip="Applies personalization, fans out to cache/index"><rect class="diag-box" x="155" y="24" width="125" height="46"/><text class="diag-label" x="217" y="47" style="font-size:11px">Feed Svc</text><text class="diag-sublabel" x="217" y="62" style="font-size:8.5px">stateless</text></g>
+          <path class="diag-arrow-path" data-id="r2" d="M280,47 L315,47" marker-end="url(#naR)"/>
+          <g data-target="step6-deepdive-ranking" data-id="r-cache" data-tip="Pre-ranked top-N articles per topic, refreshed every ~60s"><rect class="diag-box role-cache" x="315" y="24" width="125" height="46"/><text class="diag-label" x="377" y="52" style="font-size:11px">Redis (ranked)</text></g>
+          <path class="diag-arrow-path" data-id="r3" d="M440,47 L475,47" marker-end="url(#naR)"/>
+          <text class="diag-sublabel" x="457" y="37" style="font-size:9px">miss</text>
+          <g data-target="step2-entities" data-id="r-db" data-tip="Fallback for cold topics or cursor pagination past the cached window"><rect class="diag-box role-db" x="475" y="24" width="120" height="46"/><text class="diag-label" x="535" y="47" style="font-size:11px">Postgres</text></g>
+
+          <text class="diag-sublabel" x="150" y="105" style="font-size:10px;fill:var(--blue)">WRITE PATH — crawl pipeline</text>
+          <g data-target="step6-deepdive-frontier" data-id="w-frontier" data-tip="Priority queue of (source, due_time) picks what to crawl next"><rect class="diag-box role-async" x="10" y="115" width="120" height="46"/><text class="diag-label" x="70" y="138" style="font-size:11px">URL Frontier</text><text class="diag-sublabel" x="70" y="153" style="font-size:8.5px">priority queue</text></g>
+          <path class="diag-arrow-path" data-id="w1" d="M130,138 L165,138" marker-end="url(#naW)"/>
+          <g data-target="step2-entities" data-id="w-crawler" data-tip="Fetches feed/HTML, respects robots.txt and rate limits"><rect class="diag-box" x="165" y="115" width="120" height="46"/><text class="diag-label" x="225" y="143" style="font-size:11px">Crawler Fleet</text></g>
+          <path class="diag-arrow-path" data-id="w2" d="M285,138 L320,138" marker-end="url(#naW)"/>
+          <g data-target="step6-deepdive-bloom" data-id="w-bloom" data-tip="Checks url_hash against Bloom filter before doing any real work"><rect class="diag-box role-cache" x="320" y="115" width="120" height="46"/><text class="diag-label" x="380" y="138" style="font-size:11px">Bloom Filter</text><text class="diag-sublabel" x="380" y="153" style="font-size:8.5px">dedup check</text></g>
+          <path class="diag-arrow-path" data-id="w3" d="M440,138 L475,138" marker-end="url(#naW)"/>
+          <g data-target="step2-entities" data-id="w-store" data-tip="Raw HTML to S3, metadata row to Postgres, indexed into Elasticsearch"><rect class="diag-box role-db" x="475" y="115" width="120" height="46"/><text class="diag-label" x="535" y="138" style="font-size:11px">S3 + Postgres</text></g>
+
+          <text class="diag-sublabel" x="150" y="188" style="font-size:10px;fill:var(--amber)">ASYNC PATH — indexing + clustering, never blocks crawl or read</text>
+          <g data-target="step6-deepdive-ranking" data-id="kafka" data-tip="New-article events fan out to the indexer and the dedup clustering worker"><rect class="diag-box role-async" x="10" y="192" width="150" height="20"/><text class="diag-label" x="85" y="205" style="font-size:9.5px">Kafka → Indexer + Clusterer</text></g>
+        </svg>
+        <div class="diag-legend">
+          <div class="diag-legend-item"><span class="diag-legend-dot role-cache"></span>Read path — pre-ranked cache first</div>
+          <div class="diag-legend-item"><span class="diag-legend-dot role-client"></span>Write path — frontier drives crawl order</div>
+          <div class="diag-legend-item"><span class="diag-legend-dot role-async"></span>Indexing/clustering — fully decoupled</div>
+        </div>
+      </div>
+
+      <ol class="flow-steps-list">
+        <li><span>Frontier pops the next due source</span> — priority computed from publish velocity and staleness</li>
+        <li><span>Crawler fetches feed/page</span> — respects robots.txt, per-domain rate limits, conditional GET (ETag)</li>
+        <li><span>Bloom filter check on url_hash</span> — likely-duplicate URLs are dropped before any parsing happens</li>
+        <li><span>New article persisted</span> — raw HTML to S3, metadata row to Postgres, event fired to Kafka</li>
+        <li><span>Async consumers index and cluster</span> — Elasticsearch gets the text, clusterer groups same-story duplicates</li>
+      </ol>
+    </section>
+
+    <section id="step5-hld">
+      <div class="step-pill">Step 5 of 6 — High-Level Design</div>
+      <h2>High-level design</h2>
+      <p style="font-size:13px;color:#999;margin-bottom:0.75rem">Full system: crawl, dedup/index, ranking, and read paths together with every supporting component.</p>
+
+      <div class="diagram-wrap">
+        <svg viewBox="0 0 780 300" xmlns="http://www.w3.org/2000/svg">
+          <defs><marker id="naHldArrow" markerWidth="8" markerHeight="8" refX="6" refY="3" orient="auto"><path d="M0,0 L6,3 L0,6 Z" fill="var(--border2)"/></marker></defs>
+
+          <g data-tip="Scheduling loop picks sources by priority"><rect class="diag-box role-async" x="10" y="20" width="120" height="46"/><text class="diag-label" x="70" y="43" style="font-size:11px">URL Frontier</text><text class="diag-sublabel" x="70" y="58" style="font-size:8.5px">priority queue</text></g>
+          <path class="diag-arrow-path" d="M130,43 L165,43" marker-end="url(#naHldArrow)"/>
+          <g data-tip="Horizontally scaled fetch workers"><rect class="diag-box" x="165" y="20" width="120" height="46"/><text class="diag-label" x="225" y="47" style="font-size:11px">Crawler Fleet</text></g>
+          <path class="diag-arrow-path" d="M285,43 L320,43" marker-end="url(#naHldArrow)"/>
+          <g data-tip="~2B checks/day, sub-ms"><rect class="diag-box role-cache" x="320" y="20" width="120" height="46"/><text class="diag-label" x="380" y="43" style="font-size:11px">Bloom Filter</text><text class="diag-sublabel" x="380" y="58" style="font-size:8.5px">Redis</text></g>
+          <path class="diag-arrow-path" d="M440,43 L475,43" marker-end="url(#naHldArrow)"/>
+          <g data-tip="Raw HTML, ~2TB/day"><rect class="diag-box role-db" x="475" y="20" width="100" height="46"/><text class="diag-label" x="525" y="47" style="font-size:11px">S3</text></g>
+          <path class="diag-arrow-path" d="M525,66 L525,95" marker-end="url(#naHldArrow)"/>
+          <g data-tip="Article metadata, source registry"><rect class="diag-box role-db" x="465" y="95" width="120" height="46"/><text class="diag-label" x="525" y="123" style="font-size:11px">Postgres</text></g>
+
+          <path class="diag-arrow-path" d="M285,66 L285,95" marker-end="url(#naHldArrow)" stroke-dasharray="3 3"/>
+          <g data-tip="Buffers new-article events for async fanout"><rect class="diag-box role-async" x="220" y="95" width="130" height="46"/><text class="diag-label" x="285" y="123" style="font-size:11px">Kafka</text></g>
+
+          <path class="diag-arrow-path" d="M285,141 L160,141 L160,165" marker-end="url(#naHldArrow)"/>
+          <g data-tip="Full-text index for search"><rect class="diag-box role-db" x="95" y="165" width="130" height="46"/><text class="diag-label" x="160" y="193" style="font-size:11px">Elasticsearch</text></g>
+
+          <path class="diag-arrow-path" d="M285,141 L420,141 L420,165" marker-end="url(#naHldArrow)"/>
+          <g data-tip="Groups same-story articles via title/embedding similarity"><rect class="diag-box role-async" x="355" y="165" width="130" height="46"/><text class="diag-label" x="420" y="188" style="font-size:11px">Clusterer</text><text class="diag-sublabel" x="420" y="203" style="font-size:8.5px">worker pool</text></g>
+
+          <path class="diag-arrow-path" d="M485,188 L600,188 L600,165" marker-end="url(#naHldArrow)"/>
+          <g data-tip="Scores freshness, source trust, engagement signals"><rect class="diag-box role-async" x="555" y="120" width="140" height="46"/><text class="diag-label" x="625" y="143" style="font-size:11px">Ranker</text><text class="diag-sublabel" x="625" y="158" style="font-size:8.5px">writes pre-ranked lists</text></g>
+
+          <path class="diag-arrow-path" d="M625,120 L625,95" marker-end="url(#naHldArrow)"/>
+          <g data-tip="Pre-ranked top-N per topic, ~60s refresh"><rect class="diag-box role-cache" x="555" y="49" width="140" height="46"/><text class="diag-label" x="625" y="77" style="font-size:11px">Redis (ranked)</text></g>
+
+          <path class="diag-arrow-path" d="M555,72 L440,72" marker-end="url(#naHldArrow)"/>
+          <g data-tip="Stateless, serves feed/article/search requests"><rect class="diag-box" x="300" y="49" width="140" height="46"/><text class="diag-label" x="370" y="77" style="font-size:11px">Feed / API Svc</text></g>
+
+          <path class="diag-arrow-path" d="M300,72 L165,72" marker-end="url(#naHldArrow)"/>
+          <g data-tip="Web and mobile clients"><rect class="diag-box role-client" x="20" y="49" width="140" height="46"/><text class="diag-label" x="90" y="77" style="font-size:11px">Clients</text></g>
+        </svg>
+        <div class="diag-legend">
+          <div class="diag-legend-item"><span class="diag-legend-dot role-client"></span>Clients</div>
+          <div class="diag-legend-item"><span class="diag-legend-dot role-cache"></span>Bloom filter + ranked-feed cache</div>
+          <div class="diag-legend-item"><span class="diag-legend-dot role-db"></span>S3 + Postgres + Elasticsearch</div>
+          <div class="diag-legend-item"><span class="diag-legend-dot role-async"></span>Frontier, Kafka, Clusterer, Ranker</div>
+        </div>
+      </div>
+
+      <table class="def-table">
+        <thead><tr><th>Component</th><th>Role</th><th>Tech + why</th></tr></thead>
+        <tbody>
+          <tr><td>URL Frontier</td><td>Decides what to crawl next and when</td><td>Redis sorted set keyed by due_time — because a priority pop needs to be O(log n) at 2B ops/day; tradeoff is it's an extra stateful component to keep warm.</td></tr>
+          <tr><td>Bloom Filter</td><td>Fast reject of already-seen URLs</td><td>RedisBloom — because it does ~2B membership checks/day in under 1ms each at a fraction of the memory of a real set; tradeoff is a tunable false-positive rate that can silently drop real articles.</td></tr>
+          <tr><td>S3</td><td>Stores raw HTML and extracted text</td><td>Object storage — because ~2TB/day of write-once, rarely-read blobs is exactly what object storage is priced and built for; tradeoff is no query capability, metadata must live elsewhere.</td></tr>
+          <tr><td>Elasticsearch</td><td>Full-text search over recent articles</td><td>Inverted index — because keyword search over tens of millions of documents needs relevance scoring a relational DB doesn't do well; tradeoff is eventual consistency and added operational surface.</td></tr>
+          <tr><td>Clusterer</td><td>Groups duplicate stories across sources</td><td>Worker pool doing title-shingle + embedding similarity — because syntactic dedup alone misses reworded stories; tradeoff is added compute cost per article.</td></tr>
+          <tr><td>Ranker</td><td>Scores and pre-sorts articles per topic</td><td>Batch job writing to Redis every ~60s — because computing personalized rank at request time is too slow at 80k QPS; tradeoff is up to 60s staleness on ranking signals.</td></tr>
+        </tbody>
+      </table>
+
+      <h3 style="font-size:13px;color:var(--text);margin:1.25rem 0 0.6rem;font-weight:600">Scaling levers — cheapest to most complex</h3>
+      <ol class="levers-list">
+        <li><strong>Add Redis + Postgres read replicas</strong> for feed reads<span class="cost">near-zero complexity</span></li>
+        <li><strong>Add more crawler fleet workers</strong> horizontally, bounded by per-domain politeness limits<span class="cost">low complexity</span></li>
+        <li><strong>Widen Kafka partitions</strong> for indexer/clusterer throughput<span class="cost">medium complexity</span></li>
+        <li><strong>Shard Elasticsearch by time range</strong> so old indices can be dropped/archived cheaply<span class="cost">medium complexity</span></li>
+        <li><strong>Move clustering to streaming embeddings</strong> instead of batch nearest-neighbor<span class="cost">high complexity — last resort</span></li>
+      </ol>
+
+      <table class="grid-table">
+        <thead><tr><th>Bottleneck</th><th>Triggers at</th><th>Exact fix</th></tr></thead>
+        <tbody>
+          <tr><td>Frontier starvation</td><td>High-velocity sources crowd out slow ones</td><td class="fix">Cap max concurrent fetches per source; age-boost long-waiting sources</td></tr>
+          <tr><td>Bloom filter saturation</td><td>False-positive rate creeps above 0.1% target</td><td class="fix">Resize filter or rotate to a fresh filter with a rolling TTL window</td></tr>
+          <tr><td>Ranker lag</td><td>Pre-ranked cache staler than 5 min during breaking news</td><td class="fix">Shorten the ranker batch interval for high-velocity topics only</td></tr>
+        </tbody>
+      </table>
+
+      <div class="dial-wrap">
+        <div class="dial-title">Crawl strategy: freshness vs crawl cost</div>
+        <div class="dial-track"><div class="dial-marker" style="left:65%"></div></div>
+        <div class="dial-labels"><span class="end-left">Cheap, infrequent</span><span class="end-right">Aggressive, real-time</span></div>
+      </div>
+      <div class="dial-wrap">
+        <div class="dial-title">Dedup precision vs recall</div>
+        <div class="dial-track"><div class="dial-marker" style="left:35%"></div></div>
+        <div class="dial-labels"><span class="end-left">Aggressive merge</span><span class="end-right">Conservative, allow near-dupes</span></div>
+      </div>
+    </section>
+
+    <section id="step6-deepdive-frontier">
+      <div class="step-pill">Step 6 of 6 — Deep Dives</div>
+      <h2>Deep dive: URL frontier priority queue</h2>
+      <p style="font-size:13px;color:#999;margin-bottom:0.75rem">150k sources can't be polled on a flat round-robin — a wire feed publishing every 30s and a monthly blog need wildly different crawl cadences.</p>
+
+      <ol class="flow-steps-list">
+        <li><span>Track rolling publish rate per source</span> — exponential moving average of articles/hour, updated after every crawl</li>
+        <li><span>Compute next due_time</span> — <code>due_time = now + clamp(3600 / avg_publish_rate, 30s, 6h)</code>, so a high-velocity wire gets checked every 30s and a quiet blog every few hours</li>
+        <li><span>Push (source_id, due_time) into a Redis sorted set</span> — score is due_time, giving an O(log n) priority pop</li>
+        <li><span>Scheduler pops due sources in batches</span> — dispatches to the crawler fleet respecting a per-domain concurrency cap</li>
+        <li><span>Re-score after crawl</span> — a source that just published gets re-prioritized; a source with zero new articles across 5 checks backs off further</li>
+      </ol>
+
+      <div class="callout warn">Politeness beats greed: a source with no rate cap will get hammered by an eager frontier and rate-limit or block the crawler entirely. Every source carries a max-concurrency and min-interval floor that the priority score can never override.</div>
+    </section>
+
+    <section id="step6-deepdive-bloom">
+      <h2>Deep dive: Bloom filter dedup — the false-positive math</h2>
+      <p style="font-size:13px;color:#999;margin-bottom:0.75rem">A Bloom filter trades a small, tunable false-positive rate for a massive memory win over storing every seen URL as a real set.</p>
+
+      <div class="stat-grid">
+        <div class="stat-card"><div class="stat-val">2B</div><div class="stat-label">expected inserted URLs (n)</div></div>
+        <div class="stat-card"><div class="stat-val">~34.2 Gb</div><div class="stat-label">bit array size (m) for target FP rate</div></div>
+        <div class="stat-card"><div class="stat-val">7</div><div class="stat-label">optimal hash functions (k)</div></div>
+        <div class="stat-card"><div class="stat-val">0.1%</div><div class="stat-label">target false-positive rate (p)</div></div>
+      </div>
+
+      <p style="font-size:13px;color:#ccc;margin:0.75rem 0">Sized from the standard formulas <code>m = -(n · ln p) / (ln 2)²</code> and <code>k = (m/n) · ln 2</code>. At n=2B and p=0.1%, that's <code>m ≈ 2.87×10¹⁰ bits ≈ 3.4GB</code> — versus roughly 128GB+ to store 2B full SHA-256 hashes (32 bytes each) in a real set. A ~40x memory reduction for a 1-in-1000 chance of wrongly treating a new article as a duplicate.</p>
+
+      <div class="callout warn">A false positive here is silent by design — the article just never gets crawled, with no error and no retry. Mitigate by rotating the filter on a 30-day TTL window (old URLs age out, keeping n and thus m bounded) and by treating the Bloom check as advisory-only for high-priority sources, backed by a real url_hash lookup in Postgres before a final drop.</div>
+    </section>
+
+    <section id="step6-deepdive-ranking">
+      <h2>Deep dive: feed ranking pipeline — signals → score → rank</h2>
+      <p style="font-size:13px;color:#999;margin-bottom:0.75rem">Ranking runs as a batch job every ~60s per topic, not per-request — computing a personalized score for 80k QPS in real time doesn't fit the latency budget.</p>
+
+      <div class="flow-cmp-grid">
+        <div class="flow-cmp-col hit">
+          <div class="flow-cmp-title">✓ Pre-ranked cache hit — ~2-5ms</div>
+          <svg viewBox="0 0 320 130" xmlns="http://www.w3.org/2000/svg">
+            <defs><marker id="naHitArrow" markerWidth="8" markerHeight="8" refX="6" refY="3" orient="auto"><path d="M0,0 L6,3 L0,6 Z" fill="var(--accent)"/></marker></defs>
+            <path class="na-hit-arrow-1" d="M95,40 L195,40" stroke="var(--accent)" stroke-width="2" marker-end="url(#naHitArrow)" fill="none"/>
+            <path class="na-hit-arrow-2" d="M195,60 L95,60" stroke="var(--accent)" stroke-width="2" marker-end="url(#naHitArrow)" fill="none"/>
+            <circle class="diag-dot diag-flow-dot" r="3" style="offset-path: path('M95,40 L195,40')"></circle>
+            <rect class="diag-box role-client" x="10" y="20" width="85" height="50" data-tip="Feed Svc queries the ranked list for the requested topic"></rect>
+            <text class="diag-label" x="52" y="40">Feed Svc</text>
+            <text class="diag-sublabel" x="52" y="55">GET topic</text>
+            <g data-tip="Pre-sorted list, refreshed every ~60s">
+              <rect class="diag-box role-cache" x="195" y="15" width="115" height="60" rx="6"></rect>
+              <text class="diag-label" x="252" y="38" style="font-weight:600">Redis</text>
+              <text class="diag-sublabel" x="252" y="53">ranked list found</text>
+              <text class="diag-sublabel" x="252" y="65" style="fill:var(--accent)">~2-5ms</text>
+            </g>
+            <text x="145" y="100" text-anchor="middle" font-size="10" fill="var(--accent)" font-family="Inter,sans-serif">list exists → paginate and return</text>
+          </svg>
+          <button class="flow-cmp-replay" data-replay="na-hit-arrow-1,na-hit-arrow-2">▸ Replay</button>
+        </div>
+        <div class="flow-cmp-col miss">
+          <div class="flow-cmp-title">✗ Cold/niche topic miss — ~40-80ms</div>
+          <svg viewBox="0 0 420 130" xmlns="http://www.w3.org/2000/svg">
+            <defs><marker id="naMissArrow" markerWidth="8" markerHeight="8" refX="6" refY="3" orient="auto"><path d="M0,0 L6,3 L0,6 Z" fill="var(--amber)"/></marker></defs>
+            <path class="na-miss-arrow-1" d="M95,40 L195,40" stroke="var(--amber)" stroke-width="2" marker-end="url(#naMissArrow)" fill="none"/>
+            <path class="na-miss-arrow-2" d="M310,40 L405,40" stroke="var(--amber)" stroke-width="2" marker-end="url(#naMissArrow)" stroke-dasharray="4 3" fill="none"/>
+            <path class="na-miss-arrow-3" d="M405,60 L310,60" stroke="var(--amber)" stroke-width="2" marker-end="url(#naMissArrow)" stroke-dasharray="4 3" fill="none"/>
+            <path class="na-miss-arrow-4" d="M195,75 L95,75" stroke="var(--amber)" stroke-width="2" marker-end="url(#naMissArrow)" fill="none"/>
+            <circle class="diag-dot diag-flow-dot" r="3" style="offset-path: path('M95,40 L195,40')"></circle>
+            <rect class="diag-box role-client" x="10" y="20" width="85" height="55" data-tip="Feed Svc queries the ranked list for a rarely-requested topic"></rect>
+            <text class="diag-label" x="52" y="42">Feed Svc</text>
+            <text class="diag-sublabel" x="52" y="57">GET topic</text>
+            <g data-tip="No pre-ranked list exists yet for this niche topic">
+              <rect class="diag-box role-cache" x="195" y="15" width="115" height="65" rx="6"></rect>
+              <text class="diag-label" x="252" y="35" style="font-weight:600">Redis</text>
+              <text class="diag-sublabel" x="252" y="50">MISS</text>
+              <text class="diag-sublabel" x="252" y="62" style="fill:var(--amber)">fall through</text>
+            </g>
+            <g data-tip="Recency-only query, no personalized score">
+              <rect class="diag-box role-db" x="310" y="15" width="100" height="55" rx="6"></rect>
+              <text class="diag-label" x="360" y="38">Postgres</text>
+              <text class="diag-sublabel" x="360" y="53" style="fill:var(--amber)">~40-80ms</text>
+            </g>
+            <text x="160" y="105" text-anchor="middle" font-size="10" fill="var(--amber)" font-family="Inter,sans-serif">miss → recency-ordered fallback query</text>
+          </svg>
+          <button class="flow-cmp-replay" data-replay="na-miss-arrow-1,na-miss-arrow-2,na-miss-arrow-3,na-miss-arrow-4">▸ Replay</button>
+        </div>
+      </div>
+      <script>
+      (function(){
+        document.querySelectorAll('.flow-cmp-replay').forEach(function(btn){
+          if (btn.dataset.bound) return;
+          btn.dataset.bound = '1';
+          btn.addEventListener('click', function(){
+            var classes = btn.dataset.replay.split(',');
+            var svg = btn.previousElementSibling;
+            classes.forEach(function(cls){
+              var path = svg.querySelector('.' + cls);
+              if (!path) return;
+              var len = path.getTotalLength ? path.getTotalLength() : 100;
+              path.style.strokeDasharray = len;
+              path.style.strokeDashoffset = len;
+              path.getBoundingClientRect();
+              path.style.transition = 'stroke-dashoffset 0.5s ease';
+              path.style.strokeDashoffset = 0;
+            });
+          });
+        });
+      })();
+      </script>
+
+      <ol class="flow-steps-list">
+        <li><span>Collect signals per article</span> — recency, source trust score, cluster size (how many outlets ran the story), early click-through rate</li>
+        <li><span>Compute a weighted score</span> — <code>score = 0.4·recency + 0.25·source_trust + 0.2·cluster_size + 0.15·ctr</code>, weights tuned offline</li>
+        <li><span>Sort and truncate per topic</span> — top 500 articles/topic written to Redis, far more than any single page needs</li>
+        <li><span>Feed Svc paginates from the cached list</span> — cursor-based, no re-ranking per request</li>
+      </ol>
+
+      <table class="grid-table">
+        <thead><tr><th>Scenario</th><th>User impact</th><th>Detection signal</th><th>Mitigation</th></tr></thead>
+        <tbody>
+          <tr><td>Redis ranked-cache cluster down</td><td class="impact">Feed latency spikes 10-20x for all topics</td><td class="detect">Cache miss rate alert &gt;50%</td><td class="fix">Fallback to recency-ordered Postgres query; auto-scale replicas</td></tr>
+          <tr><td>Ranker batch job stalls</td><td class="impact">Feed goes stale, breaking news delayed</td><td class="detect">Ranked-list age &gt;5 min alert</td><td class="fix">Auto-restart job; page on-call if staleness exceeds 10 min</td></tr>
+          <tr><td>Bloom filter unavailable</td><td class="impact">Crawler can't dedup, risk of duplicate storms</td><td class="detect">Bloom check error rate spike</td><td class="fix">Crawler fails closed — pauses ingestion rather than writing unfiltered duplicates</td></tr>
+          <tr><td>Elasticsearch cluster degraded</td><td class="impact">Search unavailable; feed reads unaffected</td><td class="detect">Query error rate + cluster health yellow/red</td><td class="fix">Serve feed and article pages normally, disable search endpoint with a clear error</td></tr>
+          <tr><td>Clusterer falls behind</td><td class="impact">Duplicate stories briefly show as separate articles</td><td class="detect">Kafka consumer lag on clustering topic</td><td class="fix">Scale worker pool; dedup is corrective, not blocking, so late merges are acceptable</td></tr>
+        </tbody>
+      </table>
+    </section>
+
+    <section id="interview-moves">
+      <h2>Interview moves</h2>
+      <ul class="moves-list">
+        <li><span class="move-num">01</span><div><strong>"The hard part here isn't storage, it's crawl scheduling and dedup — any reasonable store handles 40M articles/day fine"</strong> — immediately signals you know where the real complexity lives</div></li>
+        <li><span class="move-num">02</span><div><strong>"I'd prioritize the crawl frontier by each source's publish velocity, not a flat round-robin — a wire feed and a monthly blog shouldn't be polled the same way"</strong> — shows scheduling insight most candidates skip entirely</div></li>
+        <li><span class="move-num">03</span><div><strong>"A Bloom filter trades a small false-positive rate for a huge memory win on the dedup check — at 2B checks/day that tradeoff is clearly worth it"</strong> — demonstrates comfort quantifying a probabilistic structure, not just naming it</div></li>
+        <li><span class="move-num">04</span><div><strong>"Ranking runs as a batch job every ~60 seconds, not per-request — computing a personalized score live for 80k QPS doesn't fit the latency budget"</strong> — ties an architectural choice directly to a stated number</div></li>
+        <li><span class="move-num">05</span><div><strong>"Dedup and clustering are corrective, not blocking — if the clusterer falls behind, duplicate articles just show up separately for a while, which is a fine degradation"</strong> — states a concrete, correct failure-mode priority unprompted</div></li>
+        <li><span class="move-num">06</span><div><strong>"Every source carries a hard politeness cap the frontier's priority score can never override, or an eager crawler gets us rate-limited or blocked entirely"</strong> — a subtlety that separates a working crawler from a naive one</div></li>
+      </ul>
+    </section>
+
+    <section id="follow-ups">
+      <h2>Follow-up questions</h2>
+      <div class="qa-block">
+        <div class="qa-q">How do you detect that two articles from different outlets are the same story?</div>
+        <div class="qa-a">Title/text shingling (n-gram overlap) catches near-identical wire copy cheaply; embedding similarity on the extracted text catches reworded coverage the shingling misses.</div>
+      </div>
+      <div class="qa-block">
+        <div class="qa-q">What happens if a source's RSS feed goes down but the site still publishes?</div>
+        <div class="qa-a">Frontier tracks consecutive feed failures and falls back to an HTML sitemap/homepage crawl after a threshold, flagging the source for manual review if that also fails.</div>
+      </div>
+      <div class="qa-block">
+        <div class="qa-q">How would you extend this to support 10x the source count?</div>
+        <div class="qa-a">Shard the frontier's sorted set by source_id hash, horizontally scale the crawler fleet, and shard Elasticsearch by time range so old indices can be archived off the hot cluster.</div>
+      </div>
+      <div class="qa-block">
+        <div class="qa-q">How do you avoid re-processing the same article if the crawler retries after a timeout?</div>
+        <div class="qa-a">The Bloom filter check happens before any parsing or storage write, and the final Postgres insert is guarded by the unique constraint on url_hash, making the write path idempotent.</div>
+      </div>
+      <div class="qa-block">
+        <div class="qa-q">Why not rank every feed request live instead of batching every 60 seconds?</div>
+        <div class="qa-a">Live ranking means recomputing scores across thousands of candidate articles per request at 80k QPS — the freshness lost by batching is a better tradeoff than that compute cost.</div>
+      </div>
+      <div class="qa-block">
+        <div class="qa-q">How do you handle a source that's flagged as low-quality or spammy?</div>
+        <div class="qa-a">Source.avg_publish_rate and a separate trust score feed directly into the ranker's weighting, and a trust score below threshold can drop a source from the frontier entirely.</div>
+      </div>
+    </section>
+
+  </main>
+  <script src="../../assets/nav.js"></script>
+</body>
+</html>
