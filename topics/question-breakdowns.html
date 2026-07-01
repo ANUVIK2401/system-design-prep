@@ -13,139 +13,210 @@
     <header class="page-head">
       <div class="pill">Questions</div>
       <h1>Question Breakdowns</h1>
-      <p class="sub">Master 10-15 canonical questions deeply. Each page covers the full 5-phase framework with interview-ready answers.</p>
+      <p class="sub">17 canonical system design questions, each walked through the same 6-step Hello Interview framework end to end.</p>
       <div class="meta-row">
-        <span class="badge green">Add via Claude Code</span>
-        <span class="badge blue">Paste screenshot to add</span>
+        <span class="badge green">17 questions</span>
+        <span class="badge blue">All interview-ready</span>
       </div>
     </header>
 
     <div class="flash-card">
-      <div class="flash-label">Study order</div>
+      <div class="flash-label">How to use this page</div>
       <ul>
-        <li>Start with Tier 1 — URL Shortener, Rate Limiter, Notification System</li>
-        <li>One question per 2 days — depth beats breadth</li>
-        <li>Practice delivery out loud with a timer after reading each page</li>
-        <li>Add new pages by saying "Add [topic]" in Claude Code + paste a screenshot</li>
+        <li>Start with Easy, then Medium, then Hard — each tier assumes the patterns from the tier before it</li>
+        <li>Every page follows the same 6 steps: Requirements → Core Entities → API → Data Flow → High-Level Design → Deep Dives</li>
+        <li>Read the flash card at the top of each page first — it's the 5 things a strong candidate says in the first 2 minutes</li>
+        <li>Practice delivery out loud with a timer — the time badge on each card is the realistic interview length</li>
+        <li>Come back to the Follow-up Q&amp;A section after a first pass once the core design is solid</li>
       </ul>
     </div>
 
-    <section id="tier1">
-      <h2>Tier 1 — Always asked</h2>
+    <section id="easy">
+      <h2>Easy — start here</h2>
       <div class="topic-grid">
         <a class="topic-card" href="questions/url-shortener.html" style="--card-i:0">
           <div class="card-num">01</div>
-          <div class="card-cat">Classic</div>
+          <div class="card-cat">Foundational</div>
           <h3>URL Shortener</h3>
-          <p>ID generation as the core problem, cache-first redirect, CDN in front</p>
+          <p>ID generation as the core problem, not redirect logic — cache-first reads, CDN in front</p>
           <div class="card-meta">
             <span class="badge green">30-40 min</span>
             <span class="badge blue">Easy</span>
           </div>
         </a>
-        <a class="topic-card" href="questions/bitly.html" style="--card-i:1">
+      </div>
+    </section>
+
+    <section id="medium">
+      <h2>Medium — build core instincts</h2>
+      <div class="topic-grid">
+        <a class="topic-card" href="questions/bitly.html" style="--card-i:0">
           <div class="card-num">02</div>
-          <div class="card-cat">Classic</div>
+          <div class="card-cat">Read-heavy</div>
           <h3>Design Bitly</h3>
-          <p>Snowflake IDs, async click analytics, 301 vs 302 as a business decision</p>
+          <p>&lt;10ms global reads, Snowflake IDs, 301 vs 302 as a product decision, async click analytics</p>
           <div class="card-meta">
             <span class="badge green">35-45 min</span>
             <span class="badge blue">Medium</span>
           </div>
         </a>
-        <div class="topic-card" style="border-style:dashed; cursor:default; opacity:0.5; --card-i:2">
+        <a class="topic-card" href="questions/news-aggregator.html" style="--card-i:1">
           <div class="card-num">03</div>
-          <div class="card-cat">Coming soon</div>
-          <h3>Rate Limiter</h3>
-          <p>Token bucket, sliding window, distributed rate limiting with Redis</p>
+          <div class="card-cat">Crawling</div>
+          <h3>News Aggregator</h3>
+          <p>Crawl scheduling and cross-source dedup as the real problem, not storage — freshness vs crawl cost</p>
           <div class="card-meta">
-            <span class="badge green">35-45 min</span>
+            <span class="badge green">30-40 min</span>
             <span class="badge blue">Medium</span>
           </div>
-        </div>
-        <div class="topic-card" style="border-style:dashed; cursor:default; opacity:0.5; --card-i:3">
+        </a>
+        <a class="topic-card" href="questions/leetcode.html" style="--card-i:2">
           <div class="card-num">04</div>
-          <div class="card-cat">Coming soon</div>
-          <h3>Notification System</h3>
-          <p>Multi-channel delivery, fan-out, retries, user preference service</p>
+          <div class="card-cat">Isolation</div>
+          <h3>LeetCode / Code Judge</h3>
+          <p>Untrusted code execution as an isolation problem — sandboxing is the design challenge, not CRUD</p>
           <div class="card-meta">
-            <span class="badge green">35-45 min</span>
+            <span class="badge green">30-40 min</span>
             <span class="badge blue">Medium</span>
           </div>
-        </div>
-        <div class="topic-card" style="border-style:dashed; cursor:default; opacity:0.5; --card-i:4">
+        </a>
+        <a class="topic-card" href="questions/yelp.html" style="--card-i:3">
           <div class="card-num">05</div>
-          <div class="card-cat">Coming soon</div>
-          <h3>Chat System</h3>
-          <p>WebSockets, message ordering, online presence, group messaging</p>
+          <div class="card-cat">Geospatial</div>
+          <h3>Design Yelp</h3>
+          <p>Geo search and ranking as the core problem — reviews and business profiles are standard CRUD</p>
           <div class="card-meta">
-            <span class="badge green">40-50 min</span>
-            <span class="badge amber">Hard</span>
+            <span class="badge green">30-40 min</span>
+            <span class="badge blue">Medium</span>
           </div>
-        </div>
+        </a>
+        <a class="topic-card" href="questions/strava.html" style="--card-i:4">
+          <div class="card-num">06</div>
+          <div class="card-cat">Time-series</div>
+          <h3>Design Strava</h3>
+          <p>Write-heavy GPS time series, segment matching against a spatial index, live leaderboards</p>
+          <div class="card-meta">
+            <span class="badge green">30-40 min</span>
+            <span class="badge blue">Medium</span>
+          </div>
+        </a>
+        <a class="topic-card" href="questions/rate-limiter.html" style="--card-i:5">
+          <div class="card-num">07</div>
+          <div class="card-cat">Infrastructure</div>
+          <h3>Design a Rate Limiter</h3>
+          <p>A shared distributed counter, not per-instance local state — token bucket vs sliding window</p>
+          <div class="card-meta">
+            <span class="badge green">30-40 min</span>
+            <span class="badge blue">Medium</span>
+          </div>
+        </a>
+        <a class="topic-card" href="questions/fb-post-search.html" style="--card-i:6">
+          <div class="card-num">08</div>
+          <div class="card-cat">Search</div>
+          <h3>Facebook Post Search</h3>
+          <p>Near-real-time indexing that enforces per-viewer privacy — the hard part isn't full-text search</p>
+          <div class="card-meta">
+            <span class="badge green">30-40 min</span>
+            <span class="badge blue">Medium</span>
+          </div>
+        </a>
+        <a class="topic-card" href="questions/price-tracking.html" style="--card-i:7">
+          <div class="card-num">09</div>
+          <div class="card-cat">Scraping</div>
+          <h3>Price Tracking Service</h3>
+          <p>Keeping a scraper fleet alive against sites actively trying to block it — anti-detection over storage</p>
+          <div class="card-meta">
+            <span class="badge green">30-40 min</span>
+            <span class="badge blue">Medium</span>
+          </div>
+        </a>
       </div>
     </section>
 
-    <section id="tier2">
-      <h2>Tier 2 — Frequently asked</h2>
+    <section id="hard">
+      <h2>Hard — distributed systems under pressure</h2>
       <div class="topic-grid">
         <a class="topic-card" href="questions/dropbox.html" style="--card-i:0">
-          <div class="card-num">01</div>
-          <div class="card-cat">Classic</div>
+          <div class="card-num">10</div>
+          <div class="card-cat">Storage sync</div>
           <h3>Design Dropbox</h3>
-          <p>Chunked upload, content-hash dedup, delta sync, conflict resolution</p>
+          <p>Chunked, content-addressed sync — dedup, delta sync, and conflict resolution across devices</p>
           <div class="card-meta">
             <span class="badge green">40-50 min</span>
             <span class="badge amber">Hard</span>
           </div>
         </a>
         <a class="topic-card" href="questions/local-delivery.html" style="--card-i:1">
-          <div class="card-num">02</div>
-          <div class="card-cat">Classic</div>
+          <div class="card-num">11</div>
+          <div class="card-cat">Geospatial</div>
           <h3>Local Delivery Service</h3>
-          <p>Geohash driver matching, order state machine, hot-partition handling</p>
+          <p>Geohash-based driver matching, exactly-once order state machine, hot-partition handling</p>
           <div class="card-meta">
             <span class="badge green">40-50 min</span>
             <span class="badge amber">Hard</span>
           </div>
         </a>
-        <div class="topic-card" style="border-style:dashed; cursor:default; opacity:0.5; --card-i:2">
-          <div class="card-num">03</div>
-          <div class="card-cat">Coming soon</div>
-          <h3>News Feed</h3>
-          <p>Fan-out on write vs read, hybrid approach, feed ranking</p>
+        <a class="topic-card" href="questions/ticketmaster.html" style="--card-i:2">
+          <div class="card-num">12</div>
+          <div class="card-cat">Contention</div>
+          <h3>Design Ticketmaster</h3>
+          <p>Distributed locking under extreme write contention — millions fighting over the same seats in 60s</p>
           <div class="card-meta">
             <span class="badge green">40-50 min</span>
             <span class="badge amber">Hard</span>
           </div>
-        </div>
-        <div class="topic-card" style="border-style:dashed; cursor:default; opacity:0.5; --card-i:3">
-          <div class="card-num">04</div>
-          <div class="card-cat">Coming soon</div>
-          <h3>Search Autocomplete</h3>
-          <p>Trie, prefix tree, top-K suggestions, real-time updates</p>
+        </a>
+        <a class="topic-card" href="questions/fb-news-feed.html" style="--card-i:3">
+          <div class="card-num">13</div>
+          <div class="card-cat">Fan-out</div>
+          <h3>Facebook News Feed</h3>
+          <p>Hybrid fan-out on write vs read — push for normal users, pull for celebrities past 1M followers</p>
           <div class="card-meta">
-            <span class="badge green">35-45 min</span>
-            <span class="badge blue">Medium</span>
-          </div>
-        </div>
-        <div class="topic-card" style="border-style:dashed; cursor:default; opacity:0.5; --card-i:4">
-          <div class="card-num">05</div>
-          <div class="card-cat">Coming soon</div>
-          <h3>Payment System</h3>
-          <p>Idempotency, distributed transactions, ledger, fraud detection</p>
-          <div class="card-meta">
-            <span class="badge green">45-55 min</span>
+            <span class="badge green">40-50 min</span>
             <span class="badge amber">Hard</span>
           </div>
-        </div>
+        </a>
+        <a class="topic-card" href="questions/tinder.html" style="--card-i:4">
+          <div class="card-num">14</div>
+          <div class="card-cat">Geospatial</div>
+          <h3>Design Tinder</h3>
+          <p>Geospatial + preference filtering before any ranking model runs — retrieval before ranking</p>
+          <div class="card-meta">
+            <span class="badge green">40-50 min</span>
+            <span class="badge amber">Hard</span>
+          </div>
+        </a>
+        <a class="topic-card" href="questions/whatsapp.html" style="--card-i:5">
+          <div class="card-num">15</div>
+          <div class="card-cat">Messaging</div>
+          <h3>Design WhatsApp</h3>
+          <p>At-least-once delivery and per-conversation ordering across millions of long-lived connections</p>
+          <div class="card-meta">
+            <span class="badge green">40-50 min</span>
+            <span class="badge amber">Hard</span>
+          </div>
+        </a>
+        <a class="topic-card" href="questions/online-auction.html" style="--card-i:6">
+          <div class="card-num">16</div>
+          <div class="card-cat">Contention</div>
+          <h3>Design an Online Auction</h3>
+          <p>Optimistic locking on bid contention and distributed coordination for auction close</p>
+          <div class="card-meta">
+            <span class="badge green">40-50 min</span>
+            <span class="badge amber">Hard</span>
+          </div>
+        </a>
+        <a class="topic-card" href="questions/fb-live-comments.html" style="--card-i:7">
+          <div class="card-num">17</div>
+          <div class="card-cat">Fan-out</div>
+          <h3>Facebook Live Comments</h3>
+          <p>Fan-out to millions of concurrent viewers per stream — pub/sub at extreme scale</p>
+          <div class="card-meta">
+            <span class="badge green">40-50 min</span>
+            <span class="badge amber">Hard</span>
+          </div>
+        </a>
       </div>
-    </section>
-
-    <section id="add-topic">
-      <h2>How to add a topic</h2>
-      <div class="callout info">Open Claude Code in this repo, say <strong>"Add [topic name]"</strong> and paste a Hello Interview screenshot. Claude Code reads CLAUDE.md and generates the full page automatically.</div>
-      <div class="callout good">Each generated page includes: "say this in 2 min" flash card, mental model analogy, definition table, flow diagram, compare grid, interview moves, and 6 follow-up Q&amp;As.</div>
     </section>
 
   </main>
