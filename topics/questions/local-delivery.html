@@ -1,0 +1,441 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Design a Local Delivery Service — SD Prep</title>
+  <link rel="stylesheet" href="../../assets/style.css">
+</head>
+<body>
+  <aside id="sidebar"></aside>
+  <main>
+
+    <header class="page-head">
+      <div class="pill">Questions</div>
+      <h1>Design a Local Delivery Service</h1>
+      <p class="sub">Tests real-time geospatial matching, exactly-once state transitions, and hot-partition handling under bursty local demand — think DoorDash, Gopuff, or Instacart.</p>
+      <div class="meta-row">
+        <span class="badge green">40-50 min interview</span>
+        <span class="badge blue">Hard</span>
+      </div>
+    </header>
+
+    <div class="flash-card">
+      <div class="flash-label">Say this in the first 2 minutes</div>
+      <ul>
+        <li>This is fundamentally a geospatial matching problem — finding the nearest available driver can't be a full table scan, it needs a geo-index</li>
+        <li>Driver location writes are extremely high frequency (every ~4s per driver) — this is a write-heavy hot path, separate from the order flow entirely</li>
+        <li>The order lifecycle is a strict state machine — every transition must be atomic and exactly-once, or you get double-dispatched drivers or lost orders</li>
+        <li>ETA is a composition of several signals (distance, traffic, prep time, driver load), not a single distance calculation</li>
+        <li>Lunch-rush demand concentrates geographically — I'd expect a hot-partition problem in popular neighborhoods and plan for it upfront</li>
+      </ul>
+    </div>
+
+    <section id="requirements">
+      <h2>Requirements</h2>
+      <div class="compare-grid">
+        <div class="compare-card good">
+          <div class="compare-label">Functional</div>
+          <ul>
+            <li>Customer places an order from a nearby merchant</li>
+            <li>System matches the order to the nearest available driver</li>
+            <li>Track order state from placed through delivered</li>
+            <li>Real-time ETA shown to both customer and driver</li>
+            <li>Surge pricing during high-demand windows</li>
+          </ul>
+        </div>
+        <div class="compare-card bad">
+          <div class="compare-label">Non-Functional</div>
+          <ul>
+            <li>10k active drivers per metro, location updates every ~4s</li>
+            <li>Order-to-dispatch matching latency &lt;2s</li>
+            <li>Exactly-once state transitions — no double-dispatch, no lost orders</li>
+            <li>Location writes must survive a single node's failure with no data loss</li>
+            <li>Handle a 5-10x demand spike in a single neighborhood at lunch</li>
+          </ul>
+        </div>
+      </div>
+      <div class="stat-grid">
+        <div class="stat-card"><div class="stat-val">~2,500/s</div><div class="stat-label">location writes/sec (10k drivers)</div></div>
+        <div class="stat-card"><div class="stat-val">~50/s</div><div class="stat-label">new orders/sec (metro peak)</div></div>
+        <div class="stat-card"><div class="stat-val">&lt;2s</div><div class="stat-label">match latency target</div></div>
+        <div class="stat-card"><div class="stat-val">~800GB</div><div class="stat-label">location event storage/yr</div></div>
+        <div class="stat-card"><div class="stat-val">~7 chars</div><div class="stat-label">geohash precision (~150m cell)</div></div>
+        <div class="stat-card"><div class="stat-val">99.9%</div><div class="stat-label">order-service availability</div></div>
+      </div>
+    </section>
+
+    <section id="architecture">
+      <h2>System architecture</h2>
+      <div class="diagram-wrap" data-paths='{"order":{"boxes":["customer","ordersvc","orderdb","matchsvc","geo"],"arrows":["o1","o2","o3","o4"]},"location":{"boxes":["driverapp","locsvc","geo","kafka"],"arrows":["l1","l2","l3"]}}'>
+        <svg viewBox="0 0 780 340" xmlns="http://www.w3.org/2000/svg">
+          <defs>
+            <marker id="ldArrow" markerWidth="8" markerHeight="8" refX="6" refY="3" orient="auto"><path d="M0,0 L6,3 L0,6 Z" fill="var(--border2)"/></marker>
+            <marker id="ldArrowB" markerWidth="8" markerHeight="8" refX="6" refY="3" orient="auto"><path d="M0,0 L6,3 L0,6 Z" fill="var(--blue)"/></marker>
+            <marker id="ldArrowA" markerWidth="8" markerHeight="8" refX="6" refY="3" orient="auto"><path d="M0,0 L6,3 L0,6 Z" fill="var(--amber)"/></marker>
+          </defs>
+
+          <text class="diag-sublabel" x="150" y="14" style="font-size:10px;fill:var(--accent)">ORDER PATH — placement + matching</text>
+          <circle class="diag-dot diag-flow-dot" r="3.5" style="offset-path: path('M10,24 L140,24 L140,60 L300,60 L300,24 L440,24')"></circle>
+          <g data-target="deepdive-statemachine" data-id="customer" data-tip="Places an order from a nearby merchant via the app"><rect class="diag-box role-client" x="10" y="24" width="120" height="50"/><text class="diag-label" x="70" y="46" style="font-size:11px">Customer App</text><text class="diag-sublabel" x="70" y="62" style="font-size:8.5px">places order</text></g>
+          <path class="diag-arrow-path" data-id="o1" d="M130,49 L165,49" marker-end="url(#ldArrow)"/>
+          <g data-target="deepdive-statemachine" data-id="ordersvc" data-tip="Owns the order state machine — every transition is atomic and exactly-once"><rect class="diag-box" x="165" y="24" width="130" height="50"/><text class="diag-label" x="230" y="46" style="font-size:11px">Order Service</text><text class="diag-sublabel" x="230" y="62" style="font-size:8.5px">state machine</text></g>
+          <path class="diag-arrow-path" data-id="o2" d="M295,49 L330,49" marker-end="url(#ldArrow)"/>
+          <g data-target="deepdive-statemachine" data-id="orderdb" data-tip="Durable transactional store for order records and state history"><rect class="diag-box role-db" x="330" y="24" width="120" height="50"/><text class="diag-label" x="390" y="46" style="font-size:11px">Order DB</text><text class="diag-sublabel" x="390" y="62" style="font-size:8.5px">Postgres</text></g>
+
+          <path class="diag-arrow-path" data-id="o3" d="M230,74 L230,110" marker-end="url(#ldArrow)"/>
+          <g data-target="deepdive-geohash" data-id="matchsvc" data-tip="Runs the nearest-driver query on order placement, expanding outward from the order's geohash cell"><rect class="diag-box" x="165" y="110" width="130" height="50"/><text class="diag-label" x="230" y="132" style="font-size:11px">Matching Svc</text><text class="diag-sublabel" x="230" y="148" style="font-size:8.5px">nearest-driver query</text></g>
+          <path class="diag-arrow-path" data-id="o4" d="M295,135 L330,135" marker-end="url(#ldArrow)"/>
+          <g data-target="deepdive-geohash" data-id="geo" data-tip="Redis GEO index of all active driver positions, queryable by radius/geohash cell"><rect class="diag-box role-cache" x="330" y="110" width="130" height="50"/><text class="diag-label" x="395" y="132" style="font-size:11px">Redis GEO</text><text class="diag-sublabel" x="395" y="148" style="font-size:8.5px">driver locations</text></g>
+
+          <text class="diag-sublabel" x="150" y="190" style="font-size:10px;fill:var(--blue)">LOCATION PATH — high-frequency writes</text>
+          <g data-target="deepdive-geohash" data-id="driverapp" data-tip="Sends a GPS ping roughly every 4 seconds while online"><rect class="diag-box role-client" x="10" y="200" width="120" height="50"/><text class="diag-label" x="70" y="222" style="font-size:11px">Driver App</text><text class="diag-sublabel" x="70" y="238" style="font-size:8.5px">GPS every ~4s</text></g>
+          <path class="diag-arrow-path" data-id="l1" d="M130,225 L165,225" marker-end="url(#ldArrowB)"/>
+          <g data-target="deepdive-geohash" data-id="locsvc" data-tip="Thin ingestion service — writes the current position to the geo-index and emits a location event"><rect class="diag-box" x="165" y="200" width="130" height="50"/><text class="diag-label" x="230" y="222" style="font-size:11px">Location Svc</text><text class="diag-sublabel" x="230" y="238" style="font-size:8.5px">thin ingest</text></g>
+          <path class="diag-arrow-path" data-id="l2" d="M295,215 L330,215" marker-end="url(#ldArrowB)"/>
+          <g data-tip="Same GEO index the matching service queries — one source of truth for current positions"><rect class="diag-box role-cache" x="330" y="190" width="130" height="40"/><text class="diag-label" x="395" y="215" style="font-size:10.5px">Redis GEO</text></g>
+          <path class="diag-arrow-path" data-id="l3" d="M295,240 L460,240 L460,260" marker-end="url(#ldArrowA)"/>
+          <g data-target="deepdive-eta" data-id="kafka" data-tip="Every location ping is also streamed here for ETA computation and historical trip analytics"><rect class="diag-box role-async" x="395" y="260" width="140" height="46"/><text class="diag-label" x="465" y="282" style="font-size:11px">Kafka</text><text class="diag-sublabel" x="465" y="297" style="font-size:8.5px">location_events</text></g>
+
+          <text class="diag-sublabel" x="640" y="14" style="font-size:10px;fill:var(--amber)">ASYNC</text>
+          <path class="diag-arrow-path" d="M535,283 L575,283" marker-end="url(#ldArrowA)"/>
+          <g data-target="deepdive-eta" data-id="etasvc" data-tip="Combines distance, live traffic, merchant prep time, and current driver load into a single ETA"><rect class="diag-box role-async" x="575" y="258" width="130" height="50"/><text class="diag-label" x="640" y="280" style="font-size:11px">ETA Service</text><text class="diag-sublabel" x="640" y="296" style="font-size:8.5px">enriches order</text></g>
+
+          <path class="diag-arrow-path" d="M230,74 L640,74 L640,258" marker-end="url(#ldArrow)" stroke-dasharray="3 3"/>
+          <g data-tip="Pushes state changes and ETA updates to both customer and driver apps"><rect class="diag-box role-async" x="575" y="24" width="150" height="50"/><text class="diag-label" x="650" y="46" style="font-size:11px">Notification Svc</text><text class="diag-sublabel" x="650" y="62" style="font-size:8.5px">push to both apps</text></g>
+        </svg>
+        <div class="diag-legend">
+          <div class="diag-legend-item"><span class="diag-legend-dot role-client"></span>Customer + driver apps — entry points</div>
+          <div class="diag-legend-item"><span class="diag-legend-dot role-cache"></span>Redis GEO — the single geospatial index both paths share</div>
+          <div class="diag-legend-item"><span class="diag-legend-dot role-db"></span>Order DB — transactional source of truth for order state</div>
+          <div class="diag-legend-item"><span class="diag-legend-dot role-async"></span>Kafka + ETA/Notification services — decoupled from the hot path</div>
+        </div>
+      </div>
+      <div class="callout info">Click any box above to jump to its deep dive below.</div>
+    </section>
+
+    <section id="datamodel">
+      <h2>Data model</h2>
+      <pre style="background:var(--surface2);border:1px solid var(--border);border-radius:6px;padding:14px;font-size:12px;overflow-x:auto;color:#ddd;line-height:1.6"><code>-- PostgreSQL: transactional order state, needs ACID guarantees
+CREATE TABLE orders (
+  order_id      UUID PRIMARY KEY,
+  customer_id   BIGINT NOT NULL,
+  merchant_id   BIGINT NOT NULL,
+  driver_id     BIGINT,                 -- null until matched
+  status        TEXT NOT NULL,          -- placed|matched|picked_up|en_route|delivered|cancelled
+  pickup_geo    GEOGRAPHY(POINT),
+  dropoff_geo   GEOGRAPHY(POINT),
+  eta_seconds   INT,
+  price_cents   INT,
+  surge_multiplier NUMERIC(3,2) DEFAULT 1.0,
+  created_at    TIMESTAMP DEFAULT NOW(),
+  version       INT DEFAULT 0          -- optimistic lock for exactly-once transitions
+);
+
+CREATE TABLE order_state_log (            -- append-only audit trail
+  order_id  UUID,
+  from_state TEXT,
+  to_state   TEXT,
+  ts         TIMESTAMP DEFAULT NOW()
+);
+
+-- Redis GEO: ephemeral, high-frequency driver positions
+-- GEOADD driver_locations {lng} {lat} driver:{id}
+-- GEORADIUS driver_locations {lng} {lat} 2 km  → nearby available drivers
+-- TTL per driver key ~30s: a driver who stops pinging silently drops out of matching
+
+-- Kafka topic: location_events (partitioned by geohash prefix for ETA/analytics consumers)</code></pre>
+      <div class="callout good"><strong>Why Postgres for orders:</strong> a delivery is a financial transaction with strict state and exactly-once requirements — ACID guarantees matter more than raw write throughput here. <strong>Why Redis GEO for locations:</strong> positions are ephemeral and read/written constantly — durability of any single ping doesn't matter, only the current position and query speed do.</div>
+    </section>
+
+    <section id="decisions">
+      <h2>Core design decisions</h2>
+
+      <div class="decision-acc expanded">
+        <button class="decision-acc-head" type="button"><span><span class="decision-acc-choice">Geohash-indexed queries</span> over a full table scan or naive lat/lng range query</span><svg class="decision-acc-chevron" viewBox="0 0 16 16" width="12" height="12"><path d="M4 6l4 4 4-4" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg></button>
+        <div class="decision-acc-body"><div class="decision-acc-body-inner"><div class="decision-acc-content">
+          <div class="why"><strong>Why:</strong> geohashing turns 2D proximity into a string-prefix problem — nearby locations share a hash prefix, so "find drivers near me" becomes a cheap indexed lookup instead of computing distance to every driver.</div>
+          <div class="tradeoff"><strong>Tradeoff:</strong> geohash cells have edge effects (two points can be physically close but in different cells) — mitigated by querying the cell plus its 8 neighbors.</div>
+        </div></div></div>
+      </div>
+
+      <div class="decision-acc">
+        <button class="decision-acc-head" type="button"><span><span class="decision-acc-choice">Redis GEO</span> for live driver positions instead of a durable geospatial DB</span><svg class="decision-acc-chevron" viewBox="0 0 16 16" width="12" height="12"><path d="M4 6l4 4 4-4" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg></button>
+        <div class="decision-acc-body"><div class="decision-acc-body-inner"><div class="decision-acc-content">
+          <div class="why"><strong>Why:</strong> at ~2,500 writes/sec of transient data where only the latest position matters, an in-memory GEO index gives sub-millisecond radius queries — durability of any individual ping is irrelevant.</div>
+          <div class="tradeoff"><strong>Tradeoff:</strong> a Redis node failure loses recent positions — acceptable since drivers re-ping every ~4s, so the gap self-heals within one ping cycle.</div>
+          <div class="dial-wrap" style="margin-top:10px"><div class="dial-title">Driver location data: durability vs write speed</div><div class="dial-track"><div class="dial-marker" style="left:85%"></div></div><div class="dial-labels"><span class="end-left">Durable</span><span class="end-right">Fast, ephemeral</span></div></div>
+        </div></div></div>
+      </div>
+
+      <div class="decision-acc">
+        <button class="decision-acc-head" type="button"><span><span class="decision-acc-choice">Optimistic locking with a version column</span> for order state transitions</span><svg class="decision-acc-chevron" viewBox="0 0 16 16" width="12" height="12"><path d="M4 6l4 4 4-4" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg></button>
+        <div class="decision-acc-body"><div class="decision-acc-body-inner"><div class="decision-acc-content">
+          <div class="why"><strong>Why:</strong> prevents two concurrent updates (e.g. a driver marking "picked up" while a system timeout tries to cancel) from silently overwriting each other — the update only succeeds if the version matches what was read.</div>
+          <div class="tradeoff"><strong>Tradeoff:</strong> a losing writer must retry against the new state, adding a small amount of complexity versus a naive blind UPDATE — worth it given the cost of a double-dispatch or lost transition.</div>
+        </div></div></div>
+      </div>
+
+      <div class="decision-acc">
+        <button class="decision-acc-head" type="button"><span><span class="decision-acc-choice">Geohash-cell-level surge pricing</span> instead of city-wide surge</span><svg class="decision-acc-chevron" viewBox="0 0 16 16" width="12" height="12"><path d="M4 6l4 4 4-4" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg></button>
+        <div class="decision-acc-body"><div class="decision-acc-body-inner"><div class="decision-acc-content">
+          <div class="why"><strong>Why:</strong> demand spikes are hyper-local (one office district at lunch) — pricing at the geohash-cell granularity reads local demand density and reacts to it directly, rather than overcharging an entire city for one busy block.</div>
+          <div class="tradeoff"><strong>Tradeoff:</strong> requires a streaming aggregation pipeline (orders-per-cell over a rolling window) instead of a simple global counter — more moving parts, but far more accurate incentive signal for driver supply.</div>
+        </div></div></div>
+      </div>
+
+      <div class="decision-acc">
+        <button class="decision-acc-head" type="button"><span><span class="decision-acc-choice">Cell-splitting for hot geohash partitions</span> instead of a fixed grid</span><svg class="decision-acc-chevron" viewBox="0 0 16 16" width="12" height="12"><path d="M4 6l4 4 4-4" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg></button>
+        <div class="decision-acc-body"><div class="decision-acc-body-inner"><div class="decision-acc-content">
+          <div class="why"><strong>Why:</strong> a single fixed-precision geohash grid means a dense downtown cell can get hammered with far more orders and drivers than a suburban cell of the same size — dynamically using finer precision in dense areas balances load per partition.</div>
+          <div class="tradeoff"><strong>Tradeoff:</strong> variable cell precision complicates the "query neighbors" logic slightly, since neighbor cells may be at different precision levels — solvable but adds an edge case to handle explicitly.</div>
+        </div></div></div>
+      </div>
+
+      <script>
+      (function(){
+        document.querySelectorAll('.decision-acc-head').forEach(function(btn){
+          btn.addEventListener('click', function(){ btn.closest('.decision-acc').classList.toggle('expanded'); });
+        });
+      })();
+      </script>
+    </section>
+
+    <section id="deepdive-geohash">
+      <h2>Deep dive: geohashing for driver matching</h2>
+      <p style="font-size:13px;color:#999;margin-bottom:0.75rem">A city is divided into a grid of geohash cells. A driver ping lands in exactly one cell; an order query expands outward from its own cell until enough drivers are found.</p>
+      <div class="diagram-wrap">
+        <svg viewBox="0 0 480 320" xmlns="http://www.w3.org/2000/svg" id="geohashGrid">
+          <defs>
+            <marker id="geoArrow" markerWidth="8" markerHeight="8" refX="6" refY="3" orient="auto"><path d="M0,0 L6,3 L0,6 Z" fill="var(--accent)"/></marker>
+          </defs>
+          <text class="diag-sublabel" x="240" y="14" style="font-size:10px;fill:var(--muted)">CITY GRID — each cell ≈ 150m × 150m (7-char geohash precision)</text>
+          <g id="gridCells"></g>
+          <circle id="driverPing" cx="0" cy="0" r="5" fill="var(--blue)" opacity="0" />
+          <text id="pingLabel" x="0" y="0" font-size="9" fill="var(--blue)" text-anchor="middle" opacity="0" font-family="Inter,sans-serif"></text>
+        </svg>
+        <div style="display:flex;gap:10px;margin-top:6px">
+          <button class="flow-cmp-replay" id="geoPingBtn" style="width:auto;padding:6px 14px">▸ Simulate driver ping</button>
+          <button class="flow-cmp-replay" id="geoQueryBtn" style="width:auto;padding:6px 14px">▸ Simulate order query (expand outward)</button>
+        </div>
+      </div>
+      <script>
+      (function(){
+        var svg = document.getElementById('geohashGrid');
+        if (!svg) return;
+        var cellsG = document.getElementById('gridCells');
+        var cols = 8, rows = 6, cellW = 48, cellH = 42, offX = 40, offY = 30;
+        var cellEls = [];
+        for (var r = 0; r < rows; r++) {
+          for (var c = 0; c < cols; c++) {
+            var x = offX + c * cellW, y = offY + r * cellH;
+            var rect = document.createElementNS('http://www.w3.org/2000/svg', 'rect');
+            rect.setAttribute('x', x); rect.setAttribute('y', y);
+            rect.setAttribute('width', cellW - 2); rect.setAttribute('height', cellH - 2);
+            rect.setAttribute('rx', 3);
+            rect.setAttribute('fill', 'var(--surface)');
+            rect.setAttribute('stroke', 'var(--border2)');
+            rect.setAttribute('stroke-width', '1');
+            rect.dataset.row = r; rect.dataset.col = c;
+            cellsG.appendChild(rect);
+            cellEls.push({ el: rect, r: r, c: c, x: x, y: y });
+          }
+        }
+        var centerR = 2, centerC = 4;
+        var ping = document.getElementById('driverPing');
+        var pingLabel = document.getElementById('pingLabel');
+
+        function cellCenter(r, c) {
+          return { x: offX + c * cellW + (cellW - 2) / 2, y: offY + r * cellH + (cellH - 2) / 2 };
+        }
+
+        document.getElementById('geoPingBtn').addEventListener('click', function(){
+          cellEls.forEach(function(ce){ ce.el.setAttribute('fill', 'var(--surface)'); });
+          var target = cellEls.find(function(ce){ return ce.r === centerR && ce.c === centerC; });
+          var pt = cellCenter(centerR, centerC);
+          ping.setAttribute('cx', pt.x); ping.setAttribute('cy', pt.y);
+          ping.setAttribute('opacity', '0');
+          pingLabel.setAttribute('x', pt.x); pingLabel.setAttribute('y', pt.y - 12);
+          pingLabel.textContent = 'GEOADD';
+          pingLabel.setAttribute('opacity', '0');
+          requestAnimationFrame(function(){
+            ping.style.transition = 'opacity 0.3s ease';
+            pingLabel.style.transition = 'opacity 0.3s ease';
+            ping.setAttribute('opacity', '1');
+            pingLabel.setAttribute('opacity', '1');
+            if (target) target.el.setAttribute('fill', '#0d1a2d');
+            if (target) target.el.setAttribute('stroke', 'var(--blue)');
+          });
+        });
+
+        document.getElementById('geoQueryBtn').addEventListener('click', function(){
+          cellEls.forEach(function(ce){ ce.el.setAttribute('fill', 'var(--surface)'); ce.el.setAttribute('stroke', 'var(--border2)'); });
+          var rings = [0, 1, 2];
+          rings.forEach(function(ring, i){
+            setTimeout(function(){
+              cellEls.forEach(function(ce){
+                var dist = Math.max(Math.abs(ce.r - centerR), Math.abs(ce.c - centerC));
+                if (dist === ring) {
+                  ce.el.style.transition = 'fill 0.3s ease, stroke 0.3s ease';
+                  ce.el.setAttribute('fill', ring === 0 ? '#08200f' : '#0d1f17');
+                  ce.el.setAttribute('stroke', 'var(--accent)');
+                }
+              });
+            }, i * 400);
+          });
+        });
+      })();
+      </script>
+      <ol class="flow-steps-list">
+        <li><span>Driver ping lands in a cell:</span> a GPS coordinate is encoded to a geohash string; <code>GEOADD</code> places the driver in that cell's index</li>
+        <li><span>Order arrives with its own cell:</span> the customer's location (or merchant's, for pickup) is encoded the same way</li>
+        <li><span>Query expands outward ring by ring:</span> check the order's own cell first, then its 8 neighbors, then the next ring out — stopping as soon as enough available drivers are found</li>
+        <li><span>Rank candidates:</span> among drivers found, rank by a combination of actual road distance (not just geohash proximity) and current driver load</li>
+        <li><span>Dispatch and lock:</span> the top candidate is offered the order with a short accept window; on timeout or decline, the next candidate is tried</li>
+      </ol>
+      <div class="callout warn">A pure distance-only match can repeatedly offer orders to the same nearby driver, ignoring one who just finished a delivery two blocks further out — ranking should blend distance with idle time or fairness to avoid this.</div>
+    </section>
+
+    <section id="deepdive-statemachine">
+      <h2>Deep dive: order state machine</h2>
+      <p style="font-size:13px;color:#999;margin-bottom:0.75rem">Every transition is atomic via optimistic locking. Dashed transitions are irreversible — there's no path back once crossed.</p>
+      <div class="diagram-wrap">
+        <svg viewBox="0 0 760 220" xmlns="http://www.w3.org/2000/svg">
+          <defs>
+            <marker id="stateArrowN" markerWidth="8" markerHeight="8" refX="6" refY="3" orient="auto"><path d="M0,0 L6,3 L0,6 Z" fill="var(--border2)"/></marker>
+            <marker id="stateArrowW" markerWidth="8" markerHeight="8" refX="6" refY="3" orient="auto"><path d="M0,0 L6,3 L0,6 Z" fill="var(--amber)"/></marker>
+          </defs>
+
+          <rect class="state-node" x="10" y="70" width="110" height="50" rx="6"/>
+          <text class="state-label" x="65" y="92">Placed</text>
+          <text class="state-sublabel" x="65" y="106">order created</text>
+
+          <path class="state-arrow" d="M120,95 L155,95" marker-end="url(#stateArrowN)"/>
+          <rect class="state-node" x="155" y="70" width="110" height="50" rx="6"/>
+          <text class="state-label" x="210" y="92">Matched</text>
+          <text class="state-sublabel" x="210" y="106">driver assigned</text>
+
+          <path class="state-arrow irreversible" d="M265,95 L300,95" marker-end="url(#stateArrowW)"/>
+          <rect class="state-node irreversible" x="300" y="70" width="110" height="50" rx="6"/>
+          <text class="state-label" x="355" y="92">Picked Up</text>
+          <text class="state-sublabel" x="355" y="106">at merchant</text>
+
+          <path class="state-arrow" d="M410,95 L445,95" marker-end="url(#stateArrowN)"/>
+          <rect class="state-node" x="445" y="70" width="110" height="50" rx="6"/>
+          <text class="state-label" x="500" y="92">En Route</text>
+          <text class="state-sublabel" x="500" y="106">to customer</text>
+
+          <path class="state-arrow irreversible" d="M555,95 L590,95" marker-end="url(#stateArrowW)"/>
+          <rect class="state-node terminal" x="590" y="70" width="110" height="50" rx="6"/>
+          <text class="state-label" x="645" y="92">Delivered</text>
+          <text class="state-sublabel" x="645" y="106">terminal</text>
+
+          <path class="state-arrow irreversible" d="M65,120 L65,165 L300,165 L300,120" marker-end="url(#stateArrowW)"/>
+          <rect class="state-node terminal" x="245" y="165" width="110" height="46" rx="6" style="stroke:var(--red)"/>
+          <text class="state-label" x="300" y="187">Cancelled</text>
+          <text class="state-sublabel" x="300" y="201" style="fill:var(--red)">terminal</text>
+          <text class="state-sublabel" x="180" y="155" style="font-size:8.5px;fill:var(--amber)">only from Placed or Matched</text>
+
+          <path class="state-arrow" d="M210,120 L210,165 L245,187" marker-end="url(#stateArrowW)" style="stroke:var(--red)"/>
+        </svg>
+      </div>
+      <table class="grid-table">
+        <thead><tr><th>Transition</th><th>Reversible?</th><th>Guard condition</th></tr></thead>
+        <tbody>
+          <tr><td>Placed → Matched</td><td>Yes (can revert to Placed on driver decline)</td><td class="detect">Matching service finds and confirms an available driver</td></tr>
+          <tr><td>Placed / Matched → Cancelled</td><td class="impact">No — terminal</td><td class="detect">Customer or system-initiated cancellation before pickup</td></tr>
+          <tr><td>Matched → Picked Up</td><td class="impact">No — irreversible</td><td class="detect">Driver confirms pickup at merchant (geofence or manual tap)</td></tr>
+          <tr><td>Picked Up → En Route</td><td>Yes (informational, not state-critical)</td><td class="detect">Driver location leaves merchant geofence</td></tr>
+          <tr><td>En Route → Delivered</td><td class="impact">No — terminal</td><td class="detect">Driver confirms drop-off (geofence + explicit confirmation)</td></tr>
+        </tbody>
+      </table>
+      <div class="callout danger">Once an order reaches "Picked Up," cancellation is no longer offered as a self-service option — food is already in the driver's possession. This must be enforced at the state machine level, not just in the UI, or a race condition could let a cancel request slip through after pickup.</div>
+    </section>
+
+    <section id="deepdive-eta">
+      <h2>Deep dive: ETA calculation inputs</h2>
+      <p style="font-size:13px;color:#999;margin-bottom:0.75rem">Not a single distance formula — a composition of independently-updated signals.</p>
+      <table class="grid-table">
+        <thead><tr><th>Input</th><th>Source</th><th>Why it matters</th></tr></thead>
+        <tbody>
+          <tr><td>Road distance</td><td>Routing engine (e.g. OSRM-style), not straight-line</td><td class="fix">Straight-line distance ignores one-way streets, highways, and physical barriers</td></tr>
+          <tr><td>Live traffic conditions</td><td>Aggregated from driver GPS speed samples, streamed via Kafka</td><td class="fix">The same 3km route takes very different time at lunch rush vs 3pm</td></tr>
+          <tr><td>Merchant prep time</td><td>Historical average per merchant, adjusted by current order queue depth</td><td class="fix">A busy kitchen adds real wait time independent of driving distance</td></tr>
+          <tr><td>Driver current load</td><td>Order service — is this driver already carrying another delivery</td><td class="fix">Batched deliveries take longer per order than a dedicated single trip</td></tr>
+        </tbody>
+      </table>
+      <div class="callout info">The interview payoff here isn't naming a specific ML model — it's showing you understand the ETA is a live composition of several independently-updated signals, recomputed as the order progresses through its state machine.</div>
+    </section>
+
+    <section id="bottlenecks">
+      <h2>Bottlenecks and scale tactics</h2>
+      <table class="grid-table">
+        <thead><tr><th>Bottleneck</th><th>Trigger condition</th><th>Exact fix</th></tr></thead>
+        <tbody>
+          <tr><td>Hot geohash cell (lunch rush)</td><td>One dense downtown cell gets far more orders/drivers than others</td><td class="fix">Dynamic cell-splitting — increase geohash precision in dense areas so load spreads across more, smaller partitions</td></tr>
+          <tr><td>Location write throughput</td><td>&gt;5k location writes/sec regionally</td><td class="fix">Shard Redis GEO by metro/region; batch writes client-side over the 4s interval rather than per-GPS-sample</td></tr>
+          <tr><td>Matching latency under load</td><td>Ring expansion takes too many hops to find a driver</td><td class="fix">Pre-warm a wider initial search radius during known peak windows (lunch, dinner) instead of always starting narrow</td></tr>
+          <tr><td>Order DB write contention</td><td>High order volume in one metro during surge</td><td class="fix">Shard orders by metro_id; use optimistic locking to avoid blocking on row-level locks</td></tr>
+          <tr><td>Notification fan-out delay</td><td>State change pushes lag behind actual transitions</td><td class="fix">Dedicated low-latency push channel (WebSocket) per active order rather than shared polling infrastructure</td></tr>
+        </tbody>
+      </table>
+    </section>
+
+    <section id="failures">
+      <h2>Failure modes</h2>
+      <table class="grid-table">
+        <thead><tr><th>Failure</th><th>User impact</th><th>Detection signal</th><th>Mitigation</th></tr></thead>
+        <tbody>
+          <tr><td>Redis GEO node failure</td><td class="impact">Matching can't find nearby drivers temporarily</td><td class="detect">GEO query error rate spike</td><td class="fix">Replica promotion; drivers self-heal the index within one ping cycle (~4s) after failover</td></tr>
+          <tr><td>Double-dispatch race condition</td><td class="impact">Two customers matched to the same driver</td><td class="detect">Optimistic lock version conflict on driver assignment</td><td class="fix">Version-checked conditional update — losing request retries against the next candidate driver</td></tr>
+          <tr><td>Driver app stops pinging (dead zone)</td><td class="impact">Driver appears unavailable, stops receiving new orders</td><td class="detect">TTL expiry on driver's GEO key with no refresh</td><td class="fix">Key naturally expires from the index after ~30s; driver re-enters pool automatically on reconnect</td></tr>
+          <tr><td>Order service partial outage</td><td class="impact">New orders can't be placed; in-flight orders unaffected</td><td class="detect">Write error rate spike on order creation endpoint</td><td class="fix">Circuit breaker shows "temporarily unavailable" in-app rather than silent failures; existing orders continue via cached state</td></tr>
+          <tr><td>ETA service degraded/down</td><td class="impact">Stale or missing ETA shown, order flow otherwise unaffected</td><td class="detect">ETA computation latency or error rate alert</td><td class="fix">Fall back to last-known ETA or a coarse distance-only estimate — never block order progression on ETA availability</td></tr>
+        </tbody>
+      </table>
+    </section>
+
+    <section id="interview-moves">
+      <h2>Interview moves</h2>
+      <ul class="moves-list">
+        <li><span class="move-num">01</span><div><strong>"Finding the nearest driver can't be a full scan over every active driver — I'd geohash-index positions so proximity becomes a prefix lookup"</strong> — immediately signals you know the core data structure problem</div></li>
+        <li><span class="move-num">02</span><div><strong>"Driver location writes are a separate, much higher-throughput hot path than the order flow — I wouldn't put them in the same database"</strong> — shows you distinguish access patterns instead of reaching for one system for everything</div></li>
+        <li><span class="move-num">03</span><div><strong>"Order state transitions need to be atomic and exactly-once — I'd use optimistic locking with a version column to prevent double-dispatch"</strong> — names a specific, correct mechanism rather than hand-waving "we'll use transactions"</div></li>
+        <li><span class="move-num">04</span><div><strong>"I'd expect a hot-partition problem during lunch rush in dense neighborhoods — I'd plan for dynamic geohash cell-splitting rather than treating it as an edge case"</strong> — proactively surfaces a scale problem before being asked</div></li>
+        <li><span class="move-num">05</span><div><strong>"ETA isn't one distance calculation — it's a live composition of routing, traffic, prep time, and driver load, recomputed as state changes"</strong> — shows systems thinking over ML hand-waving</div></li>
+        <li><span class="move-num">06</span><div><strong>"Once an order hits 'picked up,' cancellation should be blocked at the state machine level, not just hidden in the UI"</strong> — demonstrates you think about invariants holding even under adversarial or racy client behavior</div></li>
+      </ul>
+    </section>
+
+    <section id="follow-ups">
+      <h2>Follow-up questions</h2>
+      <div class="qa-block">
+        <div class="qa-q">How do you prevent two orders from being matched to the same driver simultaneously?</div>
+        <div class="qa-a">Optimistic locking on the driver's assignment record — the matching service's UPDATE only succeeds if the driver is still unassigned; a losing request immediately retries against the next candidate.</div>
+      </div>
+      <div class="qa-block">
+        <div class="qa-q">What happens if a driver goes offline mid-delivery?</div>
+        <div class="qa-a">The order enters a stalled state after a location-staleness timeout; the system either waits for reconnect within a grace period or reassigns to a backup driver, notifying the customer of the delay.</div>
+      </div>
+      <div class="qa-block">
+        <div class="qa-q">How would you detect and handle a hot geohash cell in real time, not just at lunch as a known pattern?</div>
+        <div class="qa-a">Stream order and driver counts per cell through a rolling window aggregator; when a cell's order-to-driver ratio crosses a threshold, trigger both surge pricing and dynamic cell-splitting for that region.</div>
+      </div>
+      <div class="qa-block">
+        <div class="qa-q">How do you avoid always sending orders to the same closest driver, starving others?</div>
+        <div class="qa-a">Blend distance with idle time or a fairness score in the ranking function so drivers who've been waiting longer get preference among similarly-close candidates.</div>
+      </div>
+      <div class="qa-block">
+        <div class="qa-q">How is surge pricing computed without it feeling arbitrary or exploitative to users?</div>
+        <div class="qa-a">Base it on a transparent, bounded multiplier tied to a real demand-density signal (orders per available driver per cell), capped at a maximum, and shown to the customer before they confirm the order.</div>
+      </div>
+      <div class="qa-block">
+        <div class="qa-q">How would this design change for scheduled (non-immediate) orders?</div>
+        <div class="qa-a">Scheduled orders skip immediate matching and instead enter a time-based queue that triggers the matching flow shortly before the scheduled window, reusing the same state machine and geo-index from that point on.</div>
+      </div>
+    </section>
+
+  </main>
+  <script src="../../assets/nav.js"></script>
+</body>
+</html>

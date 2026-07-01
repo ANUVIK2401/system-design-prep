@@ -1,0 +1,400 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Design Bitly — SD Prep</title>
+  <link rel="stylesheet" href="../../assets/style.css">
+</head>
+<body>
+  <aside id="sidebar"></aside>
+  <main>
+
+    <header class="page-head">
+      <div class="pill">Questions</div>
+      <h1>Design Bitly</h1>
+      <p class="sub">Tests whether you can hit &lt;10ms global read latency on a read-heavy system while keeping the write path collision-free at massive scale.</p>
+      <div class="meta-row">
+        <span class="badge green">35-45 min interview</span>
+        <span class="badge blue">Medium</span>
+      </div>
+    </header>
+
+    <div class="flash-card">
+      <div class="flash-label">Say this in the first 2 minutes</div>
+      <ul>
+        <li>This is read-heavy at roughly 1000:1 — every decision downstream optimizes the redirect path, not the shorten path</li>
+        <li>ID generation is the actual hard problem — not the redirect logic, which is a one-line cache lookup</li>
+        <li>I'd pick Snowflake IDs over hashing or a DB counter to avoid both collisions and a single-writer bottleneck</li>
+        <li>301 vs 302 is a real tradeoff between browser caching and analytics visibility, not a coin flip</li>
+        <li>Click analytics must never sit on the redirect's critical path — that goes through Kafka, fully async</li>
+      </ul>
+    </div>
+
+    <section id="requirements">
+      <h2>Requirements</h2>
+      <div class="compare-grid">
+        <div class="compare-card good">
+          <div class="compare-label">Functional</div>
+          <ul>
+            <li>Shorten a long URL into a unique short code</li>
+            <li>Redirect a short code to its original long URL</li>
+            <li>Support optional custom aliases</li>
+            <li>Support optional link expiration</li>
+            <li>Track click analytics (count, referrer, geo, time)</li>
+          </ul>
+        </div>
+        <div class="compare-card bad">
+          <div class="compare-label">Non-Functional</div>
+          <ul>
+            <li>300M links created, billions of redirects/day</li>
+            <li>Redirect latency &lt;10ms p99 globally</li>
+            <li>99.99% availability for redirects (writes can tolerate less)</li>
+            <li>Strong uniqueness guarantee — zero collisions on generated codes</li>
+            <li>Analytics can be eventually consistent (seconds to minutes lag)</li>
+          </ul>
+        </div>
+      </div>
+      <div class="stat-grid">
+        <div class="stat-card"><div class="stat-val">~12k/s</div><div class="stat-label">write QPS (shorten)</div></div>
+        <div class="stat-card"><div class="stat-val">~120k/s</div><div class="stat-label">read QPS (redirect, avg)</div></div>
+        <div class="stat-card"><div class="stat-val">~1M/s</div><div class="stat-label">read QPS (peak, viral spikes)</div></div>
+        <div class="stat-card"><div class="stat-val">~180GB</div><div class="stat-label">URL row storage/yr</div></div>
+        <div class="stat-card"><div class="stat-val">~2.5TB</div><div class="stat-label">click event storage/yr</div></div>
+        <div class="stat-card"><div class="stat-val">7 chars</div><div class="stat-label">base62 short code</div></div>
+      </div>
+    </section>
+
+    <section id="architecture">
+      <h2>System architecture</h2>
+      <div class="diagram-wrap" data-paths='{"redirect":{"boxes":["client-r","cdn","redirsvc","redis","db"],"arrows":["a1","a2","a3","a4"]},"shorten":{"boxes":["client-w","gw","shortsvc","idgen","db"],"arrows":["b1","b2","b3","b4"]}}'>
+        <svg viewBox="0 0 780 330" xmlns="http://www.w3.org/2000/svg">
+          <defs>
+            <marker id="bitlyArrow" markerWidth="8" markerHeight="8" refX="6" refY="3" orient="auto"><path d="M0,0 L6,3 L0,6 Z" fill="var(--border2)"/></marker>
+            <marker id="bitlyArrowB" markerWidth="8" markerHeight="8" refX="6" refY="3" orient="auto"><path d="M0,0 L6,3 L0,6 Z" fill="var(--blue)"/></marker>
+            <marker id="bitlyArrowA" markerWidth="8" markerHeight="8" refX="6" refY="3" orient="auto"><path d="M0,0 L6,3 L0,6 Z" fill="var(--amber)"/></marker>
+          </defs>
+
+          <text class="diag-sublabel" x="150" y="14" style="font-size:10px;fill:var(--accent)">READ PATH — redirect</text>
+          <g data-target="deepdive-cache" data-id="client-r" data-tip="Browser or app following a shortened link"><rect class="diag-box role-client" x="10" y="24" width="95" height="50"/><text class="diag-label" x="57" y="54" style="font-size:11px">Client</text></g>
+          <path class="diag-arrow-path" data-id="a1" d="M105,49 L138,49" marker-end="url(#bitlyArrow)"/>
+          <g data-target="deepdive-cache" data-id="cdn" data-tip="Caches HTTP redirects at edge — most redirects never reach origin"><rect class="diag-box role-cache" x="138" y="24" width="95" height="50"/><text class="diag-label" x="185" y="54" style="font-size:11px">CDN edge</text></g>
+          <path class="diag-arrow-path" data-id="a2" d="M233,49 L268,49" marker-end="url(#bitlyArrow)"/>
+          <g data-target="deepdive-cache" data-id="redirsvc" data-tip="Thin stateless lookup service — the only job is short_code to long_url"><rect class="diag-box" x="268" y="24" width="130" height="50"/><text class="diag-label" x="333" y="46" style="font-size:11px">Redirect Svc</text><text class="diag-sublabel" x="333" y="62">stateless</text></g>
+          <path class="diag-arrow-path" data-id="a3" d="M398,49 L432,49" marker-end="url(#bitlyArrow)"/>
+          <g data-target="deepdive-cache" data-id="redis" data-tip="In-memory cache of hot short_code to long_url mappings — cache hit resolves in ~1ms"><rect class="diag-box role-cache" x="432" y="24" width="110" height="50"/><text class="diag-label" x="487" y="46" style="font-size:11px">Redis</text><text class="diag-sublabel" x="487" y="62">hot cache</text></g>
+          <path class="diag-arrow-path" data-id="a4" d="M542,49 L577,49" marker-end="url(#bitlyArrow)"/>
+          <text class="diag-sublabel" x="559" y="39" style="font-size:9px">miss</text>
+          <g data-target="deepdive-idgen" data-id="db" data-tip="Source of truth for the URL mapping — only touched on a cache miss"><rect class="diag-box role-db" x="577" y="24" width="130" height="50"/><text class="diag-label" x="642" y="46" style="font-size:11px">Postgres</text><text class="diag-sublabel" x="642" y="62">source of truth</text></g>
+
+          <circle class="diag-dot diag-flow-dot" r="3.5" style="offset-path: path('M10,120 L60,120 L60,158 L120,158 L120,196 L180,196 L180,234 L240,234')"></circle>
+
+          <text class="diag-sublabel" x="150" y="102" style="font-size:10px;fill:var(--blue)">WRITE PATH — shorten</text>
+          <g data-target="deepdive-idgen" data-id="client-w" data-tip="Submits a long URL to be shortened"><rect class="diag-box role-client" x="10" y="112" width="95" height="46" data-id="client-w"/><text class="diag-label" x="57" y="140" style="font-size:11px">Client</text></g>
+          <path class="diag-arrow-path" data-id="b1" d="M105,135 L138,135 L138,158" marker-end="url(#bitlyArrowB)"/>
+          <g data-target="deepdive-idgen" data-id="gw" data-tip="Single entry point — auth, rate limiting per user"><rect class="diag-box role-client" x="90" y="158" width="115" height="46"/><text class="diag-label" x="147" y="185" style="font-size:11px">API Gateway</text></g>
+          <path class="diag-arrow-path" data-id="b2" d="M205,181 L238,181 L238,204" marker-end="url(#bitlyArrowB)"/>
+          <g data-target="deepdive-idgen" data-id="shortsvc" data-tip="Validates URL, checks custom alias namespace, requests an ID"><rect class="diag-box" x="200" y="204" width="130" height="46"/><text class="diag-label" x="265" y="227" style="font-size:11px">Shorten Svc</text><text class="diag-sublabel" x="265" y="242" style="font-size:8.5px">stateless pods</text></g>
+          <path class="diag-arrow-path" data-id="b3" d="M330,227 L365,227 L365,250" marker-end="url(#bitlyArrowB)"/>
+          <g data-target="deepdive-idgen" data-id="idgen" data-tip="Snowflake node — mints a globally unique, roughly time-sortable 64-bit ID with zero DB round-trip"><rect class="diag-box role-async" x="330" y="250" width="130" height="46"/><text class="diag-label" x="395" y="273" style="font-size:11px">Snowflake</text><text class="diag-sublabel" x="395" y="288" style="font-size:8.5px">ID gen</text></g>
+          <path class="diag-arrow-path" d="M460,273 L495,273" marker-end="url(#bitlyArrowB)"/>
+          <g data-id="db2" data-tip="Persists short_code (base62 of the Snowflake ID) mapped to long_url"><rect class="diag-box role-db" x="495" y="248" width="130" height="50"/><text class="diag-label" x="560" y="270" style="font-size:11px">Postgres</text><text class="diag-sublabel" x="560" y="286" style="font-size:8.5px">write</text></g>
+
+          <text class="diag-sublabel" x="150" y="200" style="font-size:10px;fill:var(--amber)">ASYNC — click analytics</text>
+          <path class="diag-arrow-path" data-id="e1" d="M398,74 C398,90 330,90 330,112" marker-end="url(#bitlyArrowA)"/>
+          <g data-target="deepdive-analytics" data-id="kafka" data-tip="Redirect fires-and-forgets a click event here — never blocks the response"><rect class="diag-box role-async" x="265" y="112" width="130" height="46"/><text class="diag-label" x="330" y="135" style="font-size:11px">Kafka</text><text class="diag-sublabel" x="330" y="150" style="font-size:8.5px">click_events</text></g>
+          <path class="diag-arrow-path" d="M395,135 L430,135" marker-end="url(#bitlyArrowA)"/>
+          <g data-target="deepdive-analytics" data-id="consumer" data-tip="Consumes and aggregates click events off the hot path"><rect class="diag-box role-async" x="430" y="112" width="140" height="46"/><text class="diag-label" x="500" y="135" style="font-size:11px">Analytics Consumer</text></g>
+          <path class="diag-arrow-path" d="M570,135 L605,135" marker-end="url(#bitlyArrowA)"/>
+          <g data-target="deepdive-analytics" data-id="clickhouse" data-tip="Column store built for fast aggregation over billions of click rows"><rect class="diag-box role-db" x="605" y="112" width="130" height="46"/><text class="diag-label" x="670" y="135" style="font-size:11px">ClickHouse</text></g>
+
+        </svg>
+        <div class="diag-legend">
+          <div class="diag-legend-item"><span class="diag-legend-dot role-client"></span>Client / gateway entry points</div>
+          <div class="diag-legend-item"><span class="diag-legend-dot role-cache"></span>CDN + Redis — read hot path</div>
+          <div class="diag-legend-item"><span class="diag-legend-dot role-db"></span>Postgres / ClickHouse — durable storage</div>
+          <div class="diag-legend-item"><span class="diag-legend-dot role-async"></span>Snowflake + Kafka — async / ID gen</div>
+        </div>
+      </div>
+      <div class="callout info">Click any box above to jump to its deep dive below.</div>
+    </section>
+
+    <section id="datamodel">
+      <h2>Data model</h2>
+      <pre style="background:var(--surface2);border:1px solid var(--border);border-radius:6px;padding:14px;font-size:12px;overflow-x:auto;color:#ddd;line-height:1.6"><code>-- Postgres: source of truth, indexed for O(1) short_code lookup
+CREATE TABLE urls (
+  id          BIGINT PRIMARY KEY,           -- Snowflake ID (64-bit)
+  short_code  VARCHAR(10) UNIQUE NOT NULL,  -- base62(id) — e.g. "gH3xK2p"
+  long_url    TEXT NOT NULL,
+  user_id     BIGINT,                       -- nullable, anonymous allowed
+  is_custom   BOOLEAN DEFAULT FALSE,        -- true = user-chosen alias
+  created_at  TIMESTAMP DEFAULT NOW(),
+  expires_at  TIMESTAMP                     -- null = never expires
+);
+CREATE UNIQUE INDEX idx_short_code ON urls(short_code);   -- redirect hot path
+
+-- Separate namespace: prevents a custom alias colliding with a Snowflake-derived code
+CREATE TABLE custom_aliases (
+  alias       VARCHAR(50) PRIMARY KEY,
+  url_id      BIGINT REFERENCES urls(id)
+);
+
+-- ClickHouse: append-only, wide, optimized for aggregation not point lookups
+CREATE TABLE click_events (
+  short_code  String,
+  ts          DateTime,
+  country     LowCardinality(String),
+  referrer    String,
+  user_agent  String
+) ENGINE = MergeTree ORDER BY (short_code, ts);</code></pre>
+      <div class="callout good"><strong>Why Postgres for URLs:</strong> low volume of writes relative to reads (12k/s vs 120k/s), strong uniqueness constraint needed on short_code, and rows are small — a single primary with read replicas comfortably handles 300M rows (~180GB/yr). <strong>Why ClickHouse for clicks:</strong> billions of append-only rows/day where the query pattern is "count/group by," which is exactly what a column store is built for.</div>
+    </section>
+
+    <section id="decisions">
+      <h2>Core design decisions</h2>
+
+      <div class="decision-acc expanded">
+        <button class="decision-acc-head" type="button"><span><span class="decision-acc-choice">Snowflake IDs</span> over hashing or a DB auto-increment counter</span><svg class="decision-acc-chevron" viewBox="0 0 16 16" width="12" height="12"><path d="M4 6l4 4 4-4" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg></button>
+        <div class="decision-acc-body"><div class="decision-acc-body-inner"><div class="decision-acc-content">
+          <div class="why"><strong>Why:</strong> Globally unique by construction, no coordination or uniqueness check needed on write, and roughly time-sortable which helps with index locality.</div>
+          <div class="tradeoff"><strong>Tradeoff:</strong> requires a machine/node ID to be provisioned per generator instance — a small operational cost versus a DB counter's simplicity.</div>
+        </div></div></div>
+      </div>
+
+      <div class="decision-acc">
+        <button class="decision-acc-head" type="button"><span><span class="decision-acc-choice">302 redirect</span> by default, not 301</span><svg class="decision-acc-chevron" viewBox="0 0 16 16" width="12" height="12"><path d="M4 6l4 4 4-4" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg></button>
+        <div class="decision-acc-body"><div class="decision-acc-body-inner"><div class="decision-acc-content">
+          <div class="why"><strong>Why:</strong> 302 (temporary) means every click reaches the server, which is what click analytics requires — Bitly's core value proposition.</div>
+          <div class="tradeoff"><strong>Tradeoff:</strong> 301 would let browsers cache the redirect and reduce server load, but you'd lose visibility after the first visit per browser.</div>
+          <div class="dial-wrap" style="margin-top:10px"><div class="dial-title">Redirect choice: analytics fidelity vs server load</div><div class="dial-track"><div class="dial-marker" style="left:20%"></div></div><div class="dial-labels"><span class="end-left">302 (analytics)</span><span class="end-right">301 (browser cache)</span></div></div>
+        </div></div></div>
+      </div>
+
+      <div class="decision-acc">
+        <button class="decision-acc-head" type="button"><span><span class="decision-acc-choice">Two-layer caching</span> — CDN edge plus Redis</span><svg class="decision-acc-chevron" viewBox="0 0 16 16" width="12" height="12"><path d="M4 6l4 4 4-4" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg></button>
+        <div class="decision-acc-body"><div class="decision-acc-body-inner"><div class="decision-acc-content">
+          <div class="why"><strong>Why:</strong> CDN eliminates the network round-trip to origin entirely for popular links; Redis catches everything else before it hits Postgres.</div>
+          <div class="tradeoff"><strong>Tradeoff:</strong> stale CDN entries on delete/expire — mitigated with a short TTL (60s) plus an explicit purge call on delete.</div>
+        </div></div></div>
+      </div>
+
+      <div class="decision-acc">
+        <button class="decision-acc-head" type="button"><span><span class="decision-acc-choice">Separate namespace</span> for custom aliases</span><svg class="decision-acc-chevron" viewBox="0 0 16 16" width="12" height="12"><path d="M4 6l4 4 4-4" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg></button>
+        <div class="decision-acc-body"><div class="decision-acc-body-inner"><div class="decision-acc-content">
+          <div class="why"><strong>Why:</strong> A user picking "/my-brand" must never silently collide with a Snowflake-generated code — keeping them in separate tables makes collision-checking a simple existence query against one table, not a probabilistic guess.</div>
+          <div class="tradeoff"><strong>Tradeoff:</strong> redirect lookups now check two tables (or a UNION) instead of one — negligible cost since both are indexed.</div>
+        </div></div></div>
+      </div>
+
+      <div class="decision-acc">
+        <button class="decision-acc-head" type="button"><span><span class="decision-acc-choice">Async click pipeline</span> via Kafka, not synchronous DB writes</span><svg class="decision-acc-chevron" viewBox="0 0 16 16" width="12" height="12"><path d="M4 6l4 4 4-4" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg></button>
+        <div class="decision-acc-body"><div class="decision-acc-body-inner"><div class="decision-acc-content">
+          <div class="why"><strong>Why:</strong> the redirect response must never wait on an analytics write — Kafka absorbs bursts and decouples producer (redirect service) from consumer (analytics pipeline).</div>
+          <div class="tradeoff"><strong>Tradeoff:</strong> click counts are eventually consistent — a dashboard might lag reality by seconds. Acceptable since analytics isn't in any user-facing critical path.</div>
+          <div class="dial-wrap" style="margin-top:10px"><div class="dial-title">Click analytics consistency</div><div class="dial-track"><div class="dial-marker" style="left:85%"></div></div><div class="dial-labels"><span class="end-left">Strong</span><span class="end-right">Eventual</span></div></div>
+        </div></div></div>
+      </div>
+
+      <div class="decision-acc">
+        <button class="decision-acc-head" type="button"><span><span class="decision-acc-choice">Background sweep</span> for expiration, not per-request TTL checks alone</span><svg class="decision-acc-chevron" viewBox="0 0 16 16" width="12" height="12"><path d="M4 6l4 4 4-4" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg></button>
+        <div class="decision-acc-body"><div class="decision-acc-body-inner"><div class="decision-acc-content">
+          <div class="why"><strong>Why:</strong> Redis TTL handles the hot-path check for free (key just disappears), but a periodic batch job is still needed to hard-delete expired rows from Postgres so the table doesn't grow unbounded.</div>
+          <div class="tradeoff"><strong>Tradeoff:</strong> a small window exists where a link is logically expired in Postgres but the sweep hasn't run yet — the Redis TTL check closes that gap for actual redirects.</div>
+        </div></div></div>
+      </div>
+
+      <script>
+      (function(){
+        document.querySelectorAll('.decision-acc-head').forEach(function(btn){
+          btn.addEventListener('click', function(){ btn.closest('.decision-acc').classList.toggle('expanded'); });
+        });
+      })();
+      </script>
+    </section>
+
+    <section id="deepdive-idgen">
+      <h2>Deep dive: Snowflake ID generation</h2>
+      <p style="font-size:13px;color:#999;margin-bottom:0.75rem">A 64-bit integer split into fields so IDs are unique across every generator node without a central counter or DB round-trip.</p>
+      <div class="bitfield">
+        <div class="bitfield-seg sign"><span class="bits">1</span><span class="lbl">sign</span></div>
+        <div class="bitfield-seg time"><span class="bits">41</span><span class="lbl">timestamp (ms)</span></div>
+        <div class="bitfield-seg node"><span class="bits">10</span><span class="lbl">node ID</span></div>
+        <div class="bitfield-seg seq"><span class="bits">12</span><span class="lbl">sequence</span></div>
+      </div>
+      <div class="bitfield-legend">
+        <div class="bitfield-legend-item"><span class="bitfield-legend-dot" style="background:#3a3a3a"></span>1 bit unused (always 0, keeps ID positive)</div>
+        <div class="bitfield-legend-item"><span class="bitfield-legend-dot" style="background:var(--accent)"></span>41 bits — ms since custom epoch, good for ~69 years</div>
+        <div class="bitfield-legend-item"><span class="bitfield-legend-dot" style="background:var(--blue)"></span>10 bits — up to 1024 generator nodes</div>
+        <div class="bitfield-legend-item"><span class="bitfield-legend-dot" style="background:var(--amber)"></span>12 bits — up to 4096 IDs per node per millisecond</div>
+      </div>
+      <ol class="flow-steps-list">
+        <li><span>Read current timestamp:</span> milliseconds since a custom epoch (e.g. service launch date, not Unix epoch — buys more usable years)</li>
+        <li><span>Attach node ID:</span> fixed per generator instance at boot (e.g. derived from a Kubernetes pod ordinal or ZooKeeper-assigned slot)</li>
+        <li><span>Increment sequence:</span> a local counter reset every millisecond, allowing up to 4096 IDs per node without collision in the same tick</li>
+        <li><span>Bit-pack and return:</span> no network call, no lock contention across nodes — the ID is unique by construction</li>
+        <li><span>Base62-encode for the short code:</span> the resulting 64-bit int is converted to base62 to produce the human-facing 7-11 character code</li>
+      </ol>
+      <div class="callout warn">Clock drift is the real failure mode: if a node's clock moves backward (NTP correction), it must refuse to generate IDs until it catches up, or two different timestamps could produce a colliding ID.</div>
+    </section>
+
+    <section id="deepdive-cache">
+      <h2>Deep dive: cache strategy — hit vs miss</h2>
+      <p style="font-size:13px;color:#999;margin-bottom:0.75rem">The entire &lt;10ms p99 target depends on the vast majority of redirects resolving in the top branch.</p>
+      <div class="flow-cmp-grid">
+        <div class="flow-cmp-col hit">
+          <div class="flow-cmp-title">✓ Cache hit — ~1-3ms</div>
+          <svg viewBox="0 0 320 130" xmlns="http://www.w3.org/2000/svg">
+            <defs><marker id="bitlyHitArrow" markerWidth="8" markerHeight="8" refX="6" refY="3" orient="auto"><path d="M0,0 L6,3 L0,6 Z" fill="var(--accent)"/></marker></defs>
+            <path class="bitly-hit-arrow-1" d="M95,40 L195,40" stroke="var(--accent)" stroke-width="2" marker-end="url(#bitlyHitArrow)" fill="none"/>
+            <path class="bitly-hit-arrow-2" d="M195,60 L95,60" stroke="var(--accent)" stroke-width="2" marker-end="url(#bitlyHitArrow)" fill="none"/>
+            <circle class="diag-dot diag-flow-dot" r="3" style="offset-path: path('M95,40 L195,40')"></circle>
+            <rect class="diag-box role-client" x="10" y="20" width="85" height="50" data-tip="Redirect Svc queries Redis for short_code"></rect>
+            <text class="diag-label" x="52" y="40">Redirect</text>
+            <text class="diag-sublabel" x="52" y="55">GET code</text>
+            <g data-tip="In-memory lookup — no disk I/O, no origin round trip">
+              <rect class="diag-box role-cache" x="195" y="15" width="115" height="60" rx="6"></rect>
+              <text class="diag-label" x="252" y="38" style="font-weight:600">Redis</text>
+              <text class="diag-sublabel" x="252" y="53">key found</text>
+              <text class="diag-sublabel" x="252" y="65" style="fill:var(--accent)">~1-3ms</text>
+            </g>
+            <text x="145" y="100" text-anchor="middle" font-size="10" fill="var(--accent)" font-family="Inter,sans-serif">key exists → issue 302 immediately</text>
+          </svg>
+          <button class="flow-cmp-replay" data-replay="bitly-hit-arrow-1,bitly-hit-arrow-2">▸ Replay</button>
+        </div>
+        <div class="flow-cmp-col miss">
+          <div class="flow-cmp-title">✗ Cache miss — ~15-30ms</div>
+          <svg viewBox="0 0 420 130" xmlns="http://www.w3.org/2000/svg">
+            <defs><marker id="bitlyMissArrow" markerWidth="8" markerHeight="8" refX="6" refY="3" orient="auto"><path d="M0,0 L6,3 L0,6 Z" fill="var(--amber)"/></marker></defs>
+            <path class="bitly-miss-arrow-1" d="M95,40 L195,40" stroke="var(--amber)" stroke-width="2" marker-end="url(#bitlyMissArrow)" fill="none"/>
+            <path class="bitly-miss-arrow-2" d="M310,40 L405,40" stroke="var(--amber)" stroke-width="2" marker-end="url(#bitlyMissArrow)" stroke-dasharray="4 3" fill="none"/>
+            <path class="bitly-miss-arrow-3" d="M405,60 L310,60" stroke="var(--amber)" stroke-width="2" marker-end="url(#bitlyMissArrow)" stroke-dasharray="4 3" fill="none"/>
+            <path class="bitly-miss-arrow-4" d="M195,75 L95,75" stroke="var(--amber)" stroke-width="2" marker-end="url(#bitlyMissArrow)" fill="none"/>
+            <circle class="diag-dot diag-flow-dot" r="3" style="offset-path: path('M95,40 L195,40')"></circle>
+            <rect class="diag-box role-client" x="10" y="20" width="85" height="55" data-tip="Redirect Svc queries Redis for short_code"></rect>
+            <text class="diag-label" x="52" y="42">Redirect</text>
+            <text class="diag-sublabel" x="52" y="57">GET code</text>
+            <g data-tip="Key not found — falls through to Postgres, then SETs the result back with a TTL">
+              <rect class="diag-box role-cache" x="195" y="15" width="115" height="65" rx="6"></rect>
+              <text class="diag-label" x="252" y="35" style="font-weight:600">Redis</text>
+              <text class="diag-sublabel" x="252" y="50">MISS</text>
+              <text class="diag-sublabel" x="252" y="62" style="fill:var(--amber)">SET back</text>
+            </g>
+            <g data-tip="Indexed lookup on short_code — much slower than memory but still sub-30ms">
+              <rect class="diag-box role-db" x="310" y="15" width="100" height="55" rx="6"></rect>
+              <text class="diag-label" x="360" y="38">Postgres</text>
+              <text class="diag-sublabel" x="360" y="53" style="fill:var(--amber)">~15-30ms</text>
+            </g>
+            <text x="160" y="105" text-anchor="middle" font-size="10" fill="var(--amber)" font-family="Inter,sans-serif">miss → query DB → cache result → return</text>
+          </svg>
+          <button class="flow-cmp-replay" data-replay="bitly-miss-arrow-1,bitly-miss-arrow-2,bitly-miss-arrow-3,bitly-miss-arrow-4">▸ Replay</button>
+        </div>
+      </div>
+      <script>
+      (function(){
+        document.querySelectorAll('.flow-cmp-replay').forEach(function(btn){
+          if (btn.dataset.bound) return;
+          btn.dataset.bound = '1';
+          btn.addEventListener('click', function(){
+            var classes = btn.dataset.replay.split(',');
+            var svg = btn.previousElementSibling;
+            classes.forEach(function(cls){
+              var path = svg.querySelector('.' + cls);
+              if (!path) return;
+              var len = path.getTotalLength ? path.getTotalLength() : 100;
+              path.style.strokeDasharray = len;
+              path.style.strokeDashoffset = len;
+              path.getBoundingClientRect();
+              path.style.transition = 'stroke-dashoffset 0.5s ease';
+              path.style.strokeDashoffset = 0;
+            });
+          });
+        });
+      })();
+      </script>
+      <div class="callout good">At Bitly's scale, cache hit rate needs to stay above ~95% — a small fraction of links (the viral ones) drive the majority of traffic, so LRU eviction naturally keeps the hot set in Redis.</div>
+    </section>
+
+    <section id="deepdive-analytics">
+      <h2>Deep dive: analytics pipeline</h2>
+      <p style="font-size:13px;color:#999;margin-bottom:0.75rem">Counting a billion clicks a day without ever touching the redirect's response time.</p>
+      <ol class="flow-steps-list">
+        <li><span>Fire-and-forget emit:</span> the redirect service publishes a click event to Kafka after already sending the 302 response — the publish is non-blocking</li>
+        <li><span>Kafka buffers the burst:</span> a viral link spiking to 100k clicks/sec doesn't overwhelm downstream consumers — it just queues</li>
+        <li><span>Consumer batches writes:</span> the analytics consumer reads in batches (e.g. every 1-5s or every N events) and bulk-inserts into ClickHouse rather than one row at a time</li>
+        <li><span>ClickHouse aggregates on read:</span> dashboards query pre-aggregated or on-the-fly grouped counts — this is what column stores are built for</li>
+        <li><span>Denormalized click_count on the urls row:</span> updated asynchronously from the same consumer for a cheap "total clicks" read without hitting ClickHouse on every profile view</li>
+      </ol>
+    </section>
+
+    <section id="bottlenecks">
+      <h2>Bottlenecks and scale tactics</h2>
+      <table class="grid-table">
+        <thead><tr><th>Bottleneck</th><th>Trigger condition</th><th>Exact fix</th></tr></thead>
+        <tbody>
+          <tr><td>Redis cache overload</td><td>Cache hit rate drops below ~90%</td><td class="fix">Shard Redis by short_code hash; increase node count; raise maxmemory with LRU eviction tuned to working set size</td></tr>
+          <tr><td>Postgres read overload on miss</td><td>&gt;20k QPS hitting the primary</td><td class="fix">Add read replicas behind the redirect service; route cache-miss reads to replicas, not primary</td></tr>
+          <tr><td>Single viral link hotspot</td><td>One short_code gets 1M+ RPS</td><td class="fix">CDN caches the 302 response at edge; Redis replicates the hot key to a local read replica per region</td></tr>
+          <tr><td>Write throughput on shorten</td><td>&gt;15k shortens/sec</td><td class="fix">Snowflake generators scale horizontally with zero coordination; shard Postgres writes by short_code prefix</td></tr>
+          <tr><td>Kafka consumer lag</td><td>Click event backlog grows unbounded</td><td class="fix">Scale out consumer group partitions; batch ClickHouse inserts larger to raise throughput per consumer</td></tr>
+        </tbody>
+      </table>
+    </section>
+
+    <section id="failures">
+      <h2>Failure modes</h2>
+      <table class="grid-table">
+        <thead><tr><th>Failure</th><th>User impact</th><th>Detection signal</th><th>Mitigation</th></tr></thead>
+        <tbody>
+          <tr><td>Redis cluster down</td><td class="impact">Redirect latency spikes 10-30x</td><td class="detect">Cache miss rate alert &gt;50%</td><td class="fix">Circuit breaker falls back to Postgres directly; auto-scale read replicas</td></tr>
+          <tr><td>Postgres primary down</td><td class="impact">Writes fail; cache misses fail</td><td class="detect">Write error rate spike + replication lag alarm</td><td class="fix">Promote a read replica to primary via automated failover (e.g. Patroni)</td></tr>
+          <tr><td>Kafka broker outage</td><td class="impact">None to redirects; analytics stalls</td><td class="detect">Consumer lag metric climbing, producer errors</td><td class="fix">Redirect service drops click events after a short retry — analytics loss is acceptable, redirect must not degrade</td></tr>
+          <tr><td>CDN misconfiguration</td><td class="impact">All redirect traffic hits origin — 10x+ spike</td><td class="detect">Origin request rate anomaly vs baseline</td><td class="fix">Rate limit at the API gateway; redirect pods auto-scale on CPU/RPS</td></tr>
+          <tr><td>Snowflake node clock drift</td><td class="impact">Potential duplicate ID (extremely rare)</td><td class="detect">NTP drift alert on generator hosts</td><td class="fix">Node refuses to generate IDs until its clock catches up past the last-issued timestamp</td></tr>
+        </tbody>
+      </table>
+    </section>
+
+    <section id="interview-moves">
+      <h2>Interview moves</h2>
+      <ul class="moves-list">
+        <li><span class="move-num">01</span><div><strong>"This is read-heavy at roughly 1000:1, so I'll design the redirect path first and treat shortening as the secondary concern"</strong> — immediately signals you understand where the engineering effort should go</div></li>
+        <li><span class="move-num">02</span><div><strong>"I'd use Snowflake IDs instead of a DB auto-increment counter to avoid a single-writer bottleneck at scale"</strong> — shows you've thought past the naive solution before being asked</div></li>
+        <li><span class="move-num">03</span><div><strong>"302 over 301 here since click analytics is a stated requirement — 301 would get cached by the browser and we'd lose visibility after the first hit"</strong> — ties a technical choice directly back to a requirement</div></li>
+        <li><span class="move-num">04</span><div><strong>"I'll decouple click tracking into Kafka so a slow analytics write never adds latency to the redirect's critical path"</strong> — demonstrates instinct for isolating hot paths from side effects</div></li>
+        <li><span class="move-num">05</span><div><strong>"Custom aliases go into a separate table from generated codes so a user-chosen alias can never silently collide with a Snowflake-derived one"</strong> — a subtlety most candidates miss entirely</div></li>
+        <li><span class="move-num">06</span><div><strong>"At 1M peak RPS on a single viral link, even Redis needs help — I'd lean on CDN edge caching so most of that traffic never reaches our infrastructure at all"</strong> — shows awareness that caching has layers, not just one tier</div></li>
+      </ul>
+    </section>
+
+    <section id="follow-ups">
+      <h2>Follow-up questions</h2>
+      <div class="qa-block">
+        <div class="qa-q">How do you prevent short code enumeration attacks (someone scanning all possible codes)?</div>
+        <div class="qa-a">Rate limit per IP/user at the gateway. Base62 with 7+ chars gives 62^7 ≈ 3.5 trillion combinations, making brute-force scanning economically infeasible even without rate limiting.</div>
+      </div>
+      <div class="qa-block">
+        <div class="qa-q">What happens if the same long URL is submitted by two different users?</div>
+        <div class="qa-a">Each gets a distinct short code by default — dedup by hashing long_url would save storage but adds a lookup on every write and complicates per-user ownership and expiration.</div>
+      </div>
+      <div class="qa-block">
+        <div class="qa-q">How would you extend this to support 10x the scale?</div>
+        <div class="qa-a">Shard Postgres by short_code prefix, extend the code to 8+ characters, add more Snowflake node IDs, and make CDN edge caching mandatory rather than optional for all traffic.</div>
+      </div>
+      <div class="qa-block">
+        <div class="qa-q">How do you handle a malicious long URL (phishing, malware)?</div>
+        <div class="qa-a">Check against Google Safe Browsing (or similar) synchronously at shorten time, and re-scan periodically; allow user reports to flag and auto-disable a short code.</div>
+      </div>
+      <div class="qa-block">
+        <div class="qa-q">Why not just use the DB's auto-increment for IDs given the write QPS is relatively low?</div>
+        <div class="qa-a">It would work at 12k/s on a single writer, but it's a single point of contention and doesn't scale horizontally — Snowflake costs little extra complexity and removes that ceiling entirely.</div>
+      </div>
+      <div class="qa-block">
+        <div class="qa-q">How do you keep the CDN cache and Redis cache consistent when a URL is deleted?</div>
+        <div class="qa-a">Set a short TTL (~60s) on both layers as a safety net, and fire an explicit purge/invalidate call to the CDN and a Redis DEL on delete rather than relying on TTL alone.</div>
+      </div>
+    </section>
+
+  </main>
+  <script src="../../assets/nav.js"></script>
+</body>
+</html>

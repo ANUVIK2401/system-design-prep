@@ -889,3 +889,83 @@ code {
   .flow-cmp-grid { grid-template-columns: 1fr; }
   .cap-detail-title, .cap-detail-body { font-size: 12px; }
 }
+
+/* ── Decision accordion (Core Design Decisions section) ── */
+.decision-acc { border: 1px solid var(--border); border-radius: 8px; margin-bottom: 8px; overflow: hidden; background: var(--surface); }
+.decision-acc-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  width: 100%;
+  padding: 12px 14px;
+  background: transparent;
+  border: none;
+  color: var(--text);
+  font-family: inherit;
+  font-size: 13px;
+  font-weight: 500;
+  text-align: left;
+  cursor: pointer;
+}
+.decision-acc-head:hover { background: var(--surface2); }
+.decision-acc-choice { color: var(--accent); font-weight: 600; }
+.decision-acc-chevron { flex-shrink: 0; color: var(--muted); transition: transform 0.2s ease; }
+.decision-acc.expanded .decision-acc-chevron { transform: rotate(180deg); color: var(--accent); }
+.decision-acc-body {
+  display: grid;
+  grid-template-rows: 0fr;
+  transition: grid-template-rows 0.25s ease;
+}
+.decision-acc.expanded .decision-acc-body { grid-template-rows: 1fr; }
+.decision-acc-body-inner { overflow: hidden; }
+.decision-acc-content { padding: 0 14px 14px; font-size: 13px; color: #bbb; line-height: 1.6; }
+.decision-acc-content .why  { color: var(--text); margin-bottom: 6px; }
+.decision-acc-content .why strong { color: var(--blue); font-weight: 600; }
+.decision-acc-content .tradeoff strong { color: var(--amber); font-weight: 600; }
+
+/* ── Scannable bottleneck / failure grid tables ── */
+.grid-table { width: 100%; border-collapse: collapse; margin-bottom: 1rem; font-size: 12.5px; }
+.grid-table th {
+  text-align: left;
+  font-size: 10.5px;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--muted);
+  padding: 8px 10px;
+  border-bottom: 1px solid var(--border2);
+  white-space: nowrap;
+}
+.grid-table td {
+  padding: 10px;
+  border-bottom: 1px solid #1a1a1a;
+  vertical-align: top;
+  color: #ccc;
+}
+.grid-table tr:last-child td { border-bottom: none; }
+.grid-table td:first-child { color: var(--text); font-weight: 500; white-space: nowrap; }
+.grid-table td.impact { color: var(--red); }
+.grid-table td.fix { color: var(--accent); }
+.grid-table td.detect { color: var(--blue); }
+
+/* ── Bit-field diagram (Snowflake ID layout) ── */
+.bitfield { display: flex; width: 100%; border-radius: 6px; overflow: hidden; margin-bottom: 10px; border: 1px solid var(--border2); }
+.bitfield-seg { padding: 14px 4px; text-align: center; font-size: 11px; font-weight: 600; color: #08120c; position: relative; }
+.bitfield-seg .bits { display: block; font-size: 15px; margin-bottom: 3px; }
+.bitfield-seg .lbl { display: block; font-size: 9.5px; font-weight: 500; opacity: 0.85; }
+.bitfield-seg.sign   { background: #3a3a3a; color: #ddd; flex: 0 0 3%; }
+.bitfield-seg.time   { background: var(--accent); flex: 0 0 62%; }
+.bitfield-seg.node   { background: var(--blue); flex: 0 0 20%; }
+.bitfield-seg.seq    { background: var(--amber); flex: 0 0 15%; }
+.bitfield-legend { display: flex; gap: 16px; flex-wrap: wrap; font-size: 11px; color: var(--muted); margin-bottom: 1rem; }
+.bitfield-legend-item { display: flex; align-items: center; gap: 6px; }
+.bitfield-legend-dot { width: 8px; height: 8px; border-radius: 2px; flex-shrink: 0; }
+
+/* ── State machine diagram ── */
+.state-node { fill: var(--surface); stroke: var(--border2); stroke-width: 1.5; }
+.state-node.irreversible { stroke: var(--amber); }
+.state-node.terminal { stroke: var(--accent); }
+.state-label { font-family: 'Inter', sans-serif; font-size: 11px; fill: var(--text); text-anchor: middle; font-weight: 500; }
+.state-sublabel { font-family: 'Inter', sans-serif; font-size: 9px; fill: var(--muted); text-anchor: middle; }
+.state-arrow { fill: none; stroke: var(--border2); stroke-width: 1.5; }
+.state-arrow.irreversible { stroke: var(--amber); stroke-dasharray: 4 3; }
