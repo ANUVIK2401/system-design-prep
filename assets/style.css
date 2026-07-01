@@ -185,6 +185,17 @@ body {
   transition: border-color 0.15s, color 0.15s, background 0.15s;
 }
 .sb-topic-name { overflow: hidden; text-overflow: ellipsis; }
+.sb-new-tag {
+  flex-shrink: 0;
+  font-size: 8px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  color: var(--bg);
+  background: var(--accent);
+  border-radius: 3px;
+  padding: 1px 5px;
+  margin-left: auto;
+}
 #sidebar a.sb-topic-link.done .sb-step-mark {
   border-color: #1e4a38;
   background: #0d1f17;
@@ -251,6 +262,7 @@ main {
 .badge.green { color: var(--accent); border-color: #1e4a38; background: #0d1f17; }
 .badge.blue  { color: var(--blue);   border-color: #1e3a5f; background: #0d1a2d; }
 .badge.amber { color: var(--amber);  border-color: #4a3a1e; background: #1a1400; }
+.badge.new   { color: var(--bg); border-color: var(--accent); background: var(--accent); font-weight: 700; }
 
 /* ── Flash card ── */
 .flash-card {
@@ -316,11 +328,12 @@ section.collapsed .sec-body {
   opacity: 0;
 }
 
-/* ── Scroll-reveal fade-in ── */
+/* ── Scroll-reveal fade-in (tightened: 12px/180ms, staggered 60ms between siblings) ── */
 .reveal {
   opacity: 0;
-  transform: translateY(10px);
-  transition: opacity 0.2s ease, transform 0.2s ease;
+  transform: translateY(12px);
+  transition: opacity 0.18s ease, transform 0.18s ease;
+  transition-delay: var(--reveal-delay, 0ms);
 }
 .reveal.in-view {
   opacity: 1;
@@ -380,7 +393,14 @@ section.collapsed .sec-body {
 
 /* ── SVG architecture diagram ── */
 .diagram-wrap {
-  background: var(--surface);
+  background:
+    linear-gradient(#ffffff04, #ffffff04),
+    var(--surface);
+  background-image:
+    linear-gradient(90deg, #ffffff04 1px, transparent 1px),
+    linear-gradient(#ffffff04 1px, transparent 1px),
+    linear-gradient(var(--surface), var(--surface));
+  background-size: 22px 22px, 22px 22px, 100% 100%;
   border: 1px solid var(--border);
   border-radius: 10px;
   padding: 1.25rem;
@@ -443,12 +463,32 @@ section.collapsed .sec-body {
   offset-rotate: 0deg;
   animation: diagFlow 2s linear infinite;
 }
+/* Path-colored flow dots: write=blue, read=accent(mint), async=amber */
+.diag-flow-dot.dot-write { fill: var(--blue);   filter: drop-shadow(0 0 3px rgba(147,197,253,0.7)); }
+.diag-flow-dot.dot-read  { fill: var(--accent);  filter: drop-shadow(0 0 3px rgba(110,231,183,0.7)); }
+.diag-flow-dot.dot-async { fill: var(--amber);   filter: drop-shadow(0 0 3px rgba(251,191,36,0.7)); }
 @keyframes diagFlow {
   0%   { offset-distance: 0%; opacity: 0; }
   8%   { opacity: 1; }
   92%  { opacity: 1; }
   100% { offset-distance: 100%; opacity: 0; }
 }
+
+/* ── Component highlight pulse on click (mint flash, 300ms) ── */
+@keyframes diagBoxPulse {
+  0%   { filter: drop-shadow(0 0 0 rgba(110,231,183,0)); }
+  40%  { filter: drop-shadow(0 0 6px rgba(110,231,183,0.9)); }
+  100% { filter: drop-shadow(0 0 0 rgba(110,231,183,0)); }
+}
+.diag-box.box-clicked { animation: diagBoxPulse 0.3s ease; stroke: var(--accent) !important; }
+
+/* ── State machine arrows: draw-on-scroll (stroke-dashoffset) ── */
+.state-arrow.draw-in {
+  stroke-dasharray: 300;
+  stroke-dashoffset: 300;
+  transition: stroke-dashoffset 0.4s ease;
+}
+.state-arrow.draw-in.drawn { stroke-dashoffset: 0; }
 .diag-legend { display: flex; gap: 14px; flex-wrap: wrap; margin-top: 10px; padding-top: 10px; border-top: 1px solid var(--border); }
 .diag-legend-item { display: flex; align-items: center; gap: 6px; font-size: 11px; color: var(--muted); }
 .diag-legend-dot { width: 8px; height: 8px; border-radius: 2px; flex-shrink: 0; }
@@ -471,6 +511,7 @@ section.collapsed .sec-body {
 .dial-marker {
   position: absolute;
   top: 50%;
+  left: 50%;
   width: 12px;
   height: 12px;
   border-radius: 50%;
@@ -478,6 +519,7 @@ section.collapsed .sec-body {
   border: 2px solid var(--bg);
   transform: translate(-50%, -50%);
   box-shadow: 0 0 0 1px var(--border2);
+  transition: left 0.6s ease-out;
 }
 .dial-labels { display: flex; justify-content: space-between; font-size: 10.5px; color: var(--muted); }
 .dial-labels .end-left  { color: var(--blue); }
@@ -609,6 +651,8 @@ section.collapsed .sec-body {
   font-weight: 500;
   color: var(--blue);
   margin-bottom: 6px;
+  cursor: pointer;
+  user-select: none;
 }
 .qa-q::before { content: "Q "; color: var(--faint); font-weight: 600; }
 .qa-a {
@@ -617,6 +661,8 @@ section.collapsed .sec-body {
   padding-left: 1rem;
   border-left: 2px solid var(--border2);
   line-height: 1.6;
+  overflow: hidden;
+  transition: max-height 0.2s ease, opacity 0.2s ease;
 }
 
 /* ── Callout boxes ── */
@@ -651,7 +697,7 @@ code {
   border-radius: 6px;
   padding: 12px 14px;
 }
-.stat-val { font-size: 28px; font-weight: 700; color: var(--accent); line-height: 1; margin-bottom: 4px; }
+.stat-val { font-size: 28px; font-weight: 700; color: var(--accent); line-height: 1; margin-bottom: 4px; font-variant-numeric: tabular-nums; }
 .stat-label { font-size: 11px; color: var(--muted); }
 
 /* ── Index page ── */
@@ -770,18 +816,41 @@ code {
   .diag-flow-dot { animation: none; }
   .reveal { opacity: 1; transform: none; transition: none; }
   .topic-card { animation: none; opacity: 1; transform: none; }
-  .flash-card { animation: none !important; }
+  .flash-card { animation: none !important; box-shadow: none !important; }
   .hash-node, .shard-box, .flow-cmp-step { animation: none !important; }
+  .diag-box.box-clicked { animation: none !important; }
+  .state-arrow.draw-in { stroke-dasharray: none; stroke-dashoffset: 0; transition: none; }
+  .dial-marker { transition: none !important; }
+  .step-pill { transition: none !important; }
+  .step-pill.pill-active { transform: none; }
+  .sb-progress-fill { transition: none !important; }
+  .qa-a { transition: none !important; }
+  * { scroll-behavior: auto !important; }
 }
 
-/* ── Flash card load-in pulse (subtle, 2s, one breath cycle then settles) ── */
+/* ── Flash card: breathing glow (alive, not distracting) ── */
 .flash-card {
-  animation: flashPulse 2s ease-in-out 1;
+  animation: flashPulse 2s ease-in-out 1, flashBreathe 3s ease-in-out infinite;
 }
 @keyframes flashPulse {
   0%   { border-left-color: var(--accent); opacity: 0.6; }
   50%  { border-left-color: var(--accent); opacity: 1; }
   100% { border-left-color: var(--accent); opacity: 1; }
+}
+@keyframes flashBreathe {
+  0%   { box-shadow: 0 0 0 0 rgba(110,231,183,0); }
+  50%  { box-shadow: 0 0 12px 0 rgba(110,231,183,0.3); }
+  100% { box-shadow: 0 0 0 0 rgba(110,231,183,0); }
+}
+
+/* ── Flash card bullets: mint tick instead of default marker ── */
+.flash-card ul { list-style: none; padding-left: 0; }
+.flash-card li { padding-left: 1.1rem; position: relative; }
+.flash-card li::before {
+  content: "▸";
+  position: absolute;
+  left: 0;
+  color: var(--accent);
 }
 
 /* ── Diagram node tooltip (hover, 1-line) ── */
@@ -991,6 +1060,17 @@ code {
   border-radius: 20px;
   padding: 4px 12px;
   margin-bottom: 10px;
+  transition: transform 0.2s ease;
+}
+.step-pill.pill-active { transform: scale(1.05); }
+
+/* Sticky step pill: pins to top of viewport while scrolling through its section */
+section .step-pill {
+  position: sticky;
+  top: 0;
+  z-index: 10;
+  background: var(--bg);
+  padding: 8px 12px;
 }
 
 /* ── Goal arc banner — Hello Interview functional/non-functional spans ── */

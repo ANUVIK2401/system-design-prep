@@ -1,0 +1,501 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Design Robinhood (Trade Execution) — SD Prep</title>
+  <link rel="stylesheet" href="../../assets/style.css">
+</head>
+<body>
+  <aside id="sidebar"></aside>
+  <main>
+
+    <header class="page-head">
+      <div class="pill">Questions</div>
+      <h1>Design Robinhood (Trade Execution)</h1>
+      <p class="sub">Tests whether you treat trade execution as a financial-correctness problem first and a scale problem second — a network retry must never turn into a duplicate buy or sell.</p>
+      <div class="meta-row">
+        <span class="badge green">45-55 min interview</span>
+        <span class="badge blue">Hard</span>
+      </div>
+    </header>
+
+    <div class="flash-card">
+      <div class="flash-label">Say this in the first 2 minutes</div>
+      <ul>
+        <li>The core insight: order execution must be idempotent and exactly-once — a client retry after a timeout must never re-execute the same trade</li>
+        <li>Key scale number to anchor on: market open/close creates a ~100x QPS spike in seconds, not minutes — this is a burst problem, not a steady-growth problem</li>
+        <li>Portfolio reads outnumber writes roughly 1000:1, so the read path (balance/positions) and the write path (order placement) need completely different scaling strategies</li>
+        <li>Component most candidates get wrong: account balance must never be a single mutable column — it has to be derived from an append-only ledger or concurrent updates silently lose money</li>
+        <li>Failure mode most candidates skip: an exchange execution confirmation that's delayed or lost leaves an order stuck in "submitted" — you need a reconciliation job, not just hope</li>
+      </ul>
+    </div>
+
+    <section id="step1-requirements">
+      <div class="step-pill">Step 1 of 6 — Requirements</div>
+      <h2>Requirements</h2>
+
+      <div class="goal-arc-wrap">
+        <div class="goal-arc-row functional">
+          <div class="goal-arc-seg">1</div><div class="goal-arc-seg">2</div><div class="goal-arc-seg">3</div><div class="goal-arc-seg">4</div><div class="goal-arc-seg">5</div><div class="goal-arc-seg inactive">6</div>
+        </div>
+        <div class="goal-arc-label"><span>Arc 1 (steps 1-5) — <strong>Satisfy Functional Requirements</strong></span></div>
+        <div class="goal-arc-row nonfunctional" style="margin-top:8px">
+          <div class="goal-arc-seg">1</div><div class="goal-arc-seg">2</div><div class="goal-arc-seg">3</div><div class="goal-arc-seg">4</div><div class="goal-arc-seg">5</div><div class="goal-arc-seg">6</div>
+        </div>
+        <div class="goal-arc-label"><span>Arc 2 (all 6 steps) — <strong>Satisfy Non-Functional Requirements</strong></span></div>
+      </div>
+
+      <div class="compare-grid">
+        <div class="compare-card good">
+          <div class="compare-label">Functional</div>
+          <ul>
+            <li>User submits a market or limit order to buy/sell a security</li>
+            <li>Order is validated (buying power), routed to an exchange, and executed</li>
+            <li>User can view current portfolio: positions, cost basis, buying power</li>
+            <li>User sees live market data (quotes) for symbols they hold or watch</li>
+          </ul>
+        </div>
+        <div class="compare-card bad">
+          <div class="compare-label">Non-Functional</div>
+          <ul>
+            <li>Exactly-once order execution — a retried request must never double-execute</li>
+            <li>Handle a ~100x QPS spike at market open/close within seconds, not minutes</li>
+            <li>Portfolio reads vastly outnumber order writes — roughly 1000:1</li>
+            <li>Order-to-confirmation latency target &lt;500ms end to end under normal load</li>
+          </ul>
+        </div>
+      </div>
+
+      <div class="callout warn"><strong>What NOT to build:</strong> KYC/account-opening and identity verification flows, options or margin trading mechanics (assume simple cash equities only), and tax-document generation (1099-B, wash-sale tracking). This is order placement, execution, and portfolio state only.</div>
+
+      <div class="stat-grid">
+        <div class="stat-card"><div class="stat-val">22M</div><div class="stat-label">active users</div></div>
+        <div class="stat-card"><div class="stat-val">1000:1</div><div class="stat-label">portfolio reads vs order writes</div></div>
+        <div class="stat-card"><div class="stat-val">100x</div><div class="stat-label">QPS spike at market open/close</div></div>
+        <div class="stat-card"><div class="stat-val">&lt;500ms</div><div class="stat-label">order-to-confirmation latency target</div></div>
+      </div>
+    </section>
+
+    <section id="step2-entities">
+      <div class="step-pill">Step 2 of 6 — Core Entities</div>
+      <h2>Core entities</h2>
+      <p style="font-size:13px;color:#999;margin-bottom:0.75rem">Every entity here is chosen to make financial correctness structurally hard to violate — not just "usually correct."</p>
+
+      <div class="entity-grid">
+        <div class="entity-box">
+          <div class="entity-head"><span class="entity-name">Order</span><span class="entity-store pg">Postgres</span></div>
+          <div class="entity-fields">
+            <div class="entity-field"><span class="fname pk">order_id</span><span class="ftype">UUID</span></div>
+            <div class="entity-field"><span class="fname idx">idempotency_key</span><span class="ftype">TEXT, UNIQUE index</span></div>
+            <div class="entity-field"><span class="fname">account_id</span><span class="ftype">BIGINT</span></div>
+            <div class="entity-field"><span class="fname">symbol, side, qty, order_type</span><span class="ftype">order intent</span></div>
+            <div class="entity-field"><span class="fname">status</span><span class="ftype">TEXT — state machine</span></div>
+            <div class="entity-field"><span class="fname">cached_response</span><span class="ftype">JSONB, nullable</span></div>
+          </div>
+          <div class="entity-why">Because a trade is a financial commitment where ACID guarantees and a unique constraint on <code>idempotency_key</code> matter far more than raw write throughput. Tradeoff: needs sharding by account_id at very high order volume.</div>
+        </div>
+
+        <div class="entity-box">
+          <div class="entity-head"><span class="entity-name">LedgerEntry</span><span class="entity-store pg">Postgres</span></div>
+          <div class="entity-fields">
+            <div class="entity-field"><span class="fname idx">account_id</span><span class="ftype">BIGINT → Account</span></div>
+            <div class="entity-field"><span class="fname pk">entry_id</span><span class="ftype">UUID, append-only</span></div>
+            <div class="entity-field"><span class="fname">delta</span><span class="ftype">DECIMAL — signed</span></div>
+            <div class="entity-field"><span class="fname">reason</span><span class="ftype">TEXT — order_fill, deposit, fee</span></div>
+            <div class="entity-field"><span class="fname">created_at</span><span class="ftype">immutable, never updated</span></div>
+          </div>
+          <div class="entity-why">Because balance must never be a single mutable field a concurrent transaction can silently overwrite — every change is a new immutable row, and truth is the sum. Tradeoff: reading a balance means aggregating rows unless it's materialized.</div>
+        </div>
+
+        <div class="entity-box">
+          <div class="entity-head"><span class="entity-name">Portfolio</span><span class="entity-store redis">Redis cache</span></div>
+          <div class="entity-fields">
+            <div class="entity-field"><span class="fname pk">account_id</span><span class="ftype">key</span></div>
+            <div class="entity-field"><span class="fname">buying_power</span><span class="ftype">derived, Postgres-computed</span></div>
+            <div class="entity-field"><span class="fname">positions</span><span class="ftype">materialized view, symbol → qty/cost basis</span></div>
+            <div class="entity-field"><span class="fname">ttl</span><span class="ftype">short TTL, ~1-2s</span></div>
+          </div>
+          <div class="entity-why">Because portfolio reads outnumber writes 1000:1 — a short-TTL cache in front of a Postgres-materialized balance absorbs almost all read traffic without serving stale-for-long data. Tradeoff: a fill can lag the cache by up to one TTL window.</div>
+        </div>
+      </div>
+
+      <div class="callout info">Primary key: <code>Order.order_id</code>. Critical index: <code>UNIQUE(idempotency_key)</code> on Order — this single constraint is what makes retried requests safe to replay instead of re-executing. <code>LedgerEntry</code> has no primary mutable field at all by design; it is insert-only.</div>
+    </section>
+
+    <section id="step3-api">
+      <div class="step-pill">Step 3 of 6 — API / Interface</div>
+      <h2>API design</h2>
+      <p style="font-size:13px;color:#999;margin-bottom:0.75rem">Order placement carries a client-generated idempotency key on every request; market data is a push feed since polling a websocket-worthy stream wastes both round trips and freshness.</p>
+
+      <div class="api-card">
+        <div class="api-line"><span class="api-method post">POST</span><span class="api-path">/api/v1/orders</span><span class="api-auth">Auth: required · Header: Idempotency-Key</span></div>
+        <div class="api-io">
+          <div class="api-io-block"><div class="api-io-label">Request</div><div class="api-io-body">{ symbol, side, qty, order_type, limit_price? }</div></div>
+          <div class="api-io-block"><div class="api-io-label">Response</div><div class="api-io-body">{ order_id, status: "submitted" } — same body replayed if Idempotency-Key seen before</div></div>
+        </div>
+      </div>
+
+      <div class="api-card">
+        <div class="api-line"><span class="api-method get">GET</span><span class="api-path">/api/v1/orders/{id}/status</span><span class="api-auth">Auth: required</span></div>
+        <div class="api-io">
+          <div class="api-io-block"><div class="api-io-label">Request</div><div class="api-io-body">path param: order_id</div></div>
+          <div class="api-io-block"><div class="api-io-label">Response</div><div class="api-io-body">{ status, filled_qty, avg_fill_price, updated_at }</div></div>
+        </div>
+      </div>
+
+      <div class="api-card">
+        <div class="api-line"><span class="api-method get">GET</span><span class="api-path">/api/v1/portfolio</span><span class="api-auth">Auth: required</span></div>
+        <div class="api-io">
+          <div class="api-io-block"><div class="api-io-label">Request</div><div class="api-io-body">none — scoped to authenticated account</div></div>
+          <div class="api-io-block"><div class="api-io-label">Response</div><div class="api-io-body">{ buying_power, positions: [{symbol, qty, cost_basis}] }</div></div>
+        </div>
+      </div>
+
+      <div class="api-card">
+        <div class="api-line"><span class="api-method ws">WEBSOCKET</span><span class="api-path">/ws/market-data</span><span class="api-auth">Auth: required</span></div>
+        <div class="api-io">
+          <div class="api-io-block"><div class="api-io-label">Message in</div><div class="api-io-body">{ subscribe: [symbols] }</div></div>
+          <div class="api-io-block"><div class="api-io-label">Message out</div><div class="api-io-body">{ symbol, price, ts } pushed on every quote change</div></div>
+        </div>
+      </div>
+
+      <div class="callout good">The <code>Idempotency-Key</code> header is mandatory, not optional, on <code>POST /orders</code> — the client generates one UUID per logical order attempt and reuses the exact same key on every retry of that attempt, including after a timeout.</div>
+    </section>
+
+    <section id="step4-dataflow">
+      <div class="step-pill">Step 4 of 6 — Data Flow</div>
+      <h2>Data flow</h2>
+      <p style="font-size:13px;color:#999;margin-bottom:0.75rem">Order submission (blue, low volume, idempotency-checked) and portfolio reads (mint, ~1000x the volume) never touch the same hot path.</p>
+
+      <div class="diagram-wrap" data-paths='{"write":{"boxes":["w-client","w-order","w-idem","w-db"],"arrows":["w1","w2","w3"]},"read":{"boxes":["r-client","r-cache","r-db"],"arrows":["r1","r2"]}}'>
+        <svg viewBox="0 0 740 230" xmlns="http://www.w3.org/2000/svg">
+          <defs>
+            <marker id="rhFlowW" markerWidth="8" markerHeight="8" refX="6" refY="3" orient="auto"><path d="M0,0 L6,3 L0,6 Z" fill="var(--blue)"/></marker>
+            <marker id="rhFlowR" markerWidth="8" markerHeight="8" refX="6" refY="3" orient="auto"><path d="M0,0 L6,3 L0,6 Z" fill="var(--accent)"/></marker>
+          </defs>
+
+          <text class="diag-sublabel" x="150" y="14" style="font-size:10px;fill:var(--blue)">WRITE PATH — order submission, idempotency-checked</text>
+          <circle class="diag-dot diag-flow-dot" data-flow="write" r="3.5" style="offset-path: path('M10,47 L165,47 L165,47 L330,47 L330,47 L520,47')"></circle>
+          <g data-target="step6-deepdive-idempotency" data-id="w-client" data-tip="Generates one Idempotency-Key per order attempt, reused on retry"><rect class="diag-box role-client" x="10" y="24" width="120" height="46"/><text class="diag-label" x="70" y="47" style="font-size:11px">Client App</text></g>
+          <path class="diag-arrow-path" data-id="w1" d="M130,47 L165,47" marker-end="url(#rhFlowW)"/>
+          <g data-target="step5-hld" data-id="w-order" data-tip="Validates buying power, routes to exchange"><rect class="diag-box" x="165" y="24" width="130" height="46"/><text class="diag-label" x="230" y="47" style="font-size:11px">Order Service</text></g>
+          <path class="diag-arrow-path" data-id="w2" d="M295,47 L330,47" marker-end="url(#rhFlowW)"/>
+          <g data-target="step6-deepdive-idempotency" data-id="w-idem" data-tip="UNIQUE(idempotency_key) — replays cached response on retry"><rect class="diag-box role-cache" x="330" y="24" width="150" height="46"/><text class="diag-label" x="405" y="47" style="font-size:11px">Idempotency Check</text></g>
+          <path class="diag-arrow-path" data-id="w3" d="M480,47 L520,47" marker-end="url(#rhFlowW)"/>
+          <g data-target="step6-deepdive-ledger" data-id="w-db" data-tip="Order row + ledger entry committed atomically"><rect class="diag-box role-db" x="520" y="24" width="120" height="46"/><text class="diag-label" x="580" y="47" style="font-size:11px">Postgres</text></g>
+
+          <text class="diag-sublabel" x="150" y="115" style="font-size:10px;fill:var(--accent)">READ PATH — portfolio reads, ~1000x write volume</text>
+          <circle class="diag-dot diag-flow-dot" data-flow="read" r="3.5" style="offset-path: path('M10,148 L165,148 L165,148 L330,148 L330,148 L520,148')"></circle>
+          <g data-target="step2-entities" data-id="r-client" data-tip="Loads positions and buying power on app open"><rect class="diag-box role-client" x="10" y="125" width="120" height="46"/><text class="diag-label" x="70" y="153" style="font-size:11px">Client App</text></g>
+          <path class="diag-arrow-path" data-id="r1" d="M130,148 L165,148" marker-end="url(#rhFlowR)"/>
+          <g data-target="step2-entities" data-id="r-cache" data-tip="Short-TTL cache absorbs ~99.9% of portfolio reads"><rect class="diag-box role-cache" x="165" y="125" width="150" height="46"/><text class="diag-label" x="240" y="153" style="font-size:11px">Portfolio Cache</text></g>
+          <path class="diag-arrow-path" data-id="r2" d="M315,148 L520,148" marker-end="url(#rhFlowR)" stroke-dasharray="3 3"/>
+          <text class="diag-sublabel" x="415" y="140" style="font-size:8.5px">cache miss / TTL expiry only</text>
+          <g data-target="step6-deepdive-ledger" data-id="r-db" data-tip="Balance derived by summing the ledger, then materialized"><rect class="diag-box role-db" x="520" y="125" width="120" height="46"/><text class="diag-label" x="580" y="153" style="font-size:11px">Postgres</text></g>
+        </svg>
+        <div class="diag-legend">
+          <div class="diag-legend-item"><span class="diag-legend-dot role-client"></span>Client app — order submission and portfolio view</div>
+          <div class="diag-legend-item"><span class="diag-legend-dot role-cache"></span>Idempotency check + portfolio cache — the hot-path components</div>
+          <div class="diag-legend-item"><span class="diag-legend-dot role-db"></span>Postgres — order, ledger, and derived balance, source of truth</div>
+        </div>
+      </div>
+
+      <ol class="flow-steps-list">
+        <li><span>Client submits an order with an idempotency key</span> — generated once per attempt, reused verbatim on any retry</li>
+        <li><span>Order Service validates buying power</span> — rejects immediately if the account can't cover the order</li>
+        <li><span>Idempotency check runs before execution</span> — a seen key short-circuits straight to the cached response, no re-execution</li>
+        <li><span>Order and ledger entry commit atomically</span> — both succeed or both fail, never one without the other</li>
+        <li><span>Portfolio reads almost always hit cache</span> — Postgres is only touched on a cache miss or TTL expiry</li>
+      </ol>
+    </section>
+
+    <section id="step5-hld">
+      <div class="step-pill">Step 5 of 6 — High-Level Design</div>
+      <h2>High-level design</h2>
+      <p style="font-size:13px;color:#999;margin-bottom:0.75rem">Order flow, exchange confirmation, and market data are three separate pipelines that only meet at the portfolio and audit log.</p>
+
+      <div class="diagram-wrap">
+        <svg viewBox="0 0 800 320" xmlns="http://www.w3.org/2000/svg">
+          <defs><marker id="rhHldArrow" markerWidth="8" markerHeight="8" refX="6" refY="3" orient="auto"><path d="M0,0 L6,3 L0,6 Z" fill="var(--border2)"/></marker></defs>
+
+          <g data-tip="Submits orders, views portfolio, receives live quotes"><rect class="diag-box role-client" x="10" y="130" width="120" height="50"/><text class="diag-label" x="70" y="152" style="font-size:11px">Client App</text><text class="diag-sublabel" x="70" y="168" style="font-size:8.5px">idempotency key/order</text></g>
+
+          <path class="diag-arrow-path" d="M130,145 L165,145" marker-end="url(#rhHldArrow)"/>
+          <g data-tip="Idempotency check on every request before touching state"><rect class="diag-box" x="165" y="120" width="140" height="50"/><text class="diag-label" x="235" y="142" style="font-size:11px">Order Service</text><text class="diag-sublabel" x="235" y="158" style="font-size:8.5px">idempotency key</text></g>
+
+          <path class="diag-arrow-path" d="M305,145 L340,145" marker-end="url(#rhHldArrow)"/>
+          <g data-tip="Checks buying power derived from the ledger"><rect class="diag-box" x="340" y="120" width="140" height="50"/><text class="diag-label" x="410" y="142" style="font-size:11px">Order Validation</text><text class="diag-sublabel" x="410" y="158" style="font-size:8.5px">buying power check</text></g>
+
+          <path class="diag-arrow-path" d="M480,145 L515,145" marker-end="url(#rhHldArrow)"/>
+          <g data-tip="Sends validated order to the exchange for matching"><rect class="diag-box" x="515" y="120" width="130" height="50"/><text class="diag-label" x="580" y="142" style="font-size:11px">Order Router</text><text class="diag-sublabel" x="580" y="158" style="font-size:8.5px">routes to venue</text></g>
+
+          <path class="diag-arrow-path" d="M645,145 L680,145" marker-end="url(#rhHldArrow)"/>
+          <g data-tip="External venue that matches and fills the order"><rect class="diag-box role-db" x="680" y="120" width="110" height="50"/><text class="diag-label" x="735" y="142" style="font-size:11px">Exchange</text><text class="diag-sublabel" x="735" y="158" style="font-size:8.5px">external</text></g>
+
+          <path class="diag-arrow-path" d="M735,170 L735,200 L645,200" marker-end="url(#rhHldArrow)"/>
+          <g data-tip="Fill events streamed back from the exchange"><rect class="diag-box role-async" x="515" y="180" width="130" height="46"/><text class="diag-label" x="580" y="203" style="font-size:11px">Exec Confirmation</text><text class="diag-sublabel" x="580" y="217" style="font-size:8.5px">Kafka consumer</text></g>
+
+          <path class="diag-arrow-path" d="M515,203 L480,203" marker-end="url(#rhHldArrow)"/>
+          <g data-tip="Applies the fill: writes ledger entry, updates order status"><rect class="diag-box" x="340" y="180" width="140" height="46"/><text class="diag-label" x="410" y="203" style="font-size:11px">Portfolio Service</text><text class="diag-sublabel" x="410" y="217" style="font-size:8.5px">writes ledger entry</text></g>
+
+          <path class="diag-arrow-path" d="M340,203 L305,203" marker-end="url(#rhHldArrow)"/>
+          <g data-tip="Append-only ledger + materialized balance, source of truth"><rect class="diag-box role-db" x="165" y="180" width="140" height="46"/><text class="diag-label" x="235" y="203" style="font-size:11px">Ledger DB</text><text class="diag-sublabel" x="235" y="217" style="font-size:8.5px">Postgres, append-only</text></g>
+
+          <path class="diag-arrow-path" d="M235,226 L235,250 L130,250" marker-end="url(#rhHldArrow)" stroke-dasharray="3 3"/>
+          <g data-tip="Short-TTL derived balance, absorbs the 1000:1 read volume"><rect class="diag-box role-cache" x="10" y="226" width="120" height="46"/><text class="diag-label" x="70" y="249" style="font-size:11px">Portfolio Cache</text><text class="diag-sublabel" x="70" y="263" style="font-size:8.5px">Redis, short TTL</text></g>
+          <path class="diag-arrow-path" d="M70,226 L70,180" marker-end="url(#rhHldArrow)"/>
+
+          <path class="diag-arrow-path" d="M735,120 L735,60 L235,60 L235,120" marker-end="url(#rhHldArrow)" stroke-dasharray="3 3"/>
+          <g data-tip="Live quotes streamed to clients holding or watching the symbol"><rect class="diag-box role-async" x="165" y="30" width="140" height="46"/><text class="diag-label" x="235" y="53" style="font-size:11px">Market Data Feed</text><text class="diag-sublabel" x="235" y="67" style="font-size:8.5px">websocket push</text></g>
+          <path class="diag-arrow-path" d="M165,53 L130,145" marker-end="url(#rhHldArrow)" stroke-dasharray="3 3"/>
+
+          <path class="diag-arrow-path" d="M235,120 L235,90 L620,90 L620,120" marker-end="url(#rhHldArrow)" stroke-dasharray="2 4"/>
+          <g data-tip="Immutable record of every order/state transition for compliance"><rect class="diag-box role-db" x="680" y="30" width="110" height="46"/><text class="diag-label" x="735" y="53" style="font-size:11px">Audit Log</text><text class="diag-sublabel" x="735" y="67" style="font-size:8.5px">append-only</text></g>
+        </svg>
+        <div class="diag-legend">
+          <div class="diag-legend-item"><span class="diag-legend-dot role-client"></span>Client app — order entry and portfolio view</div>
+          <div class="diag-legend-item"><span class="diag-legend-dot role-cache"></span>Portfolio cache — the 1000:1 hot read path</div>
+          <div class="diag-legend-item"><span class="diag-legend-dot role-db"></span>Ledger DB, exchange, audit log — durable sources of truth</div>
+          <div class="diag-legend-item"><span class="diag-legend-dot role-async"></span>Exec confirmation + market data — decoupled async paths</div>
+        </div>
+      </div>
+
+      <table class="def-table">
+        <thead><tr><th>Component</th><th>Role</th><th>Tech + why</th></tr></thead>
+        <tbody>
+          <tr><td>Order Service</td><td>Idempotency check, order intake</td><td>Postgres-backed with a UNIQUE constraint on idempotency_key — because a retried request must be provably safe to replay, not just "probably" safe.</td></tr>
+          <tr><td>Order Validation</td><td>Buying power check</td><td>Reads the materialized balance, not the raw ledger, on the hot path — because summing the full ledger per order would be too slow under burst load.</td></tr>
+          <tr><td>Order Router</td><td>Routes validated orders to an exchange venue</td><td>Stateless routing layer — because it should be trivially horizontally scalable ahead of a market-open spike.</td></tr>
+          <tr><td>Exec Confirmation Consumer</td><td>Applies exchange fills</td><td>Kafka consumer group — because fills arrive asynchronously and must be processed at-least-once with dedup, not blocked on a synchronous exchange response.</td></tr>
+          <tr><td>Portfolio Service</td><td>Applies fills to the ledger, derives balance</td><td>Ledger pattern over Postgres — because a single mutable balance field is unsafe under concurrent writes (see deep dive).</td></tr>
+          <tr><td>Market Data Feed</td><td>Live quote push</td><td>WebSocket fan-out — because polling a fast-moving price stream wastes both requests and freshness.</td></tr>
+        </tbody>
+      </table>
+
+      <h3 style="font-size:13px;color:var(--text);margin:1.25rem 0 0.6rem;font-weight:600">Scaling levers — cheapest to most complex</h3>
+      <ol class="levers-list">
+        <li><strong>Pre-scale infrastructure ahead of known market-open/close times</strong><span class="cost">low complexity</span></li>
+        <li><strong>Add Redis read replicas for the portfolio cache per region</strong><span class="cost">low complexity</span></li>
+        <li><strong>Widen the Kafka consumer group for execution confirmations</strong><span class="cost">medium complexity</span></li>
+        <li><strong>Shard the Order/Ledger DB by account_id</strong><span class="cost">medium complexity</span></li>
+        <li><strong>Move buying-power checks to a fully in-memory precomputed store</strong> refreshed on every ledger write<span class="cost">high complexity — last resort</span></li>
+      </ol>
+
+      <table class="grid-table">
+        <thead><tr><th>Bottleneck</th><th>Triggers at</th><th>Exact fix</th></tr></thead>
+        <tbody>
+          <tr><td>Market-open order burst</td><td>~100x normal QPS arriving within seconds</td><td class="fix">Scheduled pre-scaling before 9:30am ET, not reactive autoscaling</td></tr>
+          <tr><td>Order DB write contention</td><td>High concurrent order volume on popular symbols</td><td class="fix">Shard by account_id; ledger inserts avoid row-level lock contention</td></tr>
+          <tr><td>Portfolio cache stampede</td><td>Mass TTL expiry right after a market-wide price move</td><td class="fix">Jittered TTLs plus request coalescing on cache miss</td></tr>
+        </tbody>
+      </table>
+
+      <div class="dial-wrap">
+        <div class="dial-title">Order execution: exactly-once vs at-least-once</div>
+        <div class="dial-track"><div class="dial-marker" style="left:8%"></div></div>
+        <div class="dial-labels"><span class="end-left">Exactly-once</span><span class="end-right">At-least-once</span></div>
+      </div>
+      <div class="dial-wrap">
+        <div class="dial-title">Portfolio balance freshness: strong vs cached-with-short-TTL</div>
+        <div class="dial-track"><div class="dial-marker" style="left:78%"></div></div>
+        <div class="dial-labels"><span class="end-left">Strong</span><span class="end-right">Cached, short TTL</span></div>
+      </div>
+    </section>
+
+    <section id="step6-deepdive-idempotency">
+      <div class="step-pill">Step 6 of 6 — Deep Dives</div>
+      <h2>Deep dive: idempotency key flow</h2>
+      <p style="font-size:13px;color:#999;margin-bottom:0.75rem">The client generates the key once per order attempt. A timeout-triggered retry reuses that exact key — the server recognizes it and returns the cached response instead of executing a second trade.</p>
+
+      <div class="diagram-wrap">
+        <svg viewBox="0 0 720 260" xmlns="http://www.w3.org/2000/svg">
+          <defs>
+            <marker id="idemArrow" markerWidth="8" markerHeight="8" refX="6" refY="3" orient="auto"><path d="M0,0 L6,3 L0,6 Z" fill="var(--border2)"/></marker>
+            <marker id="idemArrowAmber" markerWidth="8" markerHeight="8" refX="6" refY="3" orient="auto"><path d="M0,0 L6,3 L0,6 Z" fill="var(--amber)"/></marker>
+            <marker id="idemArrowAccent" markerWidth="8" markerHeight="8" refX="6" refY="3" orient="auto"><path d="M0,0 L6,3 L0,6 Z" fill="var(--accent)"/></marker>
+          </defs>
+
+          <g data-tip="Client lane"><rect class="diag-box role-client" x="10" y="10" width="140" height="36"/><text class="diag-label" x="80" y="33" style="font-size:11px">Client</text></g>
+          <g data-tip="Server lane"><rect class="diag-box" x="500" y="10" width="140" height="36"/><text class="diag-label" x="570" y="33" style="font-size:11px">Order Service</text></g>
+          <path class="state-arrow" d="M80,46 L80,240" style="stroke-dasharray:2 4"/>
+          <path class="state-arrow" d="M570,46 L570,240" style="stroke-dasharray:2 4"/>
+
+          <text class="diag-sublabel" x="300" y="66" style="font-size:9.5px">1. First attempt — key K-9f21 sent</text>
+          <path class="diag-arrow-path" d="M80,72 L570,72" marker-end="url(#idemArrow)"/>
+          <text class="diag-sublabel" x="300" y="90" style="font-size:9px;fill:var(--muted)">POST /orders  Idempotency-Key: K-9f21</text>
+
+          <text class="diag-sublabel" x="300" y="112" style="font-size:9.5px;fill:var(--accent)">2. Server stores key + begins execution</text>
+          <g data-tip="INSERT with UNIQUE(idempotency_key) — this row is now the lock"><rect class="diag-box role-cache" x="480" y="118" width="180" height="34"/><text class="diag-label" x="570" y="139" style="font-size:10px">store key, execute trade</text></g>
+
+          <text class="diag-sublabel" x="300" y="172" style="font-size:9.5px;fill:var(--amber)">3. Response lost / client times out before it arrives</text>
+          <path class="diag-arrow-path" d="M570,160 L80,178" marker-end="url(#idemArrowAmber)" stroke-dasharray="4 3" style="stroke:var(--amber)"/>
+
+          <text class="diag-sublabel" x="300" y="200" style="font-size:9.5px">4. Client retries — SAME key K-9f21</text>
+          <path class="diag-arrow-path" d="M80,206 L570,206" marker-end="url(#idemArrowAccent)" style="stroke:var(--accent)"/>
+          <text class="diag-sublabel" x="300" y="222" style="font-size:9px;fill:var(--muted)">POST /orders  Idempotency-Key: K-9f21 (identical)</text>
+
+          <text class="diag-sublabel" x="300" y="244" style="font-size:9.5px;fill:var(--accent)">5. Key already seen — cached response replayed, NO re-execution</text>
+        </svg>
+      </div>
+
+      <div class="entity-grid">
+        <div class="entity-box">
+          <div class="entity-head"><span class="entity-name">orders (idempotency columns)</span><span class="entity-store pg">Postgres</span></div>
+          <div class="entity-fields">
+            <div class="entity-field"><span class="fname pk">order_id</span><span class="ftype">UUID PRIMARY KEY</span></div>
+            <div class="entity-field"><span class="fname idx">idempotency_key</span><span class="ftype">TEXT NOT NULL, UNIQUE INDEX</span></div>
+            <div class="entity-field"><span class="fname">status</span><span class="ftype">TEXT — submitted/filled/rejected</span></div>
+            <div class="entity-field"><span class="fname">response_body</span><span class="ftype">JSONB — the exact response to replay</span></div>
+            <div class="entity-field"><span class="fname">created_at</span><span class="ftype">TIMESTAMPTZ</span></div>
+          </div>
+          <div class="entity-why">The UNIQUE index on idempotency_key is what makes correctness structural: the second INSERT attempt with the same key fails at the database level, and that failure is the signal to fetch and return response_body instead of executing anything.</div>
+        </div>
+      </div>
+
+      <ol class="flow-steps-list">
+        <li><span>Client generates one idempotency key per logical order attempt</span> — a UUID created client-side before the first network call</li>
+        <li><span>Server attempts an INSERT keyed on idempotency_key</span> — the UNIQUE index makes a duplicate insert fail fast, before any exchange interaction</li>
+        <li><span>Trade executes exactly once</span> — only the winning INSERT proceeds to validation and routing</li>
+        <li><span>Response is persisted alongside the order</span> — not just returned to the caller, but stored for replay</li>
+        <li><span>On retry with the same key, the conflict is caught</span> — server fetches the stored response_body and returns it, skipping execution entirely</li>
+      </ol>
+      <div class="callout warn">The key must be generated once per user intent and reused across retries of that same intent — if the client mints a new key on every retry, the UNIQUE index provides zero protection and duplicate trades become possible again.</div>
+    </section>
+
+    <section id="step6-deepdive-ledger">
+      <h2>Deep dive: portfolio consistency via ledger pattern</h2>
+      <p style="font-size:13px;color:#999;margin-bottom:0.75rem">A single mutable balance column is unsafe under concurrency. An append-only ledger with a derived balance is not.</p>
+
+      <div class="diagram-wrap">
+        <svg viewBox="0 0 740 300" xmlns="http://www.w3.org/2000/svg">
+          <defs><marker id="ledgerArrow" markerWidth="8" markerHeight="8" refX="6" refY="3" orient="auto"><path d="M0,0 L6,3 L0,6 Z" fill="var(--red)"/></marker></defs>
+
+          <text class="diag-sublabel" x="180" y="16" style="font-size:10.5px;fill:var(--red)">NAIVE — mutable balance column (lost update)</text>
+          <g data-tip="Both transactions read balance = 1000 before either writes"><rect class="diag-box role-db" x="10" y="26" width="150" height="40"/><text class="diag-label" x="85" y="50" style="font-size:10.5px">accounts.balance = 1000</text></g>
+
+          <path class="diag-arrow-path" d="M85,66 L85,100" marker-end="url(#ledgerArrow)" style="stroke:var(--red)"/>
+          <g data-tip="Txn A reads 1000, computes 1000-200=800"><rect class="diag-box" x="10" y="100" width="150" height="36"/><text class="diag-label" x="85" y="122" style="font-size:10px">Txn A: read 1000, -200</text></g>
+          <path class="diag-arrow-path" d="M85,66 L260,100" marker-end="url(#ledgerArrow)" style="stroke:var(--red)"/>
+          <g data-tip="Txn B reads 1000 too — same stale value — computes 1000-300=700"><rect class="diag-box" x="185" y="100" width="150" height="36"/><text class="diag-label" x="260" y="122" style="font-size:10px">Txn B: read 1000, -300</text></g>
+
+          <path class="diag-arrow-path" d="M85,136 L85,170" marker-end="url(#ledgerArrow)" style="stroke:var(--red)"/>
+          <path class="diag-arrow-path" d="M260,136 L200,170" marker-end="url(#ledgerArrow)" style="stroke:var(--red)"/>
+          <g data-tip="Whichever UPDATE commits last wins — the other write is silently lost"><rect class="diag-box" x="10" y="170" width="325" height="40" style="stroke:var(--red)"/><text class="diag-label" x="172" y="194" style="font-size:10.5px" fill="var(--red)">UPDATE balance=800, then UPDATE balance=700 — should be 500</text></g>
+          <text class="diag-sublabel" x="172" y="222" style="font-size:9px;fill:var(--red)">Txn A's $200 debit is silently lost — final balance is wrong</text>
+
+          <text class="diag-sublabel" x="560" y="16" style="font-size:10.5px;fill:var(--accent)">LEDGER — append-only, derived balance</text>
+          <g data-tip="Every change is a new immutable row, never an overwrite"><rect class="diag-box role-cache" x="400" y="26" width="150" height="40"/><text class="diag-label" x="475" y="50" style="font-size:10.5px">ledger_entries (append-only)</text></g>
+
+          <path class="diag-arrow-path" d="M475,66 L475,100" marker-end="url(#ledgerArrow)" style="stroke:var(--accent)"/>
+          <g data-tip="Both inserts succeed independently — no read-then-write race"><rect class="diag-box" x="400" y="100" width="150" height="36"/><text class="diag-label" x="475" y="122" style="font-size:10px">INSERT delta=-200</text></g>
+          <path class="diag-arrow-path" d="M475,136 L475,170" marker-end="url(#ledgerArrow)" style="stroke:var(--accent)"/>
+          <g data-tip="Both inserts succeed independently — no read-then-write race"><rect class="diag-box" x="400" y="170" width="150" height="36"/><text class="diag-label" x="475" y="192" style="font-size:10px">INSERT delta=-300</text></g>
+
+          <path class="diag-arrow-path" d="M475,206 L475,240" marker-end="url(#ledgerArrow)" style="stroke:var(--accent)"/>
+          <g data-tip="Balance is always the sum of every entry, never overwritten"><rect class="diag-box role-cache" x="400" y="240" width="150" height="40"/><text class="diag-label" x="475" y="264" style="font-size:10px">SUM(delta) = 500 — correct</text></g>
+        </svg>
+      </div>
+
+      <ol class="flow-steps-list">
+        <li><span>Never store balance as a single mutable field</span> — a naive <code>UPDATE accounts SET balance = balance - X</code> under concurrency has a read-then-write gap where two transactions can both read the same stale value</li>
+        <li><span>Model every change as an append-only ledger entry</span> — a deposit, fee, or trade fill is an INSERT of a signed delta, never an overwrite</li>
+        <li><span>Derive balance by summing the ledger</span> — correctness follows from arithmetic on immutable rows, not from lock timing</li>
+        <li><span>Materialize the derived balance for hot-path reads</span> — recompute periodically or on every write and cache it, so buying-power checks don't sum the whole ledger per request</li>
+        <li><span>Reconcile derived balance against the ledger sum on a schedule</span> — catches drift from a lost materialization write before a user notices</li>
+      </ol>
+      <div class="callout danger">The lost-update problem isn't a rare edge case here — every order fill, fee, and deposit is a concurrent write candidate on a busy account, and a single mutable balance column will eventually silently drop one of them.</div>
+    </section>
+
+    <section id="step6-deepdive-marketburst">
+      <h2>Deep dive: market-hours burst traffic</h2>
+      <p style="font-size:13px;color:#999;margin-bottom:0.75rem">Traffic is flat for most of the day, then jumps ~100x within seconds at 9:30am ET — reactive autoscaling reacts on a timescale of minutes, far too slow for a spike that arrives in seconds.</p>
+
+      <div class="diagram-wrap">
+        <svg viewBox="0 0 720 260" xmlns="http://www.w3.org/2000/svg">
+          <defs><marker id="burstArrow" markerWidth="8" markerHeight="8" refX="6" refY="3" orient="auto"><path d="M0,0 L6,3 L0,6 Z" fill="var(--border2)"/></marker></defs>
+
+          <line x1="40" y1="220" x2="700" y2="220" stroke="var(--border2)" stroke-width="1.5"/>
+          <line x1="40" y1="220" x2="40" y2="20" stroke="var(--border2)" stroke-width="1.5"/>
+          <text class="diag-sublabel" x="40" y="14" style="font-size:9px">QPS</text>
+          <text class="diag-sublabel" x="700" y="235" style="font-size:9px" text-anchor="end">time of day</text>
+
+          <path d="M40,205 L280,205 L300,205 L320,40 L340,45 L400,55 L460,180 L700,208" fill="none" stroke="var(--blue)" stroke-width="2"/>
+
+          <text class="diag-sublabel" x="150" y="196" style="font-size:9px;fill:var(--muted)">flat baseline traffic</text>
+          <line x1="300" y1="220" x2="300" y2="30" stroke="var(--amber)" stroke-width="1" stroke-dasharray="3 3"/>
+          <text class="diag-label" x="330" y="35" style="font-size:10.5px;fill:var(--amber)">9:30am ET market open</text>
+          <text class="diag-sublabel" x="330" y="50" style="font-size:9px;fill:var(--amber)">~100x baseline within seconds</text>
+
+          <line x1="460" y1="220" x2="460" y2="170" stroke="var(--amber)" stroke-width="1" stroke-dasharray="3 3"/>
+          <text class="diag-label" x="490" y="170" style="font-size:10px;fill:var(--amber)">4:00pm ET close</text>
+          <text class="diag-sublabel" x="490" y="184" style="font-size:9px;fill:var(--muted)">second, smaller spike</text>
+
+          <path d="M320,110 L320,150" stroke="var(--red)" stroke-width="1.5" stroke-dasharray="2 3" marker-end="url(#burstArrow)"/>
+          <text class="diag-sublabel" x="320" y="105" style="font-size:8.5px;fill:var(--red)" text-anchor="middle">reactive autoscale still spinning up here</text>
+        </svg>
+      </div>
+
+      <ol class="flow-steps-list">
+        <li><span>Baseline QPS holds steady for most of the trading day</span> — normal reactive autoscaling would be adequately sized here</li>
+        <li><span>At 9:30am ET, order and quote-subscription volume jumps ~100x in seconds</span> — not over minutes, so metric-triggered autoscaling (CPU/queue-depth thresholds) hasn't even finished evaluating before the spike has already landed</li>
+        <li><span>Reactive autoscaling's reaction time (minutes to provision + warm up) exceeds the spike's arrival time (seconds)</span> — by the time new capacity is healthy, the worst of the burst has already been served in a degraded state or dropped</li>
+        <li><span>Pre-scale on a schedule instead</span> — provision extra capacity a fixed window (e.g. 15-30 min) before every known market-open and market-close time, the same way ticket-sale platforms pre-scale ahead of a published on-sale time</li>
+        <li><span>Scale back down on a schedule after the post-open volume settles</span> — avoids paying for peak capacity all day</li>
+      </ol>
+      <div class="callout warn">Autoscaling triggered by observed load is fundamentally reactive — it is the wrong tool for a spike whose timing is known in advance. Market open/close times are published and fixed, so this should be a scheduled pre-scale, not a monitored threshold.</div>
+
+      <table class="grid-table" style="margin-top:1rem">
+        <thead><tr><th>Failure mode</th><th>User impact</th><th>Detection signal</th><th>Mitigation</th></tr></thead>
+        <tbody>
+          <tr><td>Duplicate order on client retry</td><td class="impact">Double buy/sell executed, wrong position and balance</td><td class="detect">Two requests, same intent, different idempotency keys or none at all</td><td class="fix">Mandatory Idempotency-Key header with a UNIQUE DB constraint; client reuses the same key on every retry of one attempt</td></tr>
+          <tr><td>Exchange confirmation delayed or lost</td><td class="impact">Order stuck showing "submitted" indefinitely, user unsure if it filled</td><td class="detect">Orders older than expected fill SLA still in "submitted" state</td><td class="fix">Reconciliation job periodically cross-checks all "submitted" orders against the exchange's order status API and corrects state</td></tr>
+          <tr><td>Portfolio balance drift from a lost ledger write</td><td class="impact">Displayed balance disagrees with the true ledger sum</td><td class="detect">Scheduled diff between materialized balance and freshly summed ledger</td><td class="fix">Periodic reconciliation job recomputes SUM(delta) and alerts (and self-heals the materialized value) on any mismatch</td></tr>
+        </tbody>
+      </table>
+    </section>
+
+    <section id="interview-moves">
+      <h2>Interview moves</h2>
+      <ul class="moves-list">
+        <li><span class="move-num">01</span><div><strong>"This is a financial-correctness problem before it's a scale problem — the thing I'd design around first is exactly-once order execution"</strong> — states the core insight unprompted</div></li>
+        <li><span class="move-num">02</span><div><strong>"Every order request carries a client-generated idempotency key with a UNIQUE constraint in the database — that's what makes a retry provably safe instead of just usually safe"</strong> — names the specific, correct mechanism</div></li>
+        <li><span class="move-num">03</span><div><strong>"Account balance should never be a single mutable column — I'd use an append-only ledger and derive the balance, because a naive UPDATE has a lost-update race under concurrency"</strong> — shows you know why the pattern exists, not just that it exists</div></li>
+        <li><span class="move-num">04</span><div><strong>"Portfolio reads and order writes are roughly 1000:1 here, so I'd design completely different scaling strategies for each rather than one general solution"</strong> — demonstrates read/write path separation</div></li>
+        <li><span class="move-num">05</span><div><strong>"Market open at 9:30am ET is a known, scheduled event, not a random spike — I'd pre-scale ahead of it rather than rely on reactive autoscaling, which is too slow for a spike measured in seconds"</strong> — proactively surfaces the burst-traffic problem with a concrete fix</div></li>
+        <li><span class="move-num">06</span><div><strong>"I'd add a reconciliation job that cross-checks orders stuck in 'submitted' against the exchange, because a lost confirmation shouldn't require a user complaint to surface"</strong> — shows operational maturity beyond the happy path</div></li>
+      </ul>
+    </section>
+
+    <section id="follow-ups">
+      <h2>Follow-up questions</h2>
+      <div class="qa-block">
+        <div class="qa-q">What if two requests arrive with the same idempotency key at the exact same moment?</div>
+        <div class="qa-a">The UNIQUE index on idempotency_key makes the database the arbiter — only one INSERT wins; the other fails and its handler fetches and returns the winner's stored response.</div>
+      </div>
+      <div class="qa-block">
+        <div class="qa-q">How long do you retain idempotency keys?</div>
+        <div class="qa-a">Keep them as long as the order row itself lives, since a legitimate late retry (e.g. after a long network partition) should still resolve safely rather than be treated as a brand-new order.</div>
+      </div>
+      <div class="qa-block">
+        <div class="qa-q">Why not just use optimistic locking on a mutable balance column instead of a ledger?</div>
+        <div class="qa-a">Optimistic locking fixes the race but not the audit trail — a ledger also gives you a full, immutable history for disputes, compliance, and reconciliation, which a single column can never provide.</div>
+      </div>
+      <div class="qa-block">
+        <div class="qa-q">How do you keep the materialized balance in sync with the ledger cheaply?</div>
+        <div class="qa-a">Update it incrementally on every ledger insert within the same transaction, then run a periodic full-sum reconciliation job as a correctness backstop, not the primary mechanism.</div>
+      </div>
+      <div class="qa-block">
+        <div class="qa-q">What if pre-scaling for market open isn't enough for an unusually volatile day?</div>
+        <div class="qa-a">Layer reactive autoscaling on top of the scheduled pre-scale as a secondary defense, and apply load-shedding/backpressure on non-critical reads (e.g. serve slightly stale portfolio data) before ever rejecting order writes.</div>
+      </div>
+      <div class="qa-block">
+        <div class="qa-q">How would you extend this design to support limit orders that don't fill immediately?</div>
+        <div class="qa-a">The order stays in a "working" state until the exchange sends a fill or cancel event; the same execution-confirmation consumer and reconciliation job handle it, just over a longer, indefinite window.</div>
+      </div>
+    </section>
+
+  </main>
+  <script src="../../assets/nav.js"></script>
+</body>
+</html>

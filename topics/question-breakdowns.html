@@ -13,9 +13,9 @@
     <header class="page-head">
       <div class="pill">Questions</div>
       <h1>Question Breakdowns</h1>
-      <p class="sub">17 canonical system design questions, each walked through the same 6-step Hello Interview framework end to end.</p>
+      <p class="sub">23 canonical system design questions, each walked through the same 6-step Hello Interview framework end to end.</p>
       <div class="meta-row">
-        <span class="badge green">17 questions</span>
+        <span class="badge green">23 questions</span>
         <span class="badge blue">All interview-ready</span>
       </div>
     </header>
@@ -130,6 +130,16 @@
             <span class="badge blue">Medium</span>
           </div>
         </a>
+        <a class="topic-card" href="questions/youtube-top-k.html" style="--card-i:8">
+          <div class="card-num">10</div>
+          <div class="card-cat">Approximation</div>
+          <h3>Top-K Trending Videos</h3>
+          <p>Exact top-K breaks at global scale — Count-Min Sketch and heavy-hitters approximation instead of atomic counters</p>
+          <div class="card-meta">
+            <span class="badge green">30-40 min</span>
+            <span class="badge blue">Medium</span>
+          </div>
+        </a>
       </div>
     </section>
 
@@ -137,7 +147,7 @@
       <h2>Hard — distributed systems under pressure</h2>
       <div class="topic-grid">
         <a class="topic-card" href="questions/dropbox.html" style="--card-i:0">
-          <div class="card-num">10</div>
+          <div class="card-num">11</div>
           <div class="card-cat">Storage sync</div>
           <h3>Design Dropbox</h3>
           <p>Chunked, content-addressed sync — dedup, delta sync, and conflict resolution across devices</p>
@@ -147,7 +157,7 @@
           </div>
         </a>
         <a class="topic-card" href="questions/local-delivery.html" style="--card-i:1">
-          <div class="card-num">11</div>
+          <div class="card-num">12</div>
           <div class="card-cat">Geospatial</div>
           <h3>Local Delivery Service</h3>
           <p>Geohash-based driver matching, exactly-once order state machine, hot-partition handling</p>
@@ -157,7 +167,7 @@
           </div>
         </a>
         <a class="topic-card" href="questions/ticketmaster.html" style="--card-i:2">
-          <div class="card-num">12</div>
+          <div class="card-num">13</div>
           <div class="card-cat">Contention</div>
           <h3>Design Ticketmaster</h3>
           <p>Distributed locking under extreme write contention — millions fighting over the same seats in 60s</p>
@@ -167,7 +177,7 @@
           </div>
         </a>
         <a class="topic-card" href="questions/fb-news-feed.html" style="--card-i:3">
-          <div class="card-num">13</div>
+          <div class="card-num">14</div>
           <div class="card-cat">Fan-out</div>
           <h3>Facebook News Feed</h3>
           <p>Hybrid fan-out on write vs read — push for normal users, pull for celebrities past 1M followers</p>
@@ -177,7 +187,7 @@
           </div>
         </a>
         <a class="topic-card" href="questions/tinder.html" style="--card-i:4">
-          <div class="card-num">14</div>
+          <div class="card-num">15</div>
           <div class="card-cat">Geospatial</div>
           <h3>Design Tinder</h3>
           <p>Geospatial + preference filtering before any ranking model runs — retrieval before ranking</p>
@@ -187,7 +197,7 @@
           </div>
         </a>
         <a class="topic-card" href="questions/whatsapp.html" style="--card-i:5">
-          <div class="card-num">15</div>
+          <div class="card-num">16</div>
           <div class="card-cat">Messaging</div>
           <h3>Design WhatsApp</h3>
           <p>At-least-once delivery and per-conversation ordering across millions of long-lived connections</p>
@@ -197,7 +207,7 @@
           </div>
         </a>
         <a class="topic-card" href="questions/online-auction.html" style="--card-i:6">
-          <div class="card-num">16</div>
+          <div class="card-num">17</div>
           <div class="card-cat">Contention</div>
           <h3>Design an Online Auction</h3>
           <p>Optimistic locking on bid contention and distributed coordination for auction close</p>
@@ -207,10 +217,61 @@
           </div>
         </a>
         <a class="topic-card" href="questions/fb-live-comments.html" style="--card-i:7">
-          <div class="card-num">17</div>
+          <div class="card-num">18</div>
           <div class="card-cat">Fan-out</div>
           <h3>Facebook Live Comments</h3>
           <p>Fan-out to millions of concurrent viewers per stream — pub/sub at extreme scale</p>
+          <div class="card-meta">
+            <span class="badge green">40-50 min</span>
+            <span class="badge amber">Hard</span>
+          </div>
+        </a>
+        <a class="topic-card" href="questions/online-chess.html" style="--card-i:8">
+          <div class="card-num">19</div>
+          <div class="card-cat">Consensus</div>
+          <h3>Design Online Chess</h3>
+          <p>Game state as a distributed consensus problem — identical board state on both clients, even through packet loss</p>
+          <div class="card-meta">
+            <span class="badge new">New</span>
+            <span class="badge green">40-50 min</span>
+            <span class="badge amber">Hard</span>
+          </div>
+        </a>
+        <a class="topic-card" href="questions/instagram.html" style="--card-i:9">
+          <div class="card-num">20</div>
+          <div class="card-cat">Fan-out</div>
+          <h3>Design Instagram</h3>
+          <p>Photo storage and feed generation are two separate scaling problems — write-once blob storage vs. fan-out feed delivery</p>
+          <div class="card-meta">
+            <span class="badge green">40-50 min</span>
+            <span class="badge amber">Hard</span>
+          </div>
+        </a>
+        <a class="topic-card" href="questions/uber.html" style="--card-i:10">
+          <div class="card-num">21</div>
+          <div class="card-cat">Geospatial</div>
+          <h3>Design Uber</h3>
+          <p>Write-heavy driver location vs. read-heavy ride matching — different stores, plus ETA and surge pricing deep dives</p>
+          <div class="card-meta">
+            <span class="badge green">40-50 min</span>
+            <span class="badge amber">Hard</span>
+          </div>
+        </a>
+        <a class="topic-card" href="questions/robinhood.html" style="--card-i:11">
+          <div class="card-num">22</div>
+          <div class="card-cat">Consistency</div>
+          <h3>Design Robinhood</h3>
+          <p>Trade execution must be idempotent and exactly-once — a retry must never double-execute a buy or sell</p>
+          <div class="card-meta">
+            <span class="badge green">40-50 min</span>
+            <span class="badge amber">Hard</span>
+          </div>
+        </a>
+        <a class="topic-card" href="questions/google-docs.html" style="--card-i:12">
+          <div class="card-num">23</div>
+          <div class="card-cat">Collaboration</div>
+          <h3>Design Google Docs</h3>
+          <p>Real-time collaborative editing is an Operational Transformation problem — last-write-wins doesn't converge</p>
           <div class="card-meta">
             <span class="badge green">40-50 min</span>
             <span class="badge amber">Hard</span>

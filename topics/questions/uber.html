@@ -1,0 +1,552 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Design Uber — SD Prep</title>
+  <link rel="stylesheet" href="../../assets/style.css">
+</head>
+<body>
+  <aside id="sidebar"></aside>
+  <main>
+
+    <header class="page-head">
+      <div class="pill">Questions</div>
+      <h1>Design Uber</h1>
+      <p class="sub">Tests whether you split a write-heavy geospatial stream (driver location) from a read-heavy geospatial query (ride matching) — and whether you can reason about ETA and surge pricing as their own deep problems, not afterthoughts.</p>
+      <div class="meta-row">
+        <span class="badge green">45-55 min interview</span>
+        <span class="badge blue">Hard</span>
+      </div>
+    </header>
+
+    <div class="flash-card">
+      <div class="flash-label">Say this in the first 2 minutes</div>
+      <ul>
+        <li>The core insight: driver location is a write-heavy geospatial stream, ride matching is a read-heavy geospatial query — different access patterns need different stores and different optimization strategies</li>
+        <li>Key scale number to anchor on: 3M active drivers pinging every ~4s is 750k location writes/sec at peak — an entirely separate hot path from the 5M trips/day it eventually feeds</li>
+        <li>Primary tradeoff being probed: durability vs write speed for driver location — a dropped ping is irrelevant since a fresher one lands in 4s</li>
+        <li>Component most candidates gloss over: ETA is a live composition of routing, traffic, and driver behavior, not a single distance formula — and surge pricing is a separate signal fed by the same demand data</li>
+        <li>Consistency model most candidates get wrong: trip state needs strong consistency (no double-dispatch), but surge pricing is fine with data that's a few seconds stale — don't apply one consistency bar to both</li>
+      </ul>
+    </div>
+
+    <section id="step1-requirements">
+      <div class="step-pill">Step 1 of 6 — Requirements</div>
+      <h2>Requirements</h2>
+
+      <div class="goal-arc-wrap">
+        <div class="goal-arc-row functional">
+          <div class="goal-arc-seg">1</div><div class="goal-arc-seg">2</div><div class="goal-arc-seg">3</div><div class="goal-arc-seg">4</div><div class="goal-arc-seg">5</div><div class="goal-arc-seg inactive">6</div>
+        </div>
+        <div class="goal-arc-label"><span>Arc 1 (steps 1-5) — <strong>Satisfy Functional Requirements</strong></span></div>
+        <div class="goal-arc-row nonfunctional" style="margin-top:8px">
+          <div class="goal-arc-seg">1</div><div class="goal-arc-seg">2</div><div class="goal-arc-seg">3</div><div class="goal-arc-seg">4</div><div class="goal-arc-seg">5</div><div class="goal-arc-seg">6</div>
+        </div>
+        <div class="goal-arc-label"><span>Arc 2 (all 6 steps) — <strong>Satisfy Non-Functional Requirements</strong></span></div>
+      </div>
+
+      <div class="compare-grid">
+        <div class="compare-card good">
+          <div class="compare-label">Functional</div>
+          <ul>
+            <li>Rider requests a trip from their current location to a destination</li>
+            <li>System matches the request to the nearest available driver</li>
+            <li>Track trip state from requested through completed</li>
+            <li>Show a live ETA to both rider and driver</li>
+            <li>Apply a surge multiplier when local demand outstrips supply</li>
+          </ul>
+        </div>
+        <div class="compare-card bad">
+          <div class="compare-label">Non-Functional</div>
+          <ul>
+            <li>3M active drivers citywide-aggregate, location pings every ~4s</li>
+            <li>Match latency target &lt;2s from request to driver offer</li>
+            <li>Trip state transitions are strongly consistent — no double-dispatch, no lost trips</li>
+            <li>Surge pricing can tolerate a few seconds of staleness — it's a signal, not a ledger</li>
+            <li>Survive a single region/AZ outage without losing in-flight trips</li>
+          </ul>
+        </div>
+      </div>
+
+      <div class="callout warn"><strong>What NOT to build:</strong> driver onboarding or background-check workflows, in-app payment processing internals (assume a payments service exists and is called), or driver earnings/payroll systems. This is trip request, matching, ETA, and surge pricing only.</div>
+
+      <div class="stat-grid">
+        <div class="stat-card"><div class="stat-val">5M</div><div class="stat-label">trips/day</div></div>
+        <div class="stat-card"><div class="stat-val">3M</div><div class="stat-label">active drivers</div></div>
+        <div class="stat-card"><div class="stat-val">750k/s</div><div class="stat-label">location writes/sec at peak</div></div>
+        <div class="stat-card"><div class="stat-val">&lt;2s</div><div class="stat-label">match latency target</div></div>
+      </div>
+    </section>
+
+    <section id="step2-entities">
+      <div class="step-pill">Step 2 of 6 — Core Entities</div>
+      <h2>Core entities</h2>
+      <p style="font-size:13px;color:#999;margin-bottom:0.75rem">Trip state lives in Postgres because it's a financial transaction with strict ordering guarantees; driver location and surge density live in Redis because they're ephemeral, high-frequency, and only the current value matters.</p>
+
+      <div class="entity-grid">
+        <div class="entity-box">
+          <div class="entity-head"><span class="entity-name">Trip</span><span class="entity-store pg">Postgres</span></div>
+          <div class="entity-fields">
+            <div class="entity-field"><span class="fname pk">trip_id</span><span class="ftype">UUID</span></div>
+            <div class="entity-field"><span class="fname">rider_id</span><span class="ftype">BIGINT</span></div>
+            <div class="entity-field"><span class="fname">driver_id</span><span class="ftype">BIGINT, nullable</span></div>
+            <div class="entity-field"><span class="fname">status</span><span class="ftype">TEXT — state machine</span></div>
+            <div class="entity-field"><span class="fname">surge_multiplier</span><span class="ftype">DECIMAL, locked at request</span></div>
+            <div class="entity-field"><span class="fname">version</span><span class="ftype">INT — optimistic lock</span></div>
+          </div>
+          <div class="entity-why">Because a trip is money and legal liability — exactly-once state transitions matter more than raw throughput. The version column prevents two matching attempts from double-assigning the same trip. Tradeoff: needs sharding by city_id at high trip volume.</div>
+        </div>
+
+        <div class="entity-box">
+          <div class="entity-head"><span class="entity-name">DriverLocation</span><span class="entity-store redis">Redis GEO</span></div>
+          <div class="entity-fields">
+            <div class="entity-field"><span class="fname pk">driver_id</span><span class="ftype">member key</span></div>
+            <div class="entity-field"><span class="fname">lng, lat</span><span class="ftype">GEOADD coordinates</span></div>
+            <div class="entity-field"><span class="fname">status</span><span class="ftype">available / en_route / offline</span></div>
+            <div class="entity-field"><span class="fname">ttl</span><span class="ftype">~15s</span></div>
+          </div>
+          <div class="entity-why">Because positions are ephemeral and hit 750k writes/sec at peak — durability of any single ping is worthless, only the current position and sub-ms radius query speed matter. Tradeoff: a node failure loses recent positions, self-heals within one ~4s ping cycle.</div>
+        </div>
+
+        <div class="entity-box">
+          <div class="entity-head"><span class="entity-name">SurgeCell</span><span class="entity-store redis">Redis</span></div>
+          <div class="entity-fields">
+            <div class="entity-field"><span class="fname pk">geohash_cell</span><span class="ftype">7-char geohash string</span></div>
+            <div class="entity-field"><span class="fname">open_requests</span><span class="ftype">rolling counter</span></div>
+            <div class="entity-field"><span class="fname">available_drivers</span><span class="ftype">rolling counter</span></div>
+            <div class="entity-field"><span class="fname">multiplier</span><span class="ftype">DECIMAL, recomputed ~5s</span></div>
+          </div>
+          <div class="entity-why">Because demand density per cell is a pricing signal, not a source of truth — a few seconds of staleness is fine and cheap to compute from streaming counters. Tradeoff: rapid demand spikes lag the actual multiplier by one aggregation window.</div>
+        </div>
+      </div>
+
+      <div class="callout info">Primary key: <code>Trip.trip_id</code> with a <code>version</code> column for optimistic locking. Critical index: Redis GEO's internal sorted-set on driver coordinates for matching; a separate per-cell counter structure for surge — two different access patterns on the same underlying geohash key space.</div>
+    </section>
+
+    <section id="step3-api">
+      <div class="step-pill">Step 3 of 6 — API / Interface</div>
+      <h2>API design</h2>
+      <p style="font-size:13px;color:#999;margin-bottom:0.75rem">Trip request and transitions are REST since they're low-frequency and need clear success/failure semantics; driver location is a persistent WebSocket since it's a continuous high-frequency stream.</p>
+
+      <div class="api-card">
+        <div class="api-line"><span class="api-method post">POST</span><span class="api-path">/api/v1/trips/request</span><span class="api-auth">Auth: required (rider)</span></div>
+        <div class="api-io">
+          <div class="api-io-block"><div class="api-io-label">Request</div><div class="api-io-body">{ pickup_geo, dropoff_geo, ride_type }</div></div>
+          <div class="api-io-block"><div class="api-io-label">Response</div><div class="api-io-body">{ trip_id, status: "requested", surge_multiplier, eta_seconds }</div></div>
+        </div>
+      </div>
+
+      <div class="api-card">
+        <div class="api-line"><span class="api-method ws">WEBSOCKET</span><span class="api-path">/ws/driver/{id}/location</span><span class="api-auth">Auth: required (driver)</span></div>
+        <div class="api-io">
+          <div class="api-io-block"><div class="api-io-label">Message in</div><div class="api-io-body">{ lat, lng, heading } every ~4s</div></div>
+          <div class="api-io-block"><div class="api-io-label">Message out</div><div class="api-io-body">{ trip_offer } when matched, 15s accept window</div></div>
+        </div>
+      </div>
+
+      <div class="api-card">
+        <div class="api-line"><span class="api-method post">POST</span><span class="api-path">/api/v1/trips/{id}/transition</span><span class="api-auth">Auth: required (driver or rider)</span></div>
+        <div class="api-io">
+          <div class="api-io-block"><div class="api-io-label">Request</div><div class="api-io-body">{ to_status, version }</div></div>
+          <div class="api-io-block"><div class="api-io-label">Response</div><div class="api-io-body">200 on success, 409 on version conflict</div></div>
+        </div>
+      </div>
+
+      <div class="api-card">
+        <div class="api-line"><span class="api-method get">GET</span><span class="api-path">/api/v1/trips/{id}/eta</span><span class="api-auth">Auth: required (rider or driver)</span></div>
+        <div class="api-io">
+          <div class="api-io-block"><div class="api-io-label">Response</div><div class="api-io-body">{ eta_seconds, distance_m, degraded: bool }</div></div>
+          <div class="api-io-block"><div class="api-io-label">Cadence</div><div class="api-io-body">polled every ~5s or pushed on recompute</div></div>
+        </div>
+      </div>
+
+      <div class="callout good">WebSocket for location, REST for everything else: location is a continuous high-frequency push (750k/s in aggregate) where a persistent connection avoids per-ping HTTP overhead across 3M drivers; trip requests and transitions are low-frequency and benefit from REST's explicit request/response and status-code semantics.</div>
+    </section>
+
+    <section id="step4-dataflow">
+      <div class="step-pill">Step 4 of 6 — Data Flow</div>
+      <h2>Data flow</h2>
+      <p style="font-size:13px;color:#999;margin-bottom:0.75rem">Driver location writes (blue) and ride-matching reads (mint) hit the same Redis GEO index but are otherwise fully independent flows.</p>
+
+      <div class="diagram-wrap" data-paths='{"location":{"boxes":["u-driver","u-locsvc","u-geo"],"arrows":["u1","u2"]},"match":{"boxes":["u-rider","u-trip","u-match","u-geo2"],"arrows":["u3","u4","u5"]}}'>
+        <svg viewBox="0 0 740 220" xmlns="http://www.w3.org/2000/svg">
+          <defs>
+            <marker id="uberFlowW" markerWidth="8" markerHeight="8" refX="6" refY="3" orient="auto"><path d="M0,0 L6,3 L0,6 Z" fill="var(--blue)"/></marker>
+            <marker id="uberFlowR" markerWidth="8" markerHeight="8" refX="6" refY="3" orient="auto"><path d="M0,0 L6,3 L0,6 Z" fill="var(--accent)"/></marker>
+          </defs>
+
+          <text class="diag-sublabel" x="150" y="14" style="font-size:10px;fill:var(--blue)">WRITE PATH — driver location, ~750k/s peak</text>
+          <g data-target="step6-deepdive-geohash" data-id="u-driver" data-tip="Sends a GPS ping every ~4s over a persistent WebSocket"><rect class="diag-box role-client" x="10" y="24" width="120" height="46"/><text class="diag-label" x="70" y="47" style="font-size:11px">Driver App</text></g>
+          <path class="diag-arrow-path" data-id="u1" d="M130,47 L165,47" marker-end="url(#uberFlowW)"/>
+          <g data-target="step6-deepdive-geohash" data-id="u-locsvc" data-tip="Thin ingestion — writes position, forwards to Kafka for ETA/surge"><rect class="diag-box" x="165" y="24" width="130" height="46"/><text class="diag-label" x="230" y="47" style="font-size:11px">Location Svc</text></g>
+          <path class="diag-arrow-path" data-id="u2" d="M295,47 L330,47" marker-end="url(#uberFlowW)"/>
+          <g data-target="step6-deepdive-geohash" data-id="u-geo" data-tip="GEOADD writes current position, TTL ~15s"><rect class="diag-box role-cache" x="330" y="24" width="130" height="46"/><text class="diag-label" x="395" y="47" style="font-size:11px">Redis GEO</text></g>
+
+          <circle class="diag-dot diag-flow-dot" data-flow="write" r="3.5" style="offset-path: path('M10,47 L130,47 L130,47 L295,47 L295,47 L460,47')"></circle>
+
+          <text class="diag-sublabel" x="150" y="105" style="font-size:10px;fill:var(--accent)">READ PATH — ride matching</text>
+          <g data-target="step2-entities" data-id="u-rider" data-tip="Requests a trip from current location to a destination"><rect class="diag-box role-client" x="10" y="115" width="120" height="46"/><text class="diag-label" x="70" y="143" style="font-size:11px">Rider App</text></g>
+          <path class="diag-arrow-path" data-id="u3" d="M130,138 L165,138" marker-end="url(#uberFlowR)"/>
+          <g data-target="step6-deepdive-statemachine" data-id="u-trip" data-tip="Creates the trip row, kicks off matching"><rect class="diag-box" x="165" y="115" width="120" height="46"/><text class="diag-label" x="225" y="143" style="font-size:11px">Trip Service</text></g>
+          <path class="diag-arrow-path" data-id="u4" d="M285,138 L320,138" marker-end="url(#uberFlowR)"/>
+          <g data-target="step6-deepdive-geohash" data-id="u-match" data-tip="Expands outward ring by ring from the rider's cell"><rect class="diag-box" x="320" y="115" width="120" height="46"/><text class="diag-label" x="380" y="143" style="font-size:11px">Matching Svc</text></g>
+          <path class="diag-arrow-path" data-id="u5" d="M440,138 L475,138" marker-end="url(#uberFlowR)"/>
+          <g data-target="step6-deepdive-geohash" data-id="u-geo2" data-tip="Same GEO index the location write path populates"><rect class="diag-box role-cache" x="475" y="115" width="130" height="46"/><text class="diag-label" x="540" y="143" style="font-size:11px">Redis GEO</text></g>
+
+          <circle class="diag-dot diag-flow-dot" data-flow="read" r="3.5" style="offset-path: path('M10,138 L130,138 L130,138 L285,138 L285,138 L440,138 L440,138 L600,138')"></circle>
+        </svg>
+        <div class="diag-legend">
+          <div class="diag-legend-item"><span class="diag-legend-dot role-client"></span>Driver/rider apps — persistent WebSocket for location, REST for requests</div>
+          <div class="diag-legend-item"><span class="diag-legend-dot role-cache"></span>Redis GEO — one index, written by the location path, read by the matching path</div>
+        </div>
+      </div>
+
+      <ol class="flow-steps-list">
+        <li><span>Driver pings location every ~4s</span> — over the already-open WebSocket connection</li>
+        <li><span>Location Svc writes to Redis GEO</span> — GEOADD refreshes position and TTL, also streams to Kafka for ETA and surge aggregation</li>
+        <li><span>Rider requests a trip</span> — Trip Service creates the trip row in "requested" state, reads the current surge multiplier</li>
+        <li><span>Matching Svc queries Redis GEO</span> — finds nearby available drivers by expanding outward from the rider's geohash cell</li>
+        <li><span>Best candidate is offered the trip</span> — pushed over their WebSocket connection with a 15s accept window</li>
+      </ol>
+    </section>
+
+    <section id="step5-hld">
+      <div class="step-pill">Step 5 of 6 — High-Level Design</div>
+      <h2>High-level design</h2>
+      <p style="font-size:13px;color:#999;margin-bottom:0.75rem">Full system: location and matching flows, plus the ETA and surge pricing services that both read off the same geospatial and streaming data.</p>
+
+      <div class="diagram-wrap">
+        <svg viewBox="0 0 800 340" xmlns="http://www.w3.org/2000/svg">
+          <defs><marker id="uberHldArrow" markerWidth="8" markerHeight="8" refX="6" refY="3" orient="auto"><path d="M0,0 L6,3 L0,6 Z" fill="var(--border2)"/></marker></defs>
+
+          <g data-tip="Requests trips, views ETA and fare"><rect class="diag-box role-client" x="10" y="20" width="120" height="46"/><text class="diag-label" x="70" y="47" style="font-size:11px">Rider App</text></g>
+          <g data-tip="Sends location, receives trip offers"><rect class="diag-box role-client" x="10" y="80" width="120" height="46"/><text class="diag-label" x="70" y="107" style="font-size:11px">Driver App</text></g>
+
+          <path class="diag-arrow-path" d="M130,43 L165,60" marker-end="url(#uberHldArrow)"/>
+          <g data-tip="Owns the trip state machine"><rect class="diag-box" x="165" y="40" width="140" height="50"/><text class="diag-label" x="235" y="62" style="font-size:11px">Trip Service</text><text class="diag-sublabel" x="235" y="78" style="font-size:8.5px">state machine</text></g>
+          <path class="diag-arrow-path" d="M305,65 L340,65" marker-end="url(#uberHldArrow)"/>
+          <g data-tip="ACID-compliant trip records"><rect class="diag-box role-db" x="340" y="40" width="120" height="50"/><text class="diag-label" x="400" y="68" style="font-size:11px">Postgres</text></g>
+
+          <path class="diag-arrow-path" d="M130,103 L165,140" marker-end="url(#uberHldArrow)"/>
+          <g data-tip="Ingests location, writes GEO + streams to Kafka"><rect class="diag-box" x="165" y="118" width="140" height="46"/><text class="diag-label" x="235" y="141" style="font-size:11px">Location Svc</text></g>
+          <path class="diag-arrow-path" d="M235,120 L235,90 L235,90" marker-end="url(#uberHldArrow)" stroke-dasharray="3 3"/>
+          <path class="diag-arrow-path" d="M235,90 L235,65" marker-end="url(#uberHldArrow)"/>
+
+          <path class="diag-arrow-path" d="M235,164 L235,190" marker-end="url(#uberHldArrow)"/>
+          <g data-tip="Nearest-driver query, expanding geohash rings"><rect class="diag-box" x="165" y="190" width="140" height="46"/><text class="diag-label" x="235" y="213" style="font-size:11px">Matching Svc</text></g>
+          <path class="diag-arrow-path" d="M305,213 L340,213" marker-end="url(#uberHldArrow)"/>
+          <g data-tip="Live driver positions, shared read/write index"><rect class="diag-box role-cache" x="340" y="190" width="130" height="46"/><text class="diag-label" x="405" y="213" style="font-size:11px">Redis GEO</text></g>
+          <path class="diag-arrow-path" d="M130,141 L340,213" marker-end="url(#uberHldArrow)" stroke-dasharray="3 3"/>
+
+          <path class="diag-arrow-path" d="M305,141 L505,141" marker-end="url(#uberHldArrow)"/>
+          <g data-tip="Every ping streams here for ETA + surge aggregation"><rect class="diag-box role-async" x="505" y="118" width="120" height="46"/><text class="diag-label" x="565" y="141" style="font-size:11px">Kafka</text></g>
+
+          <path class="diag-arrow-path" d="M625,132 L660,90" marker-end="url(#uberHldArrow)"/>
+          <g data-tip="Composes distance, live traffic, driver load into a live ETA"><rect class="diag-box role-async" x="660" y="60" width="110" height="46"/><text class="diag-label" x="715" y="83" style="font-size:11px">ETA Svc</text></g>
+
+          <path class="diag-arrow-path" d="M625,150 L660,190" marker-end="url(#uberHldArrow)"/>
+          <g data-tip="Aggregates open-requests / available-drivers per geohash cell"><rect class="diag-box role-async" x="660" y="168" width="120" height="46"/><text class="diag-label" x="720" y="191" style="font-size:11px">Surge Pricing</text></g>
+          <path class="diag-arrow-path" d="M660,191 L470,213" marker-end="url(#uberHldArrow)" stroke-dasharray="3 3"/>
+
+          <path class="diag-arrow-path" d="M715,106 L460,62" marker-end="url(#uberHldArrow)" stroke-dasharray="3 3"/>
+
+          <path class="diag-arrow-path" d="M235,40 L235,20 L500,20 L500,255" marker-end="url(#uberHldArrow)" stroke-dasharray="3 3"/>
+          <g data-tip="Pushes trip offers and state changes to both apps"><rect class="diag-box role-async" x="440" y="255" width="150" height="46"/><text class="diag-label" x="515" y="283" style="font-size:11px">Notification Svc</text></g>
+        </svg>
+        <div class="diag-legend">
+          <div class="diag-legend-item"><span class="diag-legend-dot role-client"></span>Rider + driver apps</div>
+          <div class="diag-legend-item"><span class="diag-legend-dot role-cache"></span>Redis GEO — single geospatial index, shared by matching and surge</div>
+          <div class="diag-legend-item"><span class="diag-legend-dot role-db"></span>Postgres — transactional trip state, source of truth</div>
+          <div class="diag-legend-item"><span class="diag-legend-dot role-async"></span>Kafka + ETA/Surge/Notification — decoupled from the hot path</div>
+        </div>
+      </div>
+
+      <table class="def-table">
+        <thead><tr><th>Component</th><th>Role</th><th>Tech + why</th></tr></thead>
+        <tbody>
+          <tr><td>Trip Service</td><td>Owns trip state machine</td><td>Postgres-backed, optimistic locking — because exactly-once transitions matter more than raw throughput; tradeoff is sharding needed at high trip volume.</td></tr>
+          <tr><td>Location Service</td><td>Ingests driver pings, fans out</td><td>Stateless WebSocket terminator — writes Redis GEO synchronously, streams to Kafka async so ETA/surge never block the write path.</td></tr>
+          <tr><td>Matching Svc</td><td>Nearest-driver query</td><td>Geohash ring expansion over Redis GEO — turns 2D proximity into a cheap prefix lookup; tradeoff is edge effects at cell boundaries.</td></tr>
+          <tr><td>Redis GEO</td><td>Live driver positions</td><td>In-memory geospatial index — 750k writes/sec of ephemeral data needs sub-ms radius queries; tradeoff is no durability guarantee per ping.</td></tr>
+          <tr><td>ETA Service</td><td>Composes distance, traffic, driver load into a live estimate</td><td>Streaming consumer off Kafka — because inputs update independently and continuously; falls back to a cached estimate when degraded.</td></tr>
+          <tr><td>Surge Pricing Svc</td><td>Demand-density multiplier per cell</td><td>Rolling counters in Redis, recomputed every ~5s — a pricing signal can tolerate staleness that trip state cannot.</td></tr>
+        </tbody>
+      </table>
+
+      <h3 style="font-size:13px;color:var(--text);margin:1.25rem 0 0.6rem;font-weight:600">Scaling levers — cheapest to most complex</h3>
+      <ol class="levers-list">
+        <li><strong>Add Redis GEO read replicas per region</strong><span class="cost">low complexity</span></li>
+        <li><strong>Cache ETA estimates for a few seconds</strong> to absorb repeat polling<span class="cost">low complexity</span></li>
+        <li><strong>Shard trips by city_id</strong><span class="cost">medium complexity</span></li>
+        <li><strong>Batch client-side location writes</strong> over the 4s interval under network stress<span class="cost">medium complexity</span></li>
+        <li><strong>Dynamic geohash cell-splitting</strong> in dense downtown cores<span class="cost">high complexity — last resort</span></li>
+      </ol>
+
+      <table class="grid-table">
+        <thead><tr><th>Bottleneck</th><th>Triggers at</th><th>Exact fix</th></tr></thead>
+        <tbody>
+          <tr><td>Hot geohash cell (downtown rush hour)</td><td>One dense cell gets far more requests/drivers than others</td><td class="fix">Dynamic cell-splitting — finer geohash precision in dense areas</td></tr>
+          <tr><td>Location write throughput</td><td>&gt;100k writes/sec regionally</td><td class="fix">Shard Redis GEO by region; batch client-side writes under load</td></tr>
+          <tr><td>Trip DB write contention</td><td>High trip volume in one city during surge</td><td class="fix">Shard by city_id; optimistic locking avoids row-level blocking</td></tr>
+        </tbody>
+      </table>
+
+      <div class="dial-wrap">
+        <div class="dial-title">Driver location data: durability vs write speed</div>
+        <div class="dial-track"><div class="dial-marker" style="left:90%"></div></div>
+        <div class="dial-labels"><span class="end-left">Durable</span><span class="end-right">Fast, ephemeral</span></div>
+      </div>
+      <div class="dial-wrap">
+        <div class="dial-title">Surge pricing data: strong vs eventual consistency</div>
+        <div class="dial-track"><div class="dial-marker" style="left:82%"></div></div>
+        <div class="dial-labels"><span class="end-left">Strong</span><span class="end-right">Eventual</span></div>
+      </div>
+    </section>
+
+    <section id="step6-deepdive-geohash">
+      <div class="step-pill">Step 6 of 6 — Deep Dives</div>
+      <h2>Deep dive: geohash grid for ride matching</h2>
+      <p style="font-size:13px;color:#999;margin-bottom:0.75rem">A city is divided into a grid of geohash cells. A driver ping lands in exactly one cell; a ride request expands outward ring by ring until enough available drivers are found.</p>
+      <div class="diagram-wrap">
+        <svg viewBox="0 0 480 320" xmlns="http://www.w3.org/2000/svg" id="uberGeohashGrid">
+          <defs><marker id="uberGeoArrow" markerWidth="8" markerHeight="8" refX="6" refY="3" orient="auto"><path d="M0,0 L6,3 L0,6 Z" fill="var(--accent)"/></marker></defs>
+          <text class="diag-sublabel" x="240" y="14" style="font-size:10px;fill:var(--muted)">CITY GRID — each cell ≈ 150m × 150m (7-char geohash)</text>
+          <g id="uberGridCells"></g>
+          <circle id="uberDriverPing" cx="0" cy="0" r="5" fill="var(--blue)" opacity="0" />
+          <text id="uberPingLabel" x="0" y="0" font-size="9" fill="var(--blue)" text-anchor="middle" opacity="0" font-family="Inter,sans-serif"></text>
+        </svg>
+        <div style="display:flex;gap:10px;margin-top:6px;flex-wrap:wrap">
+          <button class="flow-cmp-replay" id="uberGeoPingBtn" style="width:auto;padding:6px 14px">▸ Simulate driver ping</button>
+          <button class="flow-cmp-replay" id="uberGeoQueryBtn" style="width:auto;padding:6px 14px">▸ Simulate ride request (expand outward)</button>
+        </div>
+      </div>
+      <script>
+      (function(){
+        var svg = document.getElementById('uberGeohashGrid');
+        if (!svg) return;
+        var cellsG = document.getElementById('uberGridCells');
+        var cols = 8, rows = 6, cellW = 48, cellH = 42, offX = 40, offY = 30;
+        var cellEls = [];
+        for (var r = 0; r < rows; r++) {
+          for (var c = 0; c < cols; c++) {
+            var x = offX + c * cellW, y = offY + r * cellH;
+            var rect = document.createElementNS('http://www.w3.org/2000/svg', 'rect');
+            rect.setAttribute('x', x); rect.setAttribute('y', y);
+            rect.setAttribute('width', cellW - 2); rect.setAttribute('height', cellH - 2);
+            rect.setAttribute('rx', 3);
+            rect.setAttribute('fill', 'var(--surface)');
+            rect.setAttribute('stroke', 'var(--border2)');
+            rect.setAttribute('stroke-width', '1');
+            rect.dataset.row = r; rect.dataset.col = c;
+            cellsG.appendChild(rect);
+            cellEls.push({ el: rect, r: r, c: c, x: x, y: y });
+          }
+        }
+        var centerR = 2, centerC = 4;
+        var ping = document.getElementById('uberDriverPing');
+        var pingLabel = document.getElementById('uberPingLabel');
+
+        function cellCenter(r, c) {
+          return { x: offX + c * cellW + (cellW - 2) / 2, y: offY + r * cellH + (cellH - 2) / 2 };
+        }
+
+        document.getElementById('uberGeoPingBtn').addEventListener('click', function(){
+          cellEls.forEach(function(ce){ ce.el.setAttribute('fill', 'var(--surface)'); ce.el.setAttribute('stroke', 'var(--border2)'); });
+          var target = cellEls.find(function(ce){ return ce.r === centerR && ce.c === centerC; });
+          var pt = cellCenter(centerR, centerC);
+          ping.setAttribute('cx', pt.x); ping.setAttribute('cy', pt.y);
+          ping.setAttribute('opacity', '0');
+          pingLabel.setAttribute('x', pt.x); pingLabel.setAttribute('y', pt.y - 12);
+          pingLabel.textContent = 'GEOADD';
+          pingLabel.setAttribute('opacity', '0');
+          requestAnimationFrame(function(){
+            ping.style.transition = 'opacity 0.3s ease';
+            pingLabel.style.transition = 'opacity 0.3s ease';
+            ping.setAttribute('opacity', '1');
+            pingLabel.setAttribute('opacity', '1');
+            if (target) target.el.setAttribute('fill', '#0d1a2d');
+            if (target) target.el.setAttribute('stroke', 'var(--blue)');
+          });
+        });
+
+        document.getElementById('uberGeoQueryBtn').addEventListener('click', function(){
+          cellEls.forEach(function(ce){ ce.el.setAttribute('fill', 'var(--surface)'); ce.el.setAttribute('stroke', 'var(--border2)'); });
+          var rings = [0, 1, 2, 3];
+          rings.forEach(function(ring, i){
+            setTimeout(function(){
+              cellEls.forEach(function(ce){
+                var dist = Math.max(Math.abs(ce.r - centerR), Math.abs(ce.c - centerC));
+                if (dist === ring) {
+                  ce.el.style.transition = 'fill 0.3s ease, stroke 0.3s ease';
+                  ce.el.setAttribute('fill', ring === 0 ? '#08200f' : '#0d1f17');
+                  ce.el.setAttribute('stroke', 'var(--accent)');
+                }
+              });
+            }, i * 350);
+          });
+        });
+      })();
+      </script>
+      <ol class="flow-steps-list">
+        <li><span>Driver ping lands in a cell</span> — GPS coordinate encoded to a geohash string, GEOADD places the driver at that key</li>
+        <li><span>Ride request arrives with its own cell</span> — rider's pickup location encoded the same way</li>
+        <li><span>Query expands outward ring by ring</span> — own cell first, then the 8 neighbors, then the next ring, until the candidate count is enough</li>
+        <li><span>Rank candidates</span> — actual road distance and current driver idle time, not just geohash proximity</li>
+        <li><span>Offer and lock</span> — top candidate gets a 15s accept window; next candidate tried on decline or timeout</li>
+      </ol>
+      <div class="callout warn">Geohash precision is a tradeoff, not a constant: 7 characters gives ~150m cells, tight enough for dense urban matching but requiring more ring expansions in sparse suburbs. Fewer characters (coarser cells) reduce ring-expansion cost but blur "nearby" into cells that can be a kilometer wide — precision should flex with local driver density, not be fixed citywide.</div>
+    </section>
+
+    <section id="step6-deepdive-statemachine">
+      <h2>Deep dive: trip state machine</h2>
+      <p style="font-size:13px;color:#999;margin-bottom:0.75rem">Every transition is atomic via optimistic locking on the trip's version column. Amber dashed transitions are irreversible.</p>
+      <div class="diagram-wrap">
+        <svg viewBox="0 0 780 260" xmlns="http://www.w3.org/2000/svg">
+          <defs>
+            <marker id="uberStateArrowN" markerWidth="8" markerHeight="8" refX="6" refY="3" orient="auto"><path d="M0,0 L6,3 L0,6 Z" fill="var(--border2)"/></marker>
+            <marker id="uberStateArrowW" markerWidth="8" markerHeight="8" refX="6" refY="3" orient="auto"><path d="M0,0 L6,3 L0,6 Z" fill="var(--amber)"/></marker>
+            <marker id="uberStateArrowRed" markerWidth="8" markerHeight="8" refX="6" refY="3" orient="auto"><path d="M0,0 L6,3 L0,6 Z" fill="var(--red)"/></marker>
+          </defs>
+
+          <rect class="state-node" x="10" y="70" width="105" height="50" rx="6"/>
+          <text class="state-label" x="62" y="92">Requested</text>
+          <text class="state-sublabel" x="62" y="106">trip created</text>
+
+          <path class="state-arrow" d="M115,95 L148,95" marker-end="url(#uberStateArrowN)"/>
+          <rect class="state-node" x="148" y="70" width="105" height="50" rx="6"/>
+          <text class="state-label" x="200" y="92">Accepted</text>
+          <text class="state-sublabel" x="200" y="106">driver assigned</text>
+
+          <path class="state-arrow" d="M253,95 L286,95" marker-end="url(#uberStateArrowN)"/>
+          <rect class="state-node" x="286" y="70" width="120" height="50" rx="6"/>
+          <text class="state-label" x="346" y="92">En Route Pickup</text>
+          <text class="state-sublabel" x="346" y="106">driver→rider</text>
+
+          <path class="state-arrow irreversible" d="M406,95 L439,95" marker-end="url(#uberStateArrowW)"/>
+          <rect class="state-node irreversible" x="439" y="70" width="115" height="50" rx="6"/>
+          <text class="state-label" x="496" y="92">Arrived Pickup</text>
+          <text class="state-sublabel" x="496" y="106">at rider's location</text>
+
+          <path class="state-arrow irreversible" d="M554,95 L587,95" marker-end="url(#uberStateArrowW)"/>
+          <rect class="state-node irreversible" x="587" y="70" width="115" height="50" rx="6"/>
+          <text class="state-label" x="644" y="92">En Route Dest</text>
+          <text class="state-sublabel" x="644" y="106">rider onboard</text>
+
+          <path class="state-arrow irreversible" d="M644,120 L644,155 L710,190" marker-end="url(#uberStateArrowW)"/>
+          <rect class="state-node terminal" x="640" y="190" width="120" height="50" rx="6"/>
+          <text class="state-label" x="700" y="212">Completed</text>
+          <text class="state-sublabel" x="700" y="226">terminal</text>
+
+          <path class="state-arrow irreversible" d="M62,120 L62,165 L286,165 L286,120" marker-end="url(#uberStateArrowRed)" style="stroke:var(--red)"/>
+          <path class="state-arrow irreversible" d="M200,120 L200,165" marker-end="url(#uberStateArrowRed)" style="stroke:var(--red)"/>
+          <rect class="state-node terminal" x="228" y="165" width="120" height="50" rx="6" style="stroke:var(--red)"/>
+          <text class="state-label" x="288" y="187">Cancelled</text>
+          <text class="state-sublabel" x="288" y="201" style="fill:var(--red)">terminal — only from Requested or Accepted</text>
+        </svg>
+      </div>
+      <table class="grid-table">
+        <thead><tr><th>Transition</th><th>Reversible?</th><th>Guard condition</th></tr></thead>
+        <tbody>
+          <tr><td>Requested → Accepted</td><td>Yes (reverts to Requested on driver decline/timeout)</td><td class="detect">Matching service confirms an available driver within the accept window</td></tr>
+          <tr><td>Requested / Accepted → Cancelled</td><td class="impact">No — terminal</td><td class="detect">Rider or system-initiated cancellation before pickup</td></tr>
+          <tr><td>Accepted → En Route Pickup</td><td>Yes (can revert to Accepted on GPS jitter, not further back)</td><td class="detect">Driver app confirms navigation started toward rider</td></tr>
+          <tr><td>En Route Pickup → Arrived Pickup</td><td class="impact">No — irreversible</td><td class="detect">Geofence match on driver's location vs pickup point</td></tr>
+          <tr><td>Arrived Pickup → En Route Dest</td><td class="impact">No — irreversible</td><td class="detect">Driver confirms rider onboard (explicit tap, not just proximity)</td></tr>
+          <tr><td>En Route Dest → Completed</td><td class="impact">No — terminal</td><td class="detect">Geofence match on destination plus explicit driver confirmation</td></tr>
+        </tbody>
+      </table>
+      <div class="callout danger">Once a trip reaches "Arrived Pickup," cancellation is no longer offered to the rider without a fee — the driver has already committed travel time and fuel. This must be enforced at the state machine level, not just hidden in the UI, or a race condition could let a free cancellation slip through after the driver has arrived.</div>
+    </section>
+
+    <section id="step6-deepdive-surge">
+      <h2>Deep dive: surge pricing pipeline</h2>
+      <p style="font-size:13px;color:#999;margin-bottom:0.75rem">Demand density per geohash cell — open ride requests divided by available drivers — drives a pricing tier multiplier. This signal can be a few seconds stale; trip state cannot.</p>
+
+      <div class="diagram-wrap">
+        <svg viewBox="0 0 760 200" xmlns="http://www.w3.org/2000/svg">
+          <defs><marker id="uberSurgeArrow" markerWidth="8" markerHeight="8" refX="6" refY="3" orient="auto"><path d="M0,0 L6,3 L0,6 Z" fill="var(--border2)"/></marker></defs>
+
+          <g data-tip="Every driver ping and every ride request streams here"><rect class="diag-box role-async" x="10" y="30" width="130" height="50"/><text class="diag-label" x="75" y="52" style="font-size:11px">Kafka</text><text class="diag-sublabel" x="75" y="68" style="font-size:8.5px">location + request events</text></g>
+          <path class="diag-arrow-path" d="M140,55 L175,55" marker-end="url(#uberSurgeArrow)"/>
+          <g data-tip="Rolling window counters keyed by geohash cell"><rect class="diag-box" x="175" y="30" width="160" height="50"/><text class="diag-label" x="255" y="52" style="font-size:11px">Density Aggregator</text><text class="diag-sublabel" x="255" y="68" style="font-size:8.5px">per-cell counters, ~5s window</text></g>
+          <path class="diag-arrow-path" d="M335,55 L370,55" marker-end="url(#uberSurgeArrow)"/>
+          <g data-tip="open_requests / available_drivers per cell"><rect class="diag-box role-cache" x="370" y="30" width="150" height="50"/><text class="diag-label" x="445" y="52" style="font-size:11px">SurgeCell (Redis)</text><text class="diag-sublabel" x="445" y="68" style="font-size:8.5px">ratio per geohash cell</text></g>
+          <path class="diag-arrow-path" d="M520,55 L555,55" marker-end="url(#uberSurgeArrow)"/>
+          <g data-tip="Ratio crosses a threshold → applies a bounded tier"><rect class="diag-box" x="555" y="30" width="150" height="50"/><text class="diag-label" x="630" y="52" style="font-size:11px">Threshold Tiering</text><text class="diag-sublabel" x="630" y="68" style="font-size:8.5px">e.g. ratio&gt;1.5 → 1.3x</text></g>
+
+          <path class="diag-arrow-path" d="M630,80 L630,120 L255,120 L255,80" marker-end="url(#uberSurgeArrow)" stroke-dasharray="3 3"/>
+          <text class="diag-sublabel" x="440" y="115" style="font-size:9px;fill:var(--muted)">Trip Service reads the current multiplier at request time and locks it into the trip row</text>
+
+          <g data-tip="Reads and freezes the multiplier for this specific trip"><rect class="diag-box role-db" x="185" y="130" width="140" height="46"/><text class="diag-label" x="255" y="153" style="font-size:11px">Trip Service</text></g>
+        </svg>
+        <div class="diag-legend">
+          <div class="diag-legend-item"><span class="diag-legend-dot role-async"></span>Kafka + aggregator — continuous streaming computation</div>
+          <div class="diag-legend-item"><span class="diag-legend-dot role-cache"></span>SurgeCell in Redis — cheap to read, tolerant of a few seconds of lag</div>
+          <div class="diag-legend-item"><span class="diag-legend-dot role-db"></span>Trip Service — the one place the multiplier becomes strongly consistent, frozen at request time</div>
+        </div>
+      </div>
+
+      <ol class="flow-steps-list">
+        <li><span>Every location ping and ride request streams to Kafka</span> — the same event stream that feeds ETA also feeds surge</li>
+        <li><span>Density Aggregator maintains rolling counters per cell</span> — open_requests and available_drivers, refreshed on a ~5s window</li>
+        <li><span>Ratio crosses a threshold</span> — e.g. requests-to-drivers ratio above 1.5 triggers the next pricing tier for that cell</li>
+        <li><span>Trip Service reads the multiplier at request time</span> — and freezes it into the trip row so the price shown to the rider never changes mid-trip</li>
+        <li><span>Multiplier decays as supply catches up</span> — the same rolling window that triggered surge naturally relaxes it</li>
+      </ol>
+      <div class="callout info">Why staleness is fine here: surge pricing only needs to be "roughly right, updated frequently" — a multiplier computed on data that's 3-5 seconds old still reflects real demand pressure, and the cost of being briefly wrong (slightly over- or under-priced) is far lower than the cost of making every rider request block on a strongly consistent citywide count. Contrast with trip state, where a stale read could double-dispatch a driver — that's why trip transitions use Postgres with optimistic locking while surge uses eventually-consistent rolling counters in Redis.</div>
+
+      <table class="grid-table">
+        <thead><tr><th>Failure mode</th><th>Rider/driver impact</th><th>Detection signal</th><th>Mitigation</th></tr></thead>
+        <tbody>
+          <tr><td>Redis GEO index goes stale</td><td class="impact">Driver appears available but has lost connection — offer sent into the void</td><td class="detect">Missed heartbeat — driver's GEO TTL key not refreshed within ~15s</td><td class="fix">TTL expiry auto-removes the driver from the index; offer times out after 15s and re-offers to the next candidate</td></tr>
+          <tr><td>ETA service slow or degraded</td><td class="impact">Trip request flow would stall waiting on a live ETA</td><td class="detect">ETA Svc p99 latency or error rate crosses a circuit-breaker threshold</td><td class="fix">Degraded mode returns a cached/static distance-based estimate immediately; request flow never blocks on ETA</td></tr>
+          <tr><td>Trip stuck mid-state (driver app crash)</td><td class="impact">Rider sees no progress; driver never confirms next transition</td><td class="detect">No state transition or location update for a trip past a timeout window (e.g. 3 min)</td><td class="fix">Automatic timeout flags the trip for ops review; on-call runs a manual resolution SOP — contact both parties, then force-transition to Cancelled or Completed based on evidence</td></tr>
+        </tbody>
+      </table>
+    </section>
+
+    <section id="interview-moves">
+      <h2>Interview moves</h2>
+      <ul class="moves-list">
+        <li><span class="move-num">01</span><div><strong>"Before I design anything, let me separate driver location from ride matching — one is a write-heavy geospatial stream, the other is a read-heavy geospatial query, and they need different stores"</strong> — states the core insight unprompted</div></li>
+        <li><span class="move-num">02</span><div><strong>"Finding the nearest driver can't be a full scan across 3M drivers — I'd geohash-index positions so proximity becomes a ring-expansion lookup"</strong> — signals you know the core data structure problem</div></li>
+        <li><span class="move-num">03</span><div><strong>"Trip state transitions need to be atomic and exactly-once — I'd use optimistic locking with a version column to prevent double-dispatch"</strong> — names a specific, correct mechanism</div></li>
+        <li><span class="move-num">04</span><div><strong>"ETA isn't one distance calculation — it's a live composition of routing, traffic, and driver load, and it needs a degraded fallback so a slow ETA service never blocks a ride request"</strong> — shows systems thinking over ML hand-waving, and names the failure mode unprompted</div></li>
+        <li><span class="move-num">05</span><div><strong>"Surge pricing can run on eventually-consistent demand data — a few seconds of staleness in a pricing signal is fine, unlike trip state where staleness causes double-dispatch"</strong> — demonstrates you apply different consistency models to different data on purpose, not by default</div></li>
+        <li><span class="move-num">06</span><div><strong>"Once a trip hits 'Arrived Pickup,' free cancellation should be blocked at the state machine level, not just hidden in the UI"</strong> — demonstrates invariants hold even under racy client behavior</div></li>
+      </ul>
+    </section>
+
+    <section id="follow-ups">
+      <h2>Follow-up questions</h2>
+      <div class="qa-block">
+        <div class="qa-q">How do you prevent two riders from being matched to the same driver simultaneously?</div>
+        <div class="qa-a">Optimistic locking on the driver assignment — the UPDATE only succeeds if the driver is still unassigned; a losing request immediately retries the next candidate.</div>
+      </div>
+      <div class="qa-block">
+        <div class="qa-q">What happens if a driver's app crashes mid-trip?</div>
+        <div class="qa-a">A timeout on state transitions and location updates flags the trip for ops review; an on-call SOP contacts both parties and force-resolves the trip to Cancelled or Completed based on available evidence.</div>
+      </div>
+      <div class="qa-block">
+        <div class="qa-q">Why is it safe for surge pricing to use stale data when trip state can't be?</div>
+        <div class="qa-a">Surge is a pricing signal where being briefly wrong just means a slightly off multiplier; trip state staleness can cause a double-dispatch, which is a hard correctness violation, not a soft one.</div>
+      </div>
+      <div class="qa-block">
+        <div class="qa-q">How would you detect a driver who appears available but has actually lost connection?</div>
+        <div class="qa-a">A TTL-based heartbeat on the driver's Redis GEO key — if it's not refreshed within ~15s, the key expires and the driver silently drops out of the matching pool.</div>
+      </div>
+      <div class="qa-block">
+        <div class="qa-q">What's the fallback if the ETA service is slow or down?</div>
+        <div class="qa-a">A circuit breaker trips and the request flow returns a cached or static distance-based estimate immediately rather than blocking the rider on a live computation.</div>
+      </div>
+      <div class="qa-block">
+        <div class="qa-q">How would you cap surge so it doesn't feel exploitative?</div>
+        <div class="qa-a">A hard multiplier ceiling per tier, shown transparently to the rider before they confirm, with the multiplier frozen into the trip at request time so it can't change mid-ride.</div>
+      </div>
+    </section>
+
+  </main>
+  <script src="../../assets/nav.js"></script>
+</body>
+</html>

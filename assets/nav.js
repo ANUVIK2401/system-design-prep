@@ -48,6 +48,12 @@
     { slug: 'fb-live-comments',   name: 'FB Live Comments',    cat: 'Questions', dir: 'questions/' },
     { slug: 'fb-post-search',     name: 'FB Post Search',      cat: 'Questions', dir: 'questions/' },
     { slug: 'price-tracking',     name: 'Price Tracking',      cat: 'Questions', dir: 'questions/' },
+    { slug: 'online-chess',       name: 'Online Chess',        cat: 'Questions', dir: 'questions/', tag: 'NEW' },
+    { slug: 'instagram',          name: 'Instagram',           cat: 'Questions', dir: 'questions/' },
+    { slug: 'youtube-top-k',      name: 'YouTube Top-K',       cat: 'Questions', dir: 'questions/' },
+    { slug: 'uber',               name: 'Uber',                cat: 'Questions', dir: 'questions/' },
+    { slug: 'robinhood',          name: 'Robinhood',           cat: 'Questions', dir: 'questions/' },
+    { slug: 'google-docs',        name: 'Google Docs',         cat: 'Questions', dir: 'questions/' },
   ];
 
   const sidebar  = document.getElementById('sidebar');
@@ -115,7 +121,8 @@
       const marker = isDone
         ? `<span class="sb-step-mark sb-step-check">✓</span>`
         : `<span class="sb-step-mark">${num}</span>`;
-      html += `<a class="sb-link sb-topic-link${active}${stateClass}" href="${rootToTopics}${t.dir}${t.slug}.html">${marker}<span class="sb-topic-name">${t.name}</span></a>`;
+      const newTag = t.tag ? `<span class="sb-new-tag">${t.tag}</span>` : '';
+      html += `<a class="sb-link sb-topic-link${active}${stateClass}" href="${rootToTopics}${t.dir}${t.slug}.html">${marker}<span class="sb-topic-name">${t.name}</span>${newTag}</a>`;
     });
     html += `</div></div></div>`;
   });
@@ -206,9 +213,13 @@
     h2.addEventListener('click', () => sec.classList.toggle('collapsed'));
   });
 
-  // ── Fade-in on scroll (sections + cards) ──
+  // ── Fade-in on scroll (sections + cards), staggered 60ms between siblings ──
   const revealTargets = document.querySelectorAll('main > section[id], .diagram-wrap, .compare-grid, .flash-card');
-  revealTargets.forEach(el => el.classList.add('reveal'));
+  const reduceMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+  revealTargets.forEach((el, i) => {
+    el.classList.add('reveal');
+    if (!reduceMotion) el.style.setProperty('--reveal-delay', `${(i % 6) * 60}ms`);
+  });
   const revealObs = new IntersectionObserver(entries => {
     entries.forEach(e => {
       if (e.isIntersecting) {
@@ -219,19 +230,131 @@
   }, { threshold: 0.08, rootMargin: '0px 0px -40px 0px' });
   revealTargets.forEach(el => revealObs.observe(el));
 
-  // ── Diagram box click → scroll to + highlight matching detail section ──
+  // ── Diagram box click → mint pulse (300ms) then scroll to + highlight matching detail section ──
   document.querySelectorAll('[data-target]').forEach(box => {
-    if (!box.querySelector('.diag-box')) return;
+    const diagBox = box.querySelector('.diag-box');
+    if (!diagBox) return;
     box.style.cursor = 'pointer';
     box.addEventListener('click', () => {
+      diagBox.classList.remove('box-clicked');
+      void diagBox.offsetWidth; // restart animation
+      diagBox.classList.add('box-clicked');
       const target = document.getElementById(box.dataset.target);
       if (!target) return;
       target.classList.remove('collapsed');
-      target.scrollIntoView({ behavior: 'smooth', block: 'start' });
+      target.scrollIntoView({ behavior: reduceMotion ? 'auto' : 'smooth', block: 'start' });
       target.style.transition = 'box-shadow 0.3s ease';
       target.style.boxShadow = '0 0 0 2px var(--accent)';
       target.style.borderRadius = '8px';
       setTimeout(() => { target.style.boxShadow = 'none'; }, 1400);
+    });
+  });
+
+  // ── Data flow dots: color by path type (write=blue, read=amber async, read=mint default) ──
+  document.querySelectorAll('.diag-flow-dot[data-flow]').forEach(dot => {
+    const kind = dot.dataset.flow; // 'write' | 'read' | 'async'
+    if (kind === 'write') dot.classList.add('dot-write');
+    else if (kind === 'async') dot.classList.add('dot-async');
+    else if (kind === 'read') dot.classList.add('dot-read');
+  });
+
+  // ── State machine arrows: draw themselves in sequentially on first scroll into view ──
+  document.querySelectorAll('svg').forEach(svg => {
+    const arrows = svg.querySelectorAll('.state-arrow');
+    if (!arrows.length) return;
+    arrows.forEach(a => a.classList.add('draw-in'));
+    const svgObs = new IntersectionObserver(entries => {
+      entries.forEach(e => {
+        if (!e.isIntersecting) return;
+        arrows.forEach((a, i) => {
+          setTimeout(() => a.classList.add('drawn'), reduceMotion ? 0 : i * 400);
+        });
+        svgObs.unobserve(e.target);
+      });
+    }, { threshold: 0.3 });
+    svgObs.observe(svg);
+  });
+
+  // ── Stat grid numbers: count up from 0 on first scroll into view (800ms, ease-out) ──
+  function animateCount(el) {
+    const raw = el.textContent.trim();
+    const match = raw.match(/^([^\d]*)([\d,.]+)([^\d]*)$/);
+    if (!match) return;
+    const [, prefix, numStr, suffix] = match;
+    const end = parseFloat(numStr.replace(/,/g, ''));
+    if (isNaN(end)) return;
+    const decimals = (numStr.split('.')[1] || '').length;
+    const duration = 800;
+    const start = performance.now();
+    function frame(now) {
+      const t = Math.min((now - start) / duration, 1);
+      const eased = 1 - Math.pow(1 - t, 3); // ease-out cubic
+      const val = end * eased;
+      el.textContent = prefix + val.toLocaleString(undefined, { minimumFractionDigits: decimals, maximumFractionDigits: decimals }) + suffix;
+      if (t < 1) requestAnimationFrame(frame);
+      else el.textContent = raw;
+    }
+    requestAnimationFrame(frame);
+  }
+  const statObs = new IntersectionObserver(entries => {
+    entries.forEach(e => {
+      if (e.isIntersecting) {
+        if (!reduceMotion) animateCount(e.target);
+        statObs.unobserve(e.target);
+      }
+    });
+  }, { threshold: 0.4 });
+  document.querySelectorAll('.stat-val').forEach(el => statObs.observe(el));
+
+  // ── Step pills: brief scale pulse (1.0→1.05→1.0) when scrolled into view ──
+  document.querySelectorAll('.step-pill').forEach(pill => {
+    const pillObs = new IntersectionObserver(entries => {
+      entries.forEach(e => {
+        if (e.isIntersecting && !reduceMotion) {
+          pill.classList.add('pill-active');
+          setTimeout(() => pill.classList.remove('pill-active'), 200);
+        }
+      });
+    }, { threshold: 0.6 });
+    pillObs.observe(pill);
+  });
+
+  // ── Decision dials: slide from 50% to actual position on first scroll into view ──
+  document.querySelectorAll('.dial-wrap').forEach(wrap => {
+    const marker = wrap.querySelector('.dial-marker');
+    if (!marker) return;
+    const finalLeft = marker.style.left;
+    marker.style.left = '50%';
+    const dialObs = new IntersectionObserver(entries => {
+      entries.forEach(e => {
+        if (e.isIntersecting) {
+          requestAnimationFrame(() => { marker.style.left = finalLeft; });
+          dialObs.unobserve(e.target);
+        }
+      });
+    }, { threshold: 0.4 });
+    dialObs.observe(wrap);
+  });
+
+  // ── Follow-up Q&A: expand/collapse animation on click ──
+  document.querySelectorAll('.qa-block').forEach(block => {
+    const q = block.querySelector('.qa-q');
+    const a = block.querySelector('.qa-a');
+    if (!q || !a) return;
+    a.style.maxHeight = 'none';
+    q.addEventListener('click', () => {
+      const collapsed = a.style.maxHeight === '0px';
+      if (collapsed) {
+        a.style.maxHeight = a.scrollHeight + 'px';
+        a.style.opacity = '1';
+        setTimeout(() => { if (a.style.maxHeight !== '0px') a.style.maxHeight = 'none'; }, 200);
+      } else {
+        a.style.maxHeight = a.scrollHeight + 'px';
+        requestAnimationFrame(() => {
+          a.style.maxHeight = '0px';
+          a.style.opacity = '0.3';
+        });
+      }
     });
   });
 

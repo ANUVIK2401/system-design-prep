@@ -1,0 +1,533 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Design Top-K Trending Videos (YouTube) — SD Prep</title>
+  <link rel="stylesheet" href="../../assets/style.css">
+</head>
+<body>
+  <aside id="sidebar"></aside>
+  <main>
+
+    <header class="page-head">
+      <div class="pill">Questions</div>
+      <h1>Design Top-K Trending Videos (YouTube)</h1>
+      <p class="sub">Tests whether you know that exact top-K at global scale is a myth — the real design is a probabilistic counting structure feeding a bounded heap, not a giant counter-per-video table.</p>
+      <div class="meta-row">
+        <span class="badge green">35-45 min interview</span>
+        <span class="badge blue">Medium</span>
+      </div>
+    </header>
+
+    <div class="flash-card">
+      <div class="flash-label">Say this in the first 2 minutes</div>
+      <ul>
+        <li>The core insight: exact top-K over hundreds of millions of videos and billions of daily events doesn't scale — you need approximate counting (Count-Min Sketch) instead of an atomic counter per video</li>
+        <li>Key scale number to anchor on: 5B views/day is ~58k events/sec average, with the top-K query needing to answer in under 100ms</li>
+        <li>Primary tradeoff being probed: exactness vs memory — a sketch trades a small, bounded overestimation error for constant memory regardless of how many distinct videos exist</li>
+        <li>Component most candidates forget: a bounded min-heap of size K sitting on top of the sketch — the sketch alone doesn't give you "top-K," it only gives you fast estimates you still have to rank</li>
+        <li>Failure mode most candidates skip: a single viral video can overload one counter shard — needs local pre-aggregation before it ever touches the shared sketch</li>
+      </ul>
+    </div>
+
+    <section id="step1-requirements">
+      <div class="step-pill">Step 1 of 6 — Requirements</div>
+      <h2>Requirements</h2>
+
+      <div class="goal-arc-wrap">
+        <div class="goal-arc-row functional">
+          <div class="goal-arc-seg">1</div><div class="goal-arc-seg">2</div><div class="goal-arc-seg">3</div><div class="goal-arc-seg">4</div><div class="goal-arc-seg">5</div><div class="goal-arc-seg inactive">6</div>
+        </div>
+        <div class="goal-arc-label"><span>Arc 1 (steps 1-5) — <strong>Satisfy Functional Requirements</strong></span></div>
+        <div class="goal-arc-row nonfunctional" style="margin-top:8px">
+          <div class="goal-arc-seg">1</div><div class="goal-arc-seg">2</div><div class="goal-arc-seg">3</div><div class="goal-arc-seg">4</div><div class="goal-arc-seg">5</div><div class="goal-arc-seg">6</div>
+        </div>
+        <div class="goal-arc-label"><span>Arc 2 (all 6 steps) — <strong>Satisfy Non-Functional Requirements</strong></span></div>
+      </div>
+
+      <div class="compare-grid">
+        <div class="compare-card good">
+          <div class="compare-label">Functional</div>
+          <ul>
+            <li>Track view events per video in near real time</li>
+            <li>Return the top-K trending videos for a given window (e.g. 1h, 24h, all-time)</li>
+            <li>Support trending broken out by region/category (same mechanism, partitioned key)</li>
+            <li>Serve the trending list to millions of concurrent readers</li>
+          </ul>
+        </div>
+        <div class="compare-card bad">
+          <div class="compare-label">Non-Functional</div>
+          <ul>
+            <li>5B view events/day, ~58k events/sec average, much higher at peak</li>
+            <li>Top-K query answers in &lt;100ms</li>
+            <li>Counting must be approximate but bounded — no unbounded memory growth per video</li>
+            <li>Tolerate a small, known overestimation error in view counts in exchange for constant memory</li>
+          </ul>
+        </div>
+      </div>
+
+      <div class="callout warn"><strong>What NOT to build:</strong> no personalized recommendations, no per-user watch history or "recommended for you" ranking, no video upload/transcoding/storage pipeline. This is purely: count view events at scale, then serve an approximate top-K.</div>
+
+      <div class="stat-grid">
+        <div class="stat-card"><div class="stat-val">5B/day</div><div class="stat-label">view events ingested</div></div>
+        <div class="stat-card"><div class="stat-val">&lt;100ms</div><div class="stat-label">top-K query latency target</div></div>
+        <div class="stat-card"><div class="stat-val">10-100</div><div class="stat-label">typical K size</div></div>
+        <div class="stat-card"><div class="stat-val">~58k/s</div><div class="stat-label">avg ingestion rate (peaks far higher)</div></div>
+      </div>
+    </section>
+
+    <section id="step2-entities">
+      <div class="step-pill">Step 2 of 6 — Core Entities</div>
+      <h2>Core entities</h2>
+      <p style="font-size:13px;color:#999;margin-bottom:0.75rem">The raw event lives briefly in Kafka, the running counts live in an ephemeral probabilistic structure in Redis, and only the periodic winner snapshot is durably persisted.</p>
+
+      <div class="entity-grid">
+        <div class="entity-box">
+          <div class="entity-head"><span class="entity-name">ViewEvent</span><span class="entity-store cass">Kafka</span></div>
+          <div class="entity-fields">
+            <div class="entity-field"><span class="fname pk">video_id</span><span class="ftype">STRING</span></div>
+            <div class="entity-field"><span class="fname">ts</span><span class="ftype">epoch millis</span></div>
+            <div class="entity-field"><span class="fname">region</span><span class="ftype">STRING, optional</span></div>
+            <div class="entity-field"><span class="fname">source</span><span class="ftype">watch_page | embed | mobile</span></div>
+          </div>
+          <div class="entity-why">Because a view is a fire-and-forget fact, not a record needing a primary key or update — it's a message on a log, partitioned by video_id so all events for one video land on the same partition for local pre-aggregation. Tradeoff: no durability guarantee beyond Kafka's own retention window.</div>
+        </div>
+
+        <div class="entity-box">
+          <div class="entity-head"><span class="entity-name">CountMinSketch</span><span class="entity-store redis">Redis</span></div>
+          <div class="entity-fields">
+            <div class="entity-field"><span class="fname idx">d rows × w cols</span><span class="ftype">INT counter matrix</span></div>
+            <div class="entity-field"><span class="fname">hash_seeds</span><span class="ftype">d independent hash fns</span></div>
+            <div class="entity-field"><span class="fname">window_id</span><span class="ftype">1h bucket | all-time</span></div>
+          </div>
+          <div class="entity-why">Because tracking an exact counter per video would need one key per distinct video — hundreds of millions of them — while the sketch uses a fixed-size matrix regardless of cardinality. Tradeoff: counts are estimates, always biased upward, never downward.</div>
+        </div>
+
+        <div class="entity-box">
+          <div class="entity-head"><span class="entity-name">TopKSnapshot</span><span class="entity-store pg">Postgres</span></div>
+          <div class="entity-fields">
+            <div class="entity-field"><span class="fname pk">snapshot_id</span><span class="ftype">UUID</span></div>
+            <div class="entity-field"><span class="fname idx">window, region</span><span class="ftype">composite index</span></div>
+            <div class="entity-field"><span class="fname">ranked_videos</span><span class="ftype">JSON[video_id, est_count]</span></div>
+            <div class="entity-field"><span class="fname">computed_at</span><span class="ftype">TIMESTAMP</span></div>
+          </div>
+          <div class="entity-why">Because query traffic for "what's trending" is bursty and read-heavy — millions of readers should never hit the sketch directly. A periodic snapshot (every few seconds to a minute) gives a durable, queryable, cacheable answer. Tradeoff: freshness is bounded by the snapshot interval, not truly real-time.</div>
+        </div>
+      </div>
+
+      <div class="callout info">Primary key: none on <code>ViewEvent</code> — it's an immutable log message, not a row. Critical index: <code>TopKSnapshot(window, region)</code> — this is what the read path hits, never the sketch or the raw stream.</div>
+    </section>
+
+    <section id="step3-api">
+      <div class="step-pill">Step 3 of 6 — API / Interface</div>
+      <h2>API design</h2>
+      <p style="font-size:13px;color:#999;margin-bottom:0.75rem">Ingestion is fire-and-forget (Kafka producer, not a synchronous REST call); reads are cheap GETs against the snapshot, with an optional WebSocket for a live-updating trending rail.</p>
+
+      <div class="api-card">
+        <div class="api-line"><span class="api-method post">POST</span><span class="api-path">/api/v1/views/track</span><span class="api-auth">Auth: service-to-service</span></div>
+        <div class="api-io">
+          <div class="api-io-block"><div class="api-io-label">Request</div><div class="api-io-body">{ video_id, ts, region, source }</div></div>
+          <div class="api-io-block"><div class="api-io-label">Response</div><div class="api-io-body">202 Accepted — enqueued to Kafka, not synchronously counted</div></div>
+        </div>
+      </div>
+
+      <div class="api-card">
+        <div class="api-line"><span class="api-method get">GET</span><span class="api-path">/api/v1/trending?window=1h&amp;region=US&amp;k=25</span><span class="api-auth">Auth: none (public read)</span></div>
+        <div class="api-io">
+          <div class="api-io-block"><div class="api-io-label">Request</div><div class="api-io-body">window, region, k as query params</div></div>
+          <div class="api-io-block"><div class="api-io-label">Response</div><div class="api-io-body">{ videos: [{video_id, est_views, rank}], snapshot_age_ms }</div></div>
+        </div>
+      </div>
+
+      <div class="api-card">
+        <div class="api-line"><span class="api-method get">GET</span><span class="api-path">/api/v1/trending?window=all&amp;k=100</span><span class="api-auth">Auth: none (public read)</span></div>
+        <div class="api-io">
+          <div class="api-io-block"><div class="api-io-label">Request</div><div class="api-io-body">window=all uses the persistent global sketch, not a time bucket</div></div>
+          <div class="api-io-block"><div class="api-io-label">Response</div><div class="api-io-body">{ videos: [{video_id, est_views, rank}], computed_at }</div></div>
+        </div>
+      </div>
+
+      <div class="api-card">
+        <div class="api-line"><span class="api-method ws">WEBSOCKET</span><span class="api-path">/ws/trending/{window}</span><span class="api-auth">Auth: none (public read)</span></div>
+        <div class="api-io">
+          <div class="api-io-block"><div class="api-io-label">Message out</div><div class="api-io-body">{ videos: [...] } pushed on every new snapshot</div></div>
+          <div class="api-io-block"><div class="api-io-label">Cadence</div><div class="api-io-body">once per snapshot interval, not per view event</div></div>
+        </div>
+      </div>
+
+      <div class="callout good">The track endpoint returns 202 immediately and never blocks on counting logic — the whole point of decoupling ingestion from aggregation is that a burst of views never backs up the client-facing write path.</div>
+    </section>
+
+    <section id="step4-dataflow">
+      <div class="step-pill">Step 4 of 6 — Data Flow</div>
+      <h2>Data flow</h2>
+      <p style="font-size:13px;color:#999;margin-bottom:0.75rem">The write path (amber) streams every view event through Kafka into the sketch asynchronously; the read path (mint) only ever touches the periodic snapshot, never the live sketch.</p>
+
+      <div class="diagram-wrap" data-paths='{"write":{"boxes":["w-client","w-kafka","w-counter","w-sketch"],"arrows":["w1","w2","w3"]},"read":{"boxes":["r-client","r-query","r-snapshot"],"arrows":["r1","r2"]}}'>
+        <svg viewBox="0 0 740 220" xmlns="http://www.w3.org/2000/svg">
+          <defs>
+            <marker id="ykWArrow" markerWidth="8" markerHeight="8" refX="6" refY="3" orient="auto"><path d="M0,0 L6,3 L0,6 Z" fill="var(--amber)"/></marker>
+            <marker id="ykRArrow" markerWidth="8" markerHeight="8" refX="6" refY="3" orient="auto"><path d="M0,0 L6,3 L0,6 Z" fill="var(--accent)"/></marker>
+          </defs>
+
+          <text class="diag-sublabel" x="150" y="14" style="font-size:10px;fill:var(--amber)">WRITE PATH — view events, ~58k/s avg</text>
+          <g data-target="step6-deepdive-cms" data-id="w-client" data-tip="Any surface a view can originate from"><rect class="diag-box role-client" x="10" y="24" width="120" height="46"/><text class="diag-label" x="70" y="47" style="font-size:11px">Watch Page</text></g>
+          <path class="diag-arrow-path" data-id="w1" d="M130,47 L165,47" marker-end="url(#ykWArrow)"/>
+          <g data-target="step5-hld" data-id="w-kafka" data-tip="Durable, ordered, partitioned by video_id"><rect class="diag-box role-async" x="165" y="24" width="110" height="46"/><text class="diag-label" x="220" y="47" style="font-size:11px">Kafka</text></g>
+          <path class="diag-arrow-path" data-id="w2" d="M275,47 L310,47" marker-end="url(#ykWArrow)"/>
+          <g data-target="step6-deepdive-heavyhitters" data-id="w-counter" data-tip="Pre-aggregates locally before touching the shared sketch"><rect class="diag-box role-async" x="310" y="24" width="150" height="46"/><text class="diag-label" x="385" y="47" style="font-size:11px">Counter Service</text></g>
+          <path class="diag-arrow-path" data-id="w3" d="M460,47 L495,47" marker-end="url(#ykWArrow)"/>
+          <g data-target="step6-deepdive-cms" data-id="w-sketch" data-tip="Count-Min Sketch — fixed-size matrix, one per window"><rect class="diag-box role-cache" x="495" y="24" width="140" height="46"/><text class="diag-label" x="565" y="47" style="font-size:11px">CMS in Redis</text></g>
+
+          <circle class="diag-dot diag-flow-dot" data-flow="async" r="3.5" style="offset-path: path('M10,47 L165,47 L165,47 L310,47 L310,47 L495,47')"></circle>
+
+          <text class="diag-sublabel" x="150" y="105" style="font-size:10px;fill:var(--accent)">READ PATH — trending query</text>
+          <g data-target="step3-api" data-id="r-client" data-tip="Requests top-K for a window/region"><rect class="diag-box role-client" x="10" y="115" width="120" height="46"/><text class="diag-label" x="70" y="143" style="font-size:11px">Client / App</text></g>
+          <path class="diag-arrow-path" data-id="r1" d="M130,138 L165,138" marker-end="url(#ykRArrow)"/>
+          <g data-target="step5-hld" data-id="r-query" data-tip="Reads only the durable snapshot, never the live sketch"><rect class="diag-box" x="165" y="115" width="140" height="46"/><text class="diag-label" x="235" y="143" style="font-size:11px">Query Service</text></g>
+          <path class="diag-arrow-path" data-id="r2" d="M305,138 L340,138" marker-end="url(#ykRArrow)"/>
+          <g data-target="step2-entities" data-id="r-snapshot" data-tip="Periodic durable top-K, cheap to serve at massive fan-out"><rect class="diag-box role-db" x="340" y="115" width="150" height="46"/><text class="diag-label" x="415" y="143" style="font-size:11px">TopKSnapshot DB</text></g>
+
+          <circle class="diag-dot diag-flow-dot" data-flow="read" r="3.5" style="offset-path: path('M10,138 L165,138 L165,138 L340,138')"></circle>
+        </svg>
+        <div class="diag-legend">
+          <div class="diag-legend-item"><span class="diag-legend-dot role-async"></span>Kafka + Counter Service — decoupled, high-throughput write path</div>
+          <div class="diag-legend-item"><span class="diag-legend-dot role-cache"></span>Redis CMS — the hot, ephemeral counting structure</div>
+          <div class="diag-legend-item"><span class="diag-legend-dot role-db"></span>Snapshot DB — what every read actually hits</div>
+        </div>
+      </div>
+
+      <ol class="flow-steps-list">
+        <li><span>View fires</span> — the watch page/app emits a view event once playback crosses a minimum threshold</li>
+        <li><span>Event lands on Kafka</span> — partitioned by video_id so one video's events stay ordered and co-located</li>
+        <li><span>Counter Service pre-aggregates</span> — batches counts locally per partition before incrementing the shared sketch</li>
+        <li><span>Sketch cells increment</span> — one increment per hash function row, not one key per video</li>
+        <li><span>Snapshot job reads the sketch</span> — periodically extracts the current top-K and writes it durably</li>
+        <li><span>Query Service serves reads</span> — every trending request hits the snapshot, completely decoupled from ingestion load</li>
+      </ol>
+    </section>
+
+    <section id="step5-hld">
+      <div class="step-pill">Step 5 of 6 — High-Level Design</div>
+      <h2>High-level design</h2>
+      <p style="font-size:13px;color:#999;margin-bottom:0.75rem">View events stream in, get pre-aggregated, increment a Count-Min Sketch, and feed a bounded min-heap; a periodic job snapshots the heap to durable storage for the query service to serve.</p>
+
+      <div class="diagram-wrap">
+        <svg viewBox="0 0 800 300" xmlns="http://www.w3.org/2000/svg">
+          <defs><marker id="ykHldArrow" markerWidth="8" markerHeight="8" refX="6" refY="3" orient="auto"><path d="M0,0 L6,3 L0,6 Z" fill="var(--border2)"/></marker></defs>
+
+          <g data-tip="Emits a view event per qualifying playback"><rect class="diag-box role-client" x="10" y="30" width="130" height="46"/><text class="diag-label" x="75" y="57" style="font-size:11px">Client Apps</text></g>
+          <path class="diag-arrow-path" d="M140,53 L175,53" marker-end="url(#ykHldArrow)"/>
+          <g data-tip="Durable, ordered, partitioned by video_id"><rect class="diag-box role-async" x="175" y="30" width="110" height="46"/><text class="diag-label" x="230" y="57" style="font-size:11px">Kafka</text></g>
+          <path class="diag-arrow-path" d="M285,53 L320,53" marker-end="url(#ykHldArrow)"/>
+          <g data-tip="Local batching absorbs hot videos before the shared sketch"><rect class="diag-box role-async" x="320" y="30" width="150" height="50"/><text class="diag-label" x="395" y="52" style="font-size:11px">View Counter Svc</text><text class="diag-sublabel" x="395" y="68" style="font-size:8.5px">local pre-aggregation</text></g>
+          <path class="diag-arrow-path" d="M470,55 L505,55" marker-end="url(#ykHldArrow)"/>
+          <g data-tip="Fixed-size counter matrix — d hash rows x w columns"><rect class="diag-box role-cache" x="505" y="30" width="150" height="50"/><text class="diag-label" x="580" y="52" style="font-size:11px">Count-Min Sketch</text><text class="diag-sublabel" x="580" y="68" style="font-size:8.5px">Redis, per window</text></g>
+
+          <path class="diag-arrow-path" d="M580,80 L580,120" marker-end="url(#ykHldArrow)"/>
+          <g data-tip="Size-K min-heap — evicts the current lowest estimate on a bigger candidate"><rect class="diag-box" x="505" y="120" width="150" height="46"/><text class="diag-label" x="580" y="147" style="font-size:11px">Top-K Min-Heap</text></g>
+
+          <path class="diag-arrow-path" d="M505,143 L395,190" marker-end="url(#ykHldArrow)"/>
+          <g data-tip="Extracts the heap on a fixed interval, writes it durably"><rect class="diag-box role-async" x="320" y="190" width="150" height="46"/><text class="diag-label" x="395" y="217" style="font-size:11px">Snapshot Job</text></g>
+          <path class="diag-arrow-path" d="M320,213 L285,213" marker-end="url(#ykHldArrow)"/>
+          <g data-tip="Durable, queryable, cacheable top-K per window/region"><rect class="diag-box role-db" x="150" y="190" width="135" height="46"/><text class="diag-label" x="217" y="217" style="font-size:11px">TopKSnapshot DB</text></g>
+
+          <path class="diag-arrow-path" d="M150,213 L115,213" marker-end="url(#ykHldArrow)"/>
+          <g data-tip="Reads only the snapshot — never the live sketch or heap"><rect class="diag-box" x="10" y="190" width="105" height="46"/><text class="diag-label" x="62" y="217" style="font-size:11px">Query Svc</text></g>
+          <path class="diag-arrow-path" d="M62,190 L62,110 L140,80" marker-end="url(#ykHldArrow)" stroke-dasharray="3 3"/>
+          <text class="diag-sublabel" x="90" y="130" style="font-size:8px;fill:var(--muted)">served to millions of readers</text>
+        </svg>
+        <div class="diag-legend">
+          <div class="diag-legend-item"><span class="diag-legend-dot role-client"></span>Client apps — every view event origin</div>
+          <div class="diag-legend-item"><span class="diag-legend-dot role-async"></span>Kafka, Counter Svc, Snapshot Job — decoupled async pipeline</div>
+          <div class="diag-legend-item"><span class="diag-legend-dot role-cache"></span>Count-Min Sketch — the hot approximate-counting core</div>
+          <div class="diag-legend-item"><span class="diag-legend-dot role-db"></span>Snapshot DB — durable, what queries actually hit</div>
+        </div>
+      </div>
+
+      <table class="def-table">
+        <thead><tr><th>Component</th><th>Role</th><th>Tech + why</th></tr></thead>
+        <tbody>
+          <tr><td>View Counter Svc</td><td>Local pre-aggregation before the shared sketch</td><td>Stateful stream consumer, batches per partition — because incrementing a shared Redis structure once per raw event would itself become the bottleneck under a viral spike; tradeoff is a few seconds of added lag before a count reflects everywhere.</td></tr>
+          <tr><td>Count-Min Sketch</td><td>Approximate per-video counting at fixed memory</td><td>In-memory counter matrix in Redis — because exact counters need one key per distinct video (hundreds of millions), while a sketch is O(width × depth) regardless of cardinality; tradeoff is a bounded overestimation error.</td></tr>
+          <tr><td>Top-K Min-Heap</td><td>Maintains the current best K candidates</td><td>Size-K min-heap, updated on sketch increments — because the sketch alone only answers "what's this video's estimated count," not "who's in the top K"; tradeoff is the heap itself must be resharded/merged across counter-service instances.</td></tr>
+          <tr><td>Snapshot Job</td><td>Durable, queryable top-K per window/region</td><td>Scheduled job writing to Postgres every few seconds — because millions of concurrent readers should never hit the live sketch or heap directly; tradeoff is a small, bounded staleness window.</td></tr>
+        </tbody>
+      </table>
+
+      <h3 style="font-size:13px;color:var(--text);margin:1.25rem 0 0.6rem;font-weight:600">Scaling levers — cheapest to most complex</h3>
+      <ol class="levers-list">
+        <li><strong>Increase snapshot job frequency</strong> for fresher trending results<span class="cost">low complexity</span></li>
+        <li><strong>Add read replicas / CDN cache in front of the snapshot query</strong><span class="cost">low complexity</span></li>
+        <li><strong>Shard the Counter Service by video_id partition</strong> to parallelize pre-aggregation<span class="cost">medium complexity</span></li>
+        <li><strong>Widen the sketch matrix</strong> (more columns/rows) to tighten the error bound<span class="cost">medium complexity</span></li>
+        <li><strong>Per-shard local heaps merged centrally</strong> for true horizontal scale of the heap itself<span class="cost">high complexity — last resort</span></li>
+      </ol>
+
+      <table class="grid-table">
+        <thead><tr><th>Bottleneck</th><th>Triggers at</th><th>Exact fix</th></tr></thead>
+        <tbody>
+          <tr><td>Hot video overloads one shard</td><td>A single viral video sends disproportionate events to one partition</td><td class="fix">Local pre-aggregation in the Counter Service before the shared sketch ever sees the event</td></tr>
+          <tr><td>Kafka consumer lag under spike</td><td>Ingestion rate temporarily exceeds Counter Service throughput</td><td class="fix">Let the snapshot go stale gracefully; expose <code>snapshot_age_ms</code> so staleness is visible, not silent</td></tr>
+          <tr><td>Sketch memory growth</td><td>Long-running windows never reset their matrix</td><td class="fix">Rotate to a fresh sketch per window boundary (e.g. new hourly sketch every hour), discard the expired one</td></tr>
+        </tbody>
+      </table>
+
+      <div class="dial-wrap">
+        <div class="dial-title">Top-K freshness: real-time vs snapshot-batched</div>
+        <div class="dial-track"><div class="dial-marker" style="left:75%"></div></div>
+        <div class="dial-labels"><span class="end-left">Real-time</span><span class="end-right">Snapshot-batched</span></div>
+      </div>
+      <div class="dial-wrap">
+        <div class="dial-title">Sketch accuracy vs memory footprint</div>
+        <div class="dial-track"><div class="dial-marker" style="left:40%"></div></div>
+        <div class="dial-labels"><span class="end-left">Tiny memory, looser bound</span><span class="end-right">Wider matrix, tighter bound</span></div>
+      </div>
+    </section>
+
+    <section id="step6-deepdive-cms">
+      <div class="step-pill">Step 6 of 6 — Deep Dives</div>
+      <h2>Deep dive: Count-Min Sketch mechanics</h2>
+      <p style="font-size:13px;color:#999;margin-bottom:0.75rem">A view event for a video is hashed by <strong>d</strong> independent hash functions, each mapping to one column in its own row of a <strong>d × w</strong> counter matrix. One event increments <strong>d</strong> cells at once — one per row. To estimate a video's count, hash it the same way and take the <strong>minimum</strong> across those <strong>d</strong> cells — collisions can only inflate a cell, never deflate it, so the min is the tightest available upper bound.</p>
+      <div class="diagram-wrap">
+        <svg viewBox="0 0 520 300" xmlns="http://www.w3.org/2000/svg" id="cmsMatrix">
+          <defs><marker id="cmsArrow" markerWidth="8" markerHeight="8" refX="6" refY="3" orient="auto"><path d="M0,0 L6,3 L0,6 Z" fill="var(--accent)"/></marker></defs>
+          <text class="diag-sublabel" x="260" y="14" style="font-size:10px;fill:var(--muted)">4 HASH ROWS × 10 COLUMNS — one event, one cell per row</text>
+          <g data-tip="A single incoming view event for one video"><rect class="diag-box role-client" x="10" y="30" width="90" height="40"/><text class="diag-label" x="55" y="54" style="font-size:10px">view event</text></g>
+          <g id="cmsRows"></g>
+          <text id="cmsEstimateLabel" x="260" y="290" text-anchor="middle" font-size="10.5" fill="var(--accent)" font-family="Inter,sans-serif"></text>
+        </svg>
+        <div style="display:flex;gap:10px;margin-top:6px">
+          <button class="flow-cmp-replay" id="cmsIncrementBtn" style="width:auto;padding:6px 14px">▸ Simulate view event (increment)</button>
+          <button class="flow-cmp-replay" id="cmsEstimateBtn" style="width:auto;padding:6px 14px">▸ Simulate estimate read (take MIN)</button>
+        </div>
+      </div>
+      <script>
+      (function(){
+        var svg = document.getElementById('cmsMatrix');
+        if (!svg) return;
+        var rowsG = document.getElementById('cmsRows');
+        var estimateLabel = document.getElementById('cmsEstimateLabel');
+        var rows = 4, cols = 10, cellW = 34, cellH = 34, offX = 150, offY = 30;
+        var rowHashCols = [3, 7, 1, 5];
+        var cellEls = [];
+        var counts = [];
+
+        for (var r = 0; r < rows; r++) {
+          counts.push(new Array(cols).fill(0));
+          var rowLabel = document.createElementNS('http://www.w3.org/2000/svg', 'text');
+          rowLabel.setAttribute('x', offX - 12);
+          rowLabel.setAttribute('y', offY + r * cellH + cellH / 2 + 4);
+          rowLabel.setAttribute('text-anchor', 'end');
+          rowLabel.setAttribute('font-size', '9');
+          rowLabel.setAttribute('fill', 'var(--muted)');
+          rowLabel.setAttribute('font-family', 'Inter,sans-serif');
+          rowLabel.textContent = 'h' + (r + 1);
+          rowsG.appendChild(rowLabel);
+          for (var c = 0; c < cols; c++) {
+            var x = offX + c * cellW, y = offY + r * cellH;
+            var rect = document.createElementNS('http://www.w3.org/2000/svg', 'rect');
+            rect.setAttribute('x', x); rect.setAttribute('y', y);
+            rect.setAttribute('width', cellW - 2); rect.setAttribute('height', cellH - 2);
+            rect.setAttribute('rx', 3);
+            rect.setAttribute('fill', 'var(--surface)');
+            rect.setAttribute('stroke', 'var(--border2)');
+            rect.setAttribute('stroke-width', '1');
+            rowsG.appendChild(rect);
+            var countText = document.createElementNS('http://www.w3.org/2000/svg', 'text');
+            countText.setAttribute('x', x + (cellW - 2) / 2);
+            countText.setAttribute('y', y + (cellH - 2) / 2 + 4);
+            countText.setAttribute('text-anchor', 'middle');
+            countText.setAttribute('font-size', '10');
+            countText.setAttribute('fill', 'var(--text)');
+            countText.setAttribute('font-family', 'Inter,sans-serif');
+            countText.textContent = '0';
+            rowsG.appendChild(countText);
+            cellEls.push({ rect: rect, text: countText, r: r, c: c });
+          }
+        }
+
+        function cellAt(r, c) {
+          return cellEls.find(function(ce){ return ce.r === r && ce.c === c; });
+        }
+
+        document.getElementById('cmsIncrementBtn').addEventListener('click', function(){
+          rowHashCols.forEach(function(col, r){
+            counts[r][col] += 1;
+            var ce = cellAt(r, col);
+            ce.text.textContent = counts[r][col];
+            ce.rect.style.transition = 'fill 0.3s ease, stroke 0.3s ease';
+            ce.rect.setAttribute('fill', '#08200f');
+            ce.rect.setAttribute('stroke', 'var(--accent)');
+            setTimeout(function(){
+              ce.rect.setAttribute('fill', 'var(--surface)');
+              ce.rect.setAttribute('stroke', 'var(--border2)');
+            }, 500);
+          });
+          estimateLabel.textContent = '';
+        });
+
+        document.getElementById('cmsEstimateBtn').addEventListener('click', function(){
+          var vals = rowHashCols.map(function(col, r){ return counts[r][col]; });
+          rowHashCols.forEach(function(col, r){
+            var ce = cellAt(r, col);
+            ce.rect.style.transition = 'stroke 0.3s ease';
+            ce.rect.setAttribute('stroke', 'var(--blue)');
+            setTimeout(function(){ ce.rect.setAttribute('stroke', 'var(--border2)'); }, 900);
+          });
+          var minVal = Math.min.apply(null, vals);
+          estimateLabel.textContent = 'estimate = MIN(' + vals.join(', ') + ') = ' + minVal;
+        });
+      })();
+      </script>
+      <ol class="flow-steps-list">
+        <li><span>Event arrives for a video</span> — the video_id is fed into d independent hash functions</li>
+        <li><span>Each hash picks one column per row</span> — d cells total are touched, one per row, possibly shared with other videos</li>
+        <li><span>All d cells increment by one</span> — a single view event is a single write fanned out across rows</li>
+        <li><span>Estimate reads hash the same video_id</span> — landing on the same d cells deterministically</li>
+        <li><span>Take the MIN across those cells</span> — collisions only inflate a cell, so the minimum is the tightest upper bound on the true count</li>
+      </ol>
+      <div class="callout info">Because two different videos can collide into the same cell, every cell is a sum of possibly multiple videos' counts — that's exactly why you take the min across rows instead of trusting any single cell: it's the row least corrupted by collisions.</div>
+    </section>
+
+    <section id="step6-deepdive-heavyhitters">
+      <h2>Deep dive: heavy hitters — exact vs approximate top-K</h2>
+      <p style="font-size:13px;color:#999;margin-bottom:0.75rem">Exact top-K needs a full count per distinct video and a full sort (or a global atomic counter per video) — both fall apart at hundreds of millions of videos. Approximate top-K bounds memory to a fixed sketch size plus a fixed-size heap.</p>
+
+      <div class="compare-grid">
+        <div class="compare-card bad">
+          <div class="compare-label">Exact top-K (impossible at this scale)</div>
+          <ul>
+            <li>One counter per distinct video — memory grows with the number of videos, not a fixed budget</li>
+            <li>Every query needs a full sort (or a full scan) across all counters to find the top K</li>
+            <li>A single global atomic counter per video becomes a hot lock under viral load</li>
+            <li>Memory for hundreds of millions of videos is untenable to keep hot in memory</li>
+          </ul>
+        </div>
+        <div class="compare-card good">
+          <div class="compare-label">Approximate top-K (what actually ships)</div>
+          <ul>
+            <li>Count-Min Sketch: fixed d × w matrix, independent of how many distinct videos exist</li>
+            <li>A bounded min-heap of size K tracks only current candidates, updated incrementally as counts change</li>
+            <li>No global lock — only local shard pre-aggregation plus periodic merges</li>
+            <li>Error is small, known, and one-sided (only ever overestimates)</li>
+          </ul>
+        </div>
+      </div>
+
+      <div class="diagram-wrap">
+        <svg viewBox="0 0 720 170" xmlns="http://www.w3.org/2000/svg">
+          <defs><marker id="hhArrow" markerWidth="8" markerHeight="8" refX="6" refY="3" orient="auto"><path d="M0,0 L6,3 L0,6 Z" fill="var(--border2)"/></marker></defs>
+          <g data-tip="Every view event, all videos, unbounded cardinality"><rect class="diag-box role-async" x="10" y="20" width="150" height="46"/><text class="diag-label" x="85" y="47" style="font-size:11px">View Event Stream</text></g>
+          <path class="diag-arrow-path" d="M160,43 L195,43" marker-end="url(#hhArrow)"/>
+          <g data-tip="Fixed-size counter matrix regardless of cardinality"><rect class="diag-box role-cache" x="195" y="20" width="170" height="46"/><text class="diag-label" x="280" y="47" style="font-size:11px">Count-Min Sketch</text></g>
+          <path class="diag-arrow-path" d="M365,43 L400,43" marker-end="url(#hhArrow)"/>
+          <g data-tip="Only K candidates ever held in memory at once"><rect class="diag-box" x="400" y="20" width="150" height="46"/><text class="diag-label" x="475" y="47" style="font-size:11px">Min-Heap (size K)</text></g>
+          <path class="diag-arrow-path" d="M550,43 L585,43" marker-end="url(#hhArrow)"/>
+          <g data-tip="K videos, ranked by estimated count"><rect class="diag-box role-db" x="585" y="20" width="120" height="46"/><text class="diag-label" x="645" y="47" style="font-size:11px">Top-K List</text></g>
+
+          <text class="diag-sublabel" x="360" y="95" style="font-size:9.5px;fill:var(--amber)">error bound: overestimate by at most ε·N with probability 1−δ</text>
+          <text class="diag-sublabel" x="360" y="112" style="font-size:9px;fill:var(--muted)">ε shrinks as matrix width w grows — w ≈ e/ε</text>
+          <text class="diag-sublabel" x="360" y="128" style="font-size:9px;fill:var(--muted)">δ shrinks as matrix depth d grows — d ≈ ln(1/δ)</text>
+          <text class="diag-sublabel" x="360" y="148" style="font-size:9px;fill:var(--muted)">wider + deeper matrix = tighter bound, more memory</text>
+        </svg>
+      </div>
+      <ol class="flow-steps-list">
+        <li><span>Stream has unbounded cardinality</span> — hundreds of millions of distinct video_ids, no way to hold one counter each affordably</li>
+        <li><span>Sketch compresses cardinality to fixed memory</span> — d × w cells absorb the entire stream, accepting collisions as the cost</li>
+        <li><span>Heap tracks only K live candidates</span> — every sketch update checks if a video's new estimate beats the heap's current minimum</li>
+        <li><span>Losing candidates are evicted</span> — the heap never grows past size K, so its memory cost is constant</li>
+        <li><span>Error is tunable, not accidental</span> — picking w and d before launch is a deliberate memory-vs-accuracy trade, not a bug to fix later</li>
+      </ol>
+      <div class="callout warn">The error bound is one-sided by construction — a video's estimated count can be inflated by collisions but is mathematically guaranteed to never be undercounted, which is exactly why taking the min across rows is safe and why a video can rank into the top K it shouldn't, but never rank out of one it deserves.</div>
+    </section>
+
+    <section id="step6-deepdive-windowed">
+      <h2>Deep dive: windowed vs all-time top-K</h2>
+      <p style="font-size:13px;color:#999;margin-bottom:0.75rem">"Trending in the last hour" and "most-viewed of all time" are different questions that need different data structures — a single persistent sketch can't cheaply answer both.</p>
+
+      <div class="diagram-wrap">
+        <svg viewBox="0 0 740 230" xmlns="http://www.w3.org/2000/svg">
+          <defs><marker id="winArrow" markerWidth="8" markerHeight="8" refX="6" refY="3" orient="auto"><path d="M0,0 L6,3 L0,6 Z" fill="var(--border2)"/></marker></defs>
+
+          <text class="diag-sublabel" x="180" y="14" style="font-size:10px;fill:var(--blue)">WINDOWED — "top-K in the last 1h"</text>
+          <g data-tip="A fresh sketch is opened every 5 minutes"><rect class="diag-box role-cache" x="10" y="24" width="90" height="42"/><text class="diag-label" x="55" y="49" style="font-size:9.5px">Bucket t-55m</text></g>
+          <g data-tip="Rolling window merges the last 12 buckets"><rect class="diag-box role-cache" x="110" y="24" width="90" height="42"/><text class="diag-label" x="155" y="49" style="font-size:9.5px">Bucket t-50m</text></g>
+          <text class="diag-label" x="220" y="49" style="font-size:14px;fill:var(--muted)">...</text>
+          <g data-tip="The most recent 5-minute bucket"><rect class="diag-box role-cache" x="250" y="24" width="90" height="42"/><text class="diag-label" x="295" y="49" style="font-size:9.5px">Bucket t-0m</text></g>
+          <path class="diag-arrow-path" d="M100,45 L250,45" marker-end="url(#winArrow)" stroke-dasharray="3 3"/>
+          <path class="diag-arrow-path" d="M295,66 L295,95" marker-end="url(#winArrow)"/>
+          <g data-tip="Merges 12 five-minute sketches into one logical 1h view — oldest bucket expires as a new one opens"><rect class="diag-box" x="120" y="95" width="220" height="46"/><text class="diag-label" x="230" y="118" style="font-size:11px">Merge last 12 buckets</text><text class="diag-sublabel" x="230" y="132" style="font-size:8px">merged CMS = elementwise sum</text></g>
+          <path class="diag-arrow-path" d="M230,141 L230,170" marker-end="url(#winArrow)"/>
+          <g data-tip="Top-K for the rolling 1h window"><rect class="diag-box role-db" x="150" y="170" width="160" height="42"/><text class="diag-label" x="230" y="195" style="font-size:11px">1h Top-K Result</text></g>
+
+          <text class="diag-sublabel" x="580" y="14" style="font-size:10px;fill:var(--accent)">ALL-TIME — "top-K ever"</text>
+          <g data-tip="One sketch, never reset, running since the video's existence"><rect class="diag-box role-cache" x="480" y="24" width="220" height="46"/><text class="diag-label" x="590" y="47" style="font-size:11px">Persistent Global Sketch</text><text class="diag-sublabel" x="590" y="60" style="font-size:8px">never resets, only grows</text></g>
+          <path class="diag-arrow-path" d="M590,70 L590,170" marker-end="url(#winArrow)"/>
+          <g data-tip="Top-K across the video's entire lifetime"><rect class="diag-box role-db" x="480" y="170" width="220" height="42"/><text class="diag-label" x="590" y="195" style="font-size:11px">All-Time Top-K Result</text></g>
+        </svg>
+      </div>
+      <ol class="flow-steps-list">
+        <li><span>Windowed queries need decay</span> — a video's popularity 3 hours ago shouldn't count toward "trending now," so old buckets must expire</li>
+        <li><span>Time-bucketed sketches solve this</span> — open a fresh small sketch every few minutes, merge the last N buckets by elementwise sum for the current window</li>
+        <li><span>All-time queries need permanence</span> — a single sketch that's never reset, growing (in accuracy demand, not physical size) over the video's life</li>
+        <li><span>One structure can't do both cheaply</span> — resetting periodically (needed for freshness) destroys history; never resetting (needed for permanence) can't express "just the last hour"</li>
+        <li><span>Two structures, two purposes</span> — bucketed+merged sketches for any rolling window, one persistent sketch (or exact aggregate, since all-time cardinality growth is slower) for all-time</li>
+      </ol>
+      <div class="callout warn">All-time counts are often worth computing exactly via a batch job (e.g. nightly aggregation from durable logs) instead of a sketch — the write rate against all-time is the same, but the tolerance for a slower, exact answer is much higher than for "trending right now."</div>
+
+      <table class="grid-table" style="margin-top:1rem">
+        <thead><tr><th>Failure mode</th><th>User impact</th><th>Detection signal</th><th>Mitigation</th></tr></thead>
+        <tbody>
+          <tr><td>Hot video overloads counter shard</td><td class="impact">Ingestion latency spikes for that video's partition</td><td class="detect">Per-partition consumer lag diverges from the rest</td><td class="fix">Local pre-aggregation in the Counter Service absorbs the burst before it reaches the shared sketch</td></tr>
+          <tr><td>Kafka consumer lag during traffic spike</td><td class="impact">Trending list is stale, not wrong</td><td class="detect"><code>snapshot_age_ms</code> exceeds the staleness SLA</td><td class="fix">Degrade gracefully — serve the last good snapshot with its age clearly surfaced, never block reads on catch-up</td></tr>
+          <tr><td>Sketch memory growth across window boundaries</td><td class="impact">Memory footprint creeps if old buckets aren't cleared</td><td class="detect">Redis memory usage trends upward without plateauing</td><td class="fix">Hard TTL / explicit reset per bucket boundary — a new bucket sketch always starts from zero</td></tr>
+        </tbody>
+      </table>
+    </section>
+
+    <section id="interview-moves">
+      <h2>Interview moves</h2>
+      <ul class="moves-list">
+        <li><span class="move-num">01</span><div><strong>"Exact top-K at this scale is a trap — with hundreds of millions of distinct videos, I can't afford a counter per video, so I'd reach for approximate counting instead"</strong> — states the core insight unprompted</div></li>
+        <li><span class="move-num">02</span><div><strong>"I'd use a Count-Min Sketch: fixed-size matrix, d hash functions per event, take the min across rows to estimate any video's count"</strong> — names the exact data structure and how reads work</div></li>
+        <li><span class="move-num">03</span><div><strong>"The sketch alone doesn't give me top-K — I still need a bounded min-heap of size K sitting on top of it"</strong> — shows you understand the sketch and the ranking layer are two separate concerns</div></li>
+        <li><span class="move-num">04</span><div><strong>"The error is tunable and one-sided — wider and deeper matrices shrink epsilon and delta, at the cost of more memory"</strong> — demonstrates you can reason about the accuracy/memory knob quantitatively</div></li>
+        <li><span class="move-num">05</span><div><strong>"Windowed and all-time top-K need different structures — a bucketed, merged sketch for the rolling window, a persistent one for all-time, because one structure can't reset and never-reset at the same time"</strong> — proactively surfaces a design fork most candidates miss</div></li>
+        <li><span class="move-num">06</span><div><strong>"A single viral video shouldn't be able to overload one shard — I'd pre-aggregate locally before ever touching the shared sketch"</strong> — surfaces the hot-partition failure mode before being asked</div></li>
+      </ul>
+    </section>
+
+    <section id="follow-ups">
+      <h2>Follow-up questions</h2>
+      <div class="qa-block">
+        <div class="qa-q">Why not just use an exact counter with atomic increments per video?</div>
+        <div class="qa-a">Memory scales linearly with distinct video count — hundreds of millions of hot keys is untenable to keep in fast storage, and a full sort for top-K would be too slow regardless.</div>
+      </div>
+      <div class="qa-block">
+        <div class="qa-q">Can the Count-Min Sketch ever undercount a video?</div>
+        <div class="qa-a">No — collisions only add extra weight to a cell, they never remove it, so every cell is an upper bound and the minimum across rows is the tightest available upper bound.</div>
+      </div>
+      <div class="qa-block">
+        <div class="qa-q">How do you size the sketch's width and depth?</div>
+        <div class="qa-a">Width (w) controls the error magnitude epsilon, roughly e/epsilon; depth (d) controls the failure probability delta, roughly ln(1/delta) — pick both from your acceptable error and confidence targets.</div>
+      </div>
+      <div class="qa-block">
+        <div class="qa-q">What happens if the snapshot job falls behind?</div>
+        <div class="qa-a">The trending list goes stale, not wrong or unavailable — the API exposes snapshot age so clients can decide whether to show a "may be outdated" indicator.</div>
+      </div>
+      <div class="qa-block">
+        <div class="qa-q">How would you support trending broken out by region or category?</div>
+        <div class="qa-a">Key the sketch and heap by (region, window) or (category, window) instead of a single global instance — same mechanism, partitioned differently, more memory in exchange for finer granularity.</div>
+      </div>
+      <div class="qa-block">
+        <div class="qa-q">Could a malicious actor game the trending list with bot views?</div>
+        <div class="qa-a">Yes without mitigation — add a lightweight anomaly filter upstream of the Counter Service (rate limits per viewer/IP, watch-time thresholds) before events ever reach the sketch.</div>
+      </div>
+    </section>
+
+  </main>
+  <script src="../../assets/nav.js"></script>
+</body>
+</html>

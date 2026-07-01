@@ -1,0 +1,522 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Design Instagram — SD Prep</title>
+  <link rel="stylesheet" href="../../assets/style.css">
+</head>
+<body>
+  <aside id="sidebar"></aside>
+  <main>
+
+    <header class="page-head">
+      <div class="pill">Questions</div>
+      <h1>Design Instagram</h1>
+      <p class="sub">Tests whether you split photo storage (write-once, read-many blob storage) from feed generation (a fan-out problem) instead of treating "Instagram" as one monolithic system.</p>
+      <div class="meta-row">
+        <span class="badge green">40-50 min interview</span>
+        <span class="badge blue">Hard</span>
+      </div>
+    </header>
+
+    <div class="flash-card">
+      <div class="flash-label">Say this in the first 2 minutes</div>
+      <ul>
+        <li>The core insight: photo storage and feed generation are two completely separate scaling problems — storage is write-once read-many (durable blob store + CDN), feed generation is a fan-out problem</li>
+        <li>Feed generation is the same shape as Facebook News Feed: push (fan-out-on-write) for normal users, pull-on-read (fan-out-on-read) for celebrity accounts, merged at read time</li>
+        <li>Key scale to anchor on: 2B users, 100M photos/day uploaded, 500M DAU viewing feed — feed reads dwarf photo writes by orders of magnitude</li>
+        <li>Component most candidates forget: the upload call must return immediately — thumbnailing, CDN pre-warm, and feed fan-out all happen asynchronously via a queue</li>
+        <li>Failure mode most candidates skip: a celebrity with 100M followers posting — fan-out-on-write for that one post would be a catastrophic write storm, so celebrity posts are pulled at read time instead</li>
+      </ul>
+    </div>
+
+    <section id="step1-requirements">
+      <div class="step-pill">Step 1 of 6 — Requirements</div>
+      <h2>Requirements</h2>
+
+      <div class="goal-arc-wrap">
+        <div class="goal-arc-row functional">
+          <div class="goal-arc-seg">1</div><div class="goal-arc-seg">2</div><div class="goal-arc-seg">3</div><div class="goal-arc-seg">4</div><div class="goal-arc-seg">5</div><div class="goal-arc-seg inactive">6</div>
+        </div>
+        <div class="goal-arc-label"><span>Arc 1 (steps 1-5) — <strong>Satisfy Functional Requirements</strong></span></div>
+        <div class="goal-arc-row nonfunctional" style="margin-top:8px">
+          <div class="goal-arc-seg">1</div><div class="goal-arc-seg">2</div><div class="goal-arc-seg">3</div><div class="goal-arc-seg">4</div><div class="goal-arc-seg">5</div><div class="goal-arc-seg">6</div>
+        </div>
+        <div class="goal-arc-label"><span>Arc 2 (all 6 steps) — <strong>Satisfy Non-Functional Requirements</strong></span></div>
+      </div>
+
+      <div class="compare-grid">
+        <div class="compare-card good">
+          <div class="compare-label">Functional</div>
+          <ul>
+            <li>User uploads a photo with an optional caption</li>
+            <li>User follows/unfollows other users</li>
+            <li>User views a home feed of photos from people they follow</li>
+            <li>User views a single photo, likes and comments on it</li>
+          </ul>
+        </div>
+        <div class="compare-card bad">
+          <div class="compare-label">Non-Functional</div>
+          <ul>
+            <li>100M photo uploads/day, 500M DAU viewing feed</li>
+            <li>Upload-to-visible latency &lt;2s (photo readable by the uploader's own feed viewers)</li>
+            <li>Feed reads are 100-1000x more frequent than photo writes — optimize for read path</li>
+            <li>Highly available for reads; feed can tolerate a few seconds of staleness</li>
+          </ul>
+        </div>
+      </div>
+
+      <div class="callout warn"><strong>What NOT to build:</strong> Stories/Reels (ephemeral or short-video content, a different storage and feed model), direct messages, e-commerce/shopping tags, or the ad delivery/ranking system. This is photo upload, follow graph, and home feed only.</div>
+
+      <div class="stat-grid">
+        <div class="stat-card"><div class="stat-val">100M</div><div class="stat-label">photos uploaded/day</div></div>
+        <div class="stat-card"><div class="stat-val">500M</div><div class="stat-label">daily active users viewing feed</div></div>
+        <div class="stat-card"><div class="stat-val">~600k/s</div><div class="stat-label">estimated peak feed reads/sec</div></div>
+        <div class="stat-card"><div class="stat-val">&lt;2s</div><div class="stat-label">upload-to-visible latency target</div></div>
+      </div>
+    </section>
+
+    <section id="step2-entities">
+      <div class="step-pill">Step 2 of 6 — Core Entities</div>
+      <h2>Core entities</h2>
+      <p style="font-size:13px;color:#999;margin-bottom:0.75rem">The photo blob and its metadata are split across two stores; the follow graph lives in a wide-column store built for adjacency lookups; the feed itself is a precomputed cache, not a live query.</p>
+
+      <div class="entity-grid">
+        <div class="entity-box">
+          <div class="entity-head"><span class="entity-name">Photo</span><span class="entity-store s3">S3 + Postgres</span></div>
+          <div class="entity-fields">
+            <div class="entity-field"><span class="fname pk">photo_id</span><span class="ftype">UUID</span></div>
+            <div class="entity-field"><span class="fname">owner_id</span><span class="ftype">BIGINT</span></div>
+            <div class="entity-field"><span class="fname">s3_key</span><span class="ftype">TEXT — blob pointer</span></div>
+            <div class="entity-field"><span class="fname">caption</span><span class="ftype">TEXT</span></div>
+            <div class="entity-field"><span class="fname">created_at</span><span class="ftype">TIMESTAMP</span></div>
+          </div>
+          <div class="entity-why">Because the pixel bytes are an immutable, write-once-read-many blob (belongs in S3) while queryable attributes (owner, caption, timestamps) belong in a row store — one entity, two physical stores by access pattern. Tradeoff: every photo read is a metadata lookup plus a CDN-fronted blob fetch, not one query.</div>
+        </div>
+
+        <div class="entity-box">
+          <div class="entity-head"><span class="entity-name">FollowGraph</span><span class="entity-store cass">Cassandra</span></div>
+          <div class="entity-fields">
+            <div class="entity-field"><span class="fname pk">follower_id</span><span class="ftype">partition key</span></div>
+            <div class="entity-field"><span class="fname idx">followee_id</span><span class="ftype">clustering key</span></div>
+            <div class="entity-field"><span class="fname">followed_at</span><span class="ftype">TIMESTAMP</span></div>
+            <div class="entity-field"><span class="fname">is_celebrity</span><span class="ftype">BOOL — on followee row</span></div>
+          </div>
+          <div class="entity-why">Because at billions of edges the only query that matters is "give me everyone X follows" — a partition-key lookup, no joins — and a wide-column store serves that at a fraction of the cost of a relational table with foreign keys. Tradeoff: no ad-hoc relational queries; every access pattern needs its own table.</div>
+        </div>
+
+        <div class="entity-box">
+          <div class="entity-head"><span class="entity-name">FeedEntry</span><span class="entity-store redis">Redis</span></div>
+          <div class="entity-fields">
+            <div class="entity-field"><span class="fname pk">user_id</span><span class="ftype">key — sorted set</span></div>
+            <div class="entity-field"><span class="fname">photo_id</span><span class="ftype">member</span></div>
+            <div class="entity-field"><span class="fname">score</span><span class="ftype">created_at, for ranking</span></div>
+            <div class="entity-field"><span class="fname">cap</span><span class="ftype">~800 entries/user</span></div>
+          </div>
+          <div class="entity-why">Because the feed is read hundreds of times more often than it changes — precomputing it into a per-user sorted set turns "what's my feed" from a fan-in query into an O(1) cache read. Tradeoff: storage cost of duplicating photo_ids across every follower's cache, and a cold-start problem for brand-new users.</div>
+        </div>
+      </div>
+
+      <div class="callout info">Primary key: <code>Photo.photo_id</code> with <code>s3_key</code> as the indirection to the blob. Critical index: <code>FollowGraph</code> partitioned by <code>follower_id</code> so "who does X follow" is a single-partition read, never a scan.</div>
+    </section>
+
+    <section id="step3-api">
+      <div class="step-pill">Step 3 of 6 — API / Interface</div>
+      <h2>API design</h2>
+      <p style="font-size:13px;color:#999;margin-bottom:0.75rem">Upload is a REST call that returns immediately — heavy lifting (thumbnailing, fan-out) happens after the response, off a queue.</p>
+
+      <div class="api-card">
+        <div class="api-line"><span class="api-method post">POST</span><span class="api-path">/api/v1/photos</span><span class="api-auth">Auth: required</span></div>
+        <div class="api-io">
+          <div class="api-io-block"><div class="api-io-label">Request</div><div class="api-io-body">multipart chunked upload + { caption }</div></div>
+          <div class="api-io-block"><div class="api-io-label">Response</div><div class="api-io-body">202 Accepted { photo_id, status: "processing" }</div></div>
+        </div>
+      </div>
+
+      <div class="api-card">
+        <div class="api-line"><span class="api-method get">GET</span><span class="api-path">/api/v1/feed</span><span class="api-auth">Auth: required</span></div>
+        <div class="api-io">
+          <div class="api-io-block"><div class="api-io-label">Request</div><div class="api-io-body">{ cursor, limit }</div></div>
+          <div class="api-io-block"><div class="api-io-label">Response</div><div class="api-io-body">{ photos: [...], next_cursor }</div></div>
+        </div>
+      </div>
+
+      <div class="api-card">
+        <div class="api-line"><span class="api-method post">POST</span><span class="api-path">/api/v1/follow/{userId}</span><span class="api-auth">Auth: required</span></div>
+        <div class="api-io">
+          <div class="api-io-block"><div class="api-io-label">Request</div><div class="api-io-body">{ } (userId in path)</div></div>
+          <div class="api-io-block"><div class="api-io-label">Response</div><div class="api-io-body">200 { following: true }</div></div>
+        </div>
+      </div>
+
+      <div class="api-card">
+        <div class="api-line"><span class="api-method get">GET</span><span class="api-path">/api/v1/photos/{id}</span><span class="api-auth">Auth: required</span></div>
+        <div class="api-io">
+          <div class="api-io-block"><div class="api-io-label">Request</div><div class="api-io-body">{ id } (path param)</div></div>
+          <div class="api-io-block"><div class="api-io-label">Response</div><div class="api-io-body">{ photo_id, owner, caption, cdn_url, created_at }</div></div>
+        </div>
+      </div>
+
+      <div class="callout good">The upload endpoint returns <code>202 Accepted</code>, not <code>201 Created</code>, with the photo already visible on the owner's own profile but processing (thumbnails, CDN pre-warm, feed fan-out) happening asynchronously — this is what keeps upload latency low regardless of downstream fan-out cost.</div>
+    </section>
+
+    <section id="step4-dataflow">
+      <div class="step-pill">Step 4 of 6 — Data Flow</div>
+      <h2>Data flow</h2>
+      <p style="font-size:13px;color:#999;margin-bottom:0.75rem">Upload writes (blue) hit S3 synchronously then hand off to async workers (amber); feed reads (mint) hit the precomputed feed cache, never the follow graph directly.</p>
+
+      <div class="diagram-wrap" data-paths='{"upload":{"boxes":["u-client","u-svc","u-s3","u-queue","u-thumb","u-cdn"],"arrows":["u1","u2","u3","u4","u5"]},"feed":{"boxes":["f-client","f-feedsvc","f-cache"],"arrows":["f1","f2"]}}'>
+        <svg viewBox="0 0 760 240" xmlns="http://www.w3.org/2000/svg">
+          <defs>
+            <marker id="igW" markerWidth="8" markerHeight="8" refX="6" refY="3" orient="auto"><path d="M0,0 L6,3 L0,6 Z" fill="var(--blue)"/></marker>
+            <marker id="igA" markerWidth="8" markerHeight="8" refX="6" refY="3" orient="auto"><path d="M0,0 L6,3 L0,6 Z" fill="var(--amber)"/></marker>
+            <marker id="igR" markerWidth="8" markerHeight="8" refX="6" refY="3" orient="auto"><path d="M0,0 L6,3 L0,6 Z" fill="var(--accent)"/></marker>
+          </defs>
+
+          <text class="diag-sublabel" x="150" y="14" style="font-size:10px;fill:var(--blue)">UPLOAD PATH — sync write, async fan-out</text>
+          <g data-target="step6-deepdive-upload" data-id="u-client" data-tip="Chunked upload over HTTPS"><rect class="diag-box role-client" x="10" y="24" width="110" height="46"/><text class="diag-label" x="65" y="47" style="font-size:11px">Client</text></g>
+          <path class="diag-arrow-path" data-id="u1" d="M120,47 L150,47" marker-end="url(#igW)"/>
+          <g data-target="step6-deepdive-upload" data-id="u-svc" data-tip="Validates, writes blob, returns 202 immediately"><rect class="diag-box" x="150" y="24" width="120" height="46"/><text class="diag-label" x="210" y="47" style="font-size:11px">Upload Svc</text></g>
+          <path class="diag-arrow-path" data-id="u2" d="M270,47 L300,47" marker-end="url(#igW)"/>
+          <g data-target="step6-deepdive-upload" data-id="u-s3" data-tip="Durable blob storage, write-once read-many"><rect class="diag-box role-db" x="300" y="24" width="90" height="46"/><text class="diag-label" x="345" y="47" style="font-size:11px">S3</text></g>
+
+          <circle class="diag-dot diag-flow-dot" data-flow="write" r="3.5" style="offset-path: path('M10,47 L120,47 L120,47 L270,47 L270,47 L390,47')"></circle>
+
+          <path class="diag-arrow-path" data-id="u3" d="M390,47 L420,47" marker-end="url(#igA)"/>
+          <g data-target="step6-deepdive-upload" data-id="u-queue" data-tip="Decouples upload response from processing"><rect class="diag-box role-async" x="420" y="24" width="100" height="46"/><text class="diag-label" x="470" y="47" style="font-size:11px">Queue</text></g>
+          <path class="diag-arrow-path" data-id="u4" d="M520,47 L550,47" marker-end="url(#igA)"/>
+          <g data-target="step6-deepdive-upload" data-id="u-thumb" data-tip="Generates thumbnail sizes, runs moderation"><rect class="diag-box role-async" x="550" y="24" width="100" height="46"/><text class="diag-label" x="600" y="47" style="font-size:11px">Thumb Worker</text></g>
+          <path class="diag-arrow-path" data-id="u5" d="M650,47 L680,47" marker-end="url(#igA)"/>
+          <g data-target="step6-deepdive-upload" data-id="u-cdn" data-tip="Pre-warms edge caches ahead of first view"><rect class="diag-box role-cdn" x="680" y="24" width="70" height="46"/><text class="diag-label" x="715" y="47" style="font-size:11px">CDN</text></g>
+
+          <circle class="diag-dot diag-flow-dot" data-flow="async" r="3.5" style="offset-path: path('M390,47 L420,47 L420,47 L650,47 L650,47 L750,47')"></circle>
+
+          <text class="diag-sublabel" x="150" y="122" style="font-size:10px;fill:var(--accent)">FEED READ PATH</text>
+          <g data-target="step2-entities" data-id="f-client" data-tip="Opens the home feed"><rect class="diag-box role-client" x="10" y="132" width="110" height="46"/><text class="diag-label" x="65" y="155" style="font-size:11px">Client</text></g>
+          <path class="diag-arrow-path" data-id="f1" d="M120,155 L150,155" marker-end="url(#igR)"/>
+          <g data-target="step6-deepdive-feedfanout" data-id="f-feedsvc" data-tip="Reads the precomputed feed, no fan-in query"><rect class="diag-box" x="150" y="132" width="130" height="46"/><text class="diag-label" x="215" y="155" style="font-size:11px">Feed Read Svc</text></g>
+          <path class="diag-arrow-path" data-id="f2" d="M280,155 L310,155" marker-end="url(#igR)"/>
+          <g data-target="step6-deepdive-feedfanout" data-id="f-cache" data-tip="Per-user sorted set of recent photo_ids"><rect class="diag-box role-cache" x="310" y="132" width="140" height="46"/><text class="diag-label" x="380" y="155" style="font-size:11px">Feed Cache</text></g>
+
+          <circle class="diag-dot diag-flow-dot" data-flow="read" r="3.5" style="offset-path: path('M10,155 L120,155 L120,155 L280,155 L280,155 L450,155')"></circle>
+
+          <text class="diag-sublabel" x="150" y="200" style="font-size:10px;fill:var(--amber)">NOTIFICATION PATH — separate, decoupled</text>
+          <g data-target="step6-deepdive-upload" data-id="n-notif" data-tip="Notifies followers of a new post, independent of feed fan-out"><rect class="diag-box role-async" x="10" y="208" width="200" height="26" rx="6"/><text class="diag-label" x="110" y="225" style="font-size:10px">Notification Service (push, off same queue)</text></g>
+        </svg>
+        <div class="diag-legend">
+          <div class="diag-legend-item"><span class="diag-legend-dot role-client"></span>Client apps — upload and feed viewing</div>
+          <div class="diag-legend-item"><span class="diag-legend-dot role-db"></span>S3 — durable blob storage</div>
+          <div class="diag-legend-item"><span class="diag-legend-dot role-async"></span>Queue + workers — async thumbnailing, fan-out, notifications</div>
+          <div class="diag-legend-item"><span class="diag-legend-dot role-cache"></span>Feed cache — precomputed, read hot-path</div>
+        </div>
+      </div>
+
+      <ol class="flow-steps-list">
+        <li><span>Client uploads in chunks</span> — resumable multipart upload over HTTPS</li>
+        <li><span>Upload Svc writes the blob to S3</span> — then immediately returns 202 to the client, photo already visible on owner's own profile</li>
+        <li><span>A message is pushed to the queue</span> — decouples the fast synchronous write from slow downstream work</li>
+        <li><span>Thumbnail worker generates sizes and pre-warms the CDN</span> — runs entirely in the background</li>
+        <li><span>Feed fan-out and notifications happen off the same queue</span> — feed reads always hit the precomputed cache, never the follow graph live</li>
+      </ol>
+    </section>
+
+    <section id="step5-hld">
+      <div class="step-pill">Step 5 of 6 — High-Level Design</div>
+      <h2>High-level design</h2>
+      <p style="font-size:13px;color:#999;margin-bottom:0.75rem">Upload path (top), feed generation path (middle), and follow graph (bottom) as three largely independent subsystems joined only at fan-out time.</p>
+
+      <div class="diagram-wrap">
+        <svg viewBox="0 0 800 340" xmlns="http://www.w3.org/2000/svg">
+          <defs><marker id="igHld" markerWidth="8" markerHeight="8" refX="6" refY="3" orient="auto"><path d="M0,0 L6,3 L0,6 Z" fill="var(--border2)"/></marker></defs>
+
+          <g data-tip="Uploads photos, views feed"><rect class="diag-box role-client" x="10" y="16" width="120" height="46"/><text class="diag-label" x="70" y="43" style="font-size:11px">Client App</text></g>
+
+          <path class="diag-arrow-path" d="M130,39 L165,39" marker-end="url(#igHld)"/>
+          <g data-tip="Accepts chunked upload, returns immediately"><rect class="diag-box" x="165" y="16" width="130" height="46"/><text class="diag-label" x="230" y="39" style="font-size:11px">Upload Service</text><text class="diag-sublabel" x="230" y="53" style="font-size:8.5px">returns 202 fast</text></g>
+          <path class="diag-arrow-path" d="M295,39 L330,39" marker-end="url(#igHld)"/>
+          <g data-tip="Durable blob storage"><rect class="diag-box role-db" x="330" y="16" width="90" height="46"/><text class="diag-label" x="375" y="43" style="font-size:11px">S3</text></g>
+          <path class="diag-arrow-path" d="M420,39 L455,39" marker-end="url(#igHld)"/>
+          <g data-tip="Edge cache, pre-warmed for viral spread"><rect class="diag-box role-cdn" x="455" y="16" width="90" height="46"/><text class="diag-label" x="500" y="43" style="font-size:11px">CDN</text></g>
+
+          <path class="diag-arrow-path" d="M230,62 L230,90" marker-end="url(#igHld)"/>
+          <g data-tip="Async thumbnailing, moderation, fan-out trigger"><rect class="diag-box role-async" x="165" y="90" width="130" height="46"/><text class="diag-label" x="230" y="113" style="font-size:11px">Queue + Workers</text></g>
+
+          <path class="diag-arrow-path" d="M230,136 L230,164" marker-end="url(#igHld)"/>
+          <g data-tip="Decides push vs pull per post, based on author's follower count"><rect class="diag-box" x="140" y="164" width="180" height="46"/><text class="diag-label" x="230" y="187" style="font-size:11px">Feed Generation Worker</text></g>
+
+          <path class="diag-arrow-path" d="M140,187 L60,187 L60,236" marker-end="url(#igHld)"/>
+          <g data-tip="Adjacency list — who follows whom, at scale"><rect class="diag-box role-db" x="10" y="236" width="130" height="46"/><text class="diag-label" x="75" y="259" style="font-size:11px">Follow Graph</text><text class="diag-sublabel" x="75" y="273" style="font-size:8.5px">Cassandra</text></g>
+
+          <path class="diag-arrow-path" d="M320,187 L400,187 L400,164" marker-end="url(#igHld)" stroke-dasharray="3 3"/>
+          <g data-tip="Normal users: fan-out-on-write pushes entries here at post time"><rect class="diag-box role-cache" x="400" y="164" width="150" height="46"/><text class="diag-label" x="475" y="183" style="font-size:11px">Per-User Feed Cache</text><text class="diag-sublabel" x="475" y="198" style="font-size:8.5px">Redis, fan-out-on-write</text></g>
+
+          <path class="diag-arrow-path" d="M475,210 L475,236" marker-end="url(#igHld)"/>
+          <g data-tip="Celebrity accounts: pulled live at read time, merged with cache"><rect class="diag-box role-async" x="400" y="236" width="150" height="46"/><text class="diag-label" x="475" y="255" style="font-size:11px">Celebrity Pull Svc</text><text class="diag-sublabel" x="475" y="270" style="font-size:8.5px">fan-out-on-read</text></g>
+
+          <path class="diag-arrow-path" d="M550,187 L640,187" marker-end="url(#igHld)"/>
+          <path class="diag-arrow-path" d="M550,259 L640,259 L640,210" marker-end="url(#igHld)"/>
+          <g data-tip="Merges pushed + pulled entries, serves the client"><rect class="diag-box" x="640" y="164" width="140" height="46"/><text class="diag-label" x="710" y="183" style="font-size:11px">Feed Read Service</text><text class="diag-sublabel" x="710" y="198" style="font-size:8.5px">merge + rank</text></g>
+
+          <path class="diag-arrow-path" d="M710,164 L710,62 L130,62 L130,39" marker-end="url(#igHld)" stroke-dasharray="3 3"/>
+
+          <g data-tip="Notifies followers of new posts, decoupled from feed cache"><rect class="diag-box role-async" x="600" y="90" width="150" height="46"/><text class="diag-label" x="675" y="113" style="font-size:11px">Notification Svc</text></g>
+          <path class="diag-arrow-path" d="M295,113 L600,113" marker-end="url(#igHld)" stroke-dasharray="3 3"/>
+        </svg>
+        <div class="diag-legend">
+          <div class="diag-legend-item"><span class="diag-legend-dot role-client"></span>Client app — upload + feed viewing</div>
+          <div class="diag-legend-item"><span class="diag-legend-dot role-db"></span>S3 + Follow Graph — durable storage</div>
+          <div class="diag-legend-item"><span class="diag-legend-dot role-cdn"></span>CDN — pre-warmed edge cache for photo blobs</div>
+          <div class="diag-legend-item"><span class="diag-legend-dot role-cache"></span>Feed cache — precomputed hot-path for normal users</div>
+          <div class="diag-legend-item"><span class="diag-legend-dot role-async"></span>Queues, workers, celebrity pull, notifications</div>
+        </div>
+      </div>
+
+      <table class="def-table">
+        <thead><tr><th>Component</th><th>Role</th><th>Tech + why</th></tr></thead>
+        <tbody>
+          <tr><td>Upload Service</td><td>Accepts chunked uploads, writes blob, returns fast</td><td>Stateless HTTP service in front of S3 — because the client should never wait on downstream processing; tradeoff is the client sees "processing" state briefly.</td></tr>
+          <tr><td>S3 + CDN</td><td>Durable photo storage + edge delivery</td><td>Object storage is write-once-read-many by nature; CDN pre-warm avoids a cold origin fetch on first viral view — tradeoff is CDN cache invalidation complexity if a photo is deleted.</td></tr>
+          <tr><td>Feed Generation Worker</td><td>Decides push vs pull per post</td><td>Reads follower count from the Follow Graph — under a threshold, fans out to feed caches; over it, marks the post for pull-only. Tradeoff: threshold tuning is a judgment call, not a hard science.</td></tr>
+          <tr><td>Follow Graph (Cassandra)</td><td>Adjacency list — who follows whom</td><td>Wide-column store partitioned by follower_id — because the only query is a fast key lookup, never a join; tradeoff is duplicated data if reverse lookups (followers of X) are also needed.</td></tr>
+          <tr><td>Feed Cache (Redis)</td><td>Precomputed per-user feed</td><td>Sorted set per user, capped at ~800 entries — because reading a feed should never require a live fan-in query; tradeoff is storage cost from duplicating photo_ids across followers.</td></tr>
+        </tbody>
+      </table>
+
+      <table class="grid-table">
+        <thead><tr><th>Bottleneck</th><th>Triggers at</th><th>Exact fix</th></tr></thead>
+        <tbody>
+          <tr><td>CDN origin overload</td><td>A photo goes viral, thousands of concurrent cache misses hit S3 at once</td><td class="fix">Request coalescing at the origin + CDN pre-warm on upload so the first real viewer is already a cache hit</td></tr>
+          <tr><td>Feed cache cold start</td><td>Brand-new user with an empty or sparse follow graph</td><td class="fix">Fall back to a trending/popular pull query until the follow graph and feed cache warm up</td></tr>
+          <tr><td>Celebrity fan-out storm</td><td>An account with tens of millions of followers posts</td><td class="fix">Route celebrity posts to pull-on-read instead of pushing to every follower's cache</td></tr>
+        </tbody>
+      </table>
+
+      <h3 style="font-size:13px;color:var(--text);margin:1.25rem 0 0.6rem;font-weight:600">Scaling levers — cheapest to most complex</h3>
+      <ol class="levers-list">
+        <li><strong>Add CDN edge PoPs and increase TTL</strong> for immutable photo blobs<span class="cost">low complexity</span></li>
+        <li><strong>Cap feed cache size per user</strong> (~800 entries) instead of storing full history<span class="cost">low complexity</span></li>
+        <li><strong>Tune the celebrity-threshold follower count</strong> that switches push to pull<span class="cost">medium complexity</span></li>
+        <li><strong>Shard the Follow Graph</strong> by follower_id across more Cassandra nodes<span class="cost">medium complexity</span></li>
+        <li><strong>Pre-rank and cache merged feeds</strong> for celebrity-heavy users to avoid recomputing the merge on every read<span class="cost">high complexity — last resort</span></li>
+      </ol>
+
+      <div class="dial-wrap">
+        <div class="dial-title">Feed freshness: real-time vs cached</div>
+        <div class="dial-track"><div class="dial-marker" style="left:78%"></div></div>
+        <div class="dial-labels"><span class="end-left">Real-time</span><span class="end-right">Cached, seconds stale</span></div>
+      </div>
+      <div class="dial-wrap">
+        <div class="dial-title">Photo blob storage: cost vs redundancy</div>
+        <div class="dial-track"><div class="dial-marker" style="left:35%"></div></div>
+        <div class="dial-labels"><span class="end-left">Cheapest storage tier</span><span class="end-right">Multi-region redundancy</span></div>
+      </div>
+    </section>
+
+    <section id="step6-deepdive-upload">
+      <div class="step-pill">Step 6 of 6 — Deep Dives</div>
+      <h2>Deep dive: photo upload pipeline</h2>
+      <p style="font-size:13px;color:#999;margin-bottom:0.75rem">The upload call is synchronous only up to the S3 write. Everything after that — thumbnailing, CDN propagation — is async, off a queue, and invisible to the client's latency budget.</p>
+
+      <div class="diagram-wrap">
+        <svg viewBox="0 0 700 260" xmlns="http://www.w3.org/2000/svg">
+          <defs><marker id="upSeqArrow" markerWidth="8" markerHeight="8" refX="6" refY="3" orient="auto"><path d="M0,0 L6,3 L0,6 Z" fill="var(--border2)"/></marker></defs>
+
+          <text class="diag-label" x="60" y="20" style="font-size:11px;text-anchor:middle">Client</text>
+          <text class="diag-label" x="220" y="20" style="font-size:11px;text-anchor:middle">Upload Svc</text>
+          <text class="diag-label" x="360" y="20" style="font-size:11px;text-anchor:middle">S3</text>
+          <text class="diag-label" x="480" y="20" style="font-size:11px;text-anchor:middle">Queue</text>
+          <text class="diag-label" x="600" y="20" style="font-size:11px;text-anchor:middle">Thumb Worker</text>
+
+          <line x1="60" y1="30" x2="60" y2="240" stroke="var(--border)" stroke-width="1"/>
+          <line x1="220" y1="30" x2="220" y2="240" stroke="var(--border)" stroke-width="1"/>
+          <line x1="360" y1="30" x2="360" y2="240" stroke="var(--border)" stroke-width="1"/>
+          <line x1="480" y1="30" x2="480" y2="240" stroke="var(--border)" stroke-width="1"/>
+          <line x1="600" y1="30" x2="600" y2="240" stroke="var(--border)" stroke-width="1"/>
+
+          <path class="diag-arrow-path" d="M60,50 L220,50" marker-end="url(#upSeqArrow)"/>
+          <text class="diag-sublabel" x="140" y="44" style="font-size:9px">chunked upload (multipart)</text>
+
+          <path class="diag-arrow-path" d="M220,80 L360,80" marker-end="url(#upSeqArrow)"/>
+          <text class="diag-sublabel" x="290" y="74" style="font-size:9px;fill:var(--blue)">PUT blob</text>
+
+          <circle class="diag-flow-dot" data-flow="write" r="3.5" style="offset-path: path('M220,80 L360,80')"></circle>
+
+          <path class="diag-arrow-path" d="M360,105 L220,105" marker-end="url(#upSeqArrow)"/>
+          <text class="diag-sublabel" x="290" y="99" style="font-size:9px">S3 write ack</text>
+
+          <path class="diag-arrow-path" d="M220,130 L60,130" marker-end="url(#upSeqArrow)"/>
+          <rect x="15" y="112" width="90" height="30" rx="6" fill="#08200f" stroke="var(--accent)" stroke-width="1"/>
+          <text class="diag-sublabel" x="60" y="130" style="font-size:9px;fill:var(--accent);text-anchor:middle">202 Accepted</text>
+          <text class="diag-sublabel" x="60" y="141" style="font-size:8px;fill:var(--accent);text-anchor:middle">returned immediately</text>
+
+          <path class="diag-arrow-path" d="M220,160 L480,160" marker-end="url(#upSeqArrow)" stroke="var(--amber)"/>
+          <text class="diag-sublabel" x="350" y="154" style="font-size:9px;fill:var(--amber)">enqueue processing job (async)</text>
+
+          <circle class="diag-flow-dot" data-flow="async" r="3.5" style="offset-path: path('M220,160 L480,160')"></circle>
+
+          <path class="diag-arrow-path" d="M480,185 L600,185" marker-end="url(#upSeqArrow)" stroke="var(--amber)"/>
+          <text class="diag-sublabel" x="540" y="179" style="font-size:9px;fill:var(--amber)">dequeue</text>
+
+          <path class="diag-arrow-path" d="M600,210 L360,210" marker-end="url(#upSeqArrow)" stroke="var(--amber)"/>
+          <text class="diag-sublabel" x="480" y="204" style="font-size:9px;fill:var(--amber)">reads original, writes thumbnail sizes</text>
+
+          <rect x="555" y="222" width="90" height="30" rx="6" fill="#1c1730" stroke="var(--purple)" stroke-width="1"/>
+          <text class="diag-sublabel" x="600" y="240" style="font-size:9px;fill:var(--purple);text-anchor:middle">CDN pre-warm</text>
+        </svg>
+      </div>
+
+      <ol class="flow-steps-list">
+        <li><span>Client sends the photo in chunks</span> — resumable multipart upload, tolerant of a flaky mobile connection</li>
+        <li><span>Upload Svc streams the blob to S3</span> — the only synchronous, latency-sensitive write in the whole pipeline</li>
+        <li><span>202 Accepted returns to the client immediately</span> — the original photo is already viewable on the owner's own profile at full resolution</li>
+        <li><span>A processing job is enqueued</span> — decouples the fast path from everything downstream</li>
+        <li><span>Thumbnail worker generates multiple sizes and pre-warms the CDN</span> — happens entirely in the background, typically completing well under the 2s "visible to followers" target</li>
+      </ol>
+      <div class="callout good">The key move: the upload call's latency is bounded by one S3 write, not by thumbnailing or fan-out. Anything that can happen after the client stops caring about the response belongs on the queue, not in the request path.</div>
+    </section>
+
+    <section id="step6-deepdive-feedfanout">
+      <h2>Deep dive: feed generation — push vs pull hybrid</h2>
+      <p style="font-size:13px;color:#999;margin-bottom:0.75rem">Same pattern as the Facebook News Feed problem: fan-out-on-write for normal users, fan-out-on-read for celebrity accounts, merged at serve time.</p>
+
+      <div class="diagram-wrap">
+        <svg viewBox="0 0 720 260" xmlns="http://www.w3.org/2000/svg">
+          <defs>
+            <marker id="fanArrowPush" markerWidth="8" markerHeight="8" refX="6" refY="3" orient="auto"><path d="M0,0 L6,3 L0,6 Z" fill="var(--accent)"/></marker>
+            <marker id="fanArrowPull" markerWidth="8" markerHeight="8" refX="6" refY="3" orient="auto"><path d="M0,0 L6,3 L0,6 Z" fill="var(--amber)"/></marker>
+            <marker id="fanArrowN" markerWidth="8" markerHeight="8" refX="6" refY="3" orient="auto"><path d="M0,0 L6,3 L0,6 Z" fill="var(--border2)"/></marker>
+          </defs>
+
+          <g data-tip="A post from a normal user (few thousand followers)"><rect class="diag-box role-client" x="10" y="20" width="150" height="46"/><text class="diag-label" x="85" y="43" style="font-size:11px">Normal User Post</text></g>
+          <path class="diag-arrow-path" d="M160,43 L195,43" marker-end="url(#fanArrowPush)"/>
+          <g data-tip="Follower count under threshold — push now"><rect class="diag-box role-cache" x="195" y="20" width="170" height="46"/><text class="diag-label" x="280" y="39" style="font-size:11px">Fan-out-on-Write</text><text class="diag-sublabel" x="280" y="54" style="font-size:8.5px">push at post time</text></g>
+          <path class="diag-arrow-path" d="M365,43 L400,43" marker-end="url(#fanArrowPush)"/>
+          <g data-tip="Entry written into every follower's feed cache"><rect class="diag-box role-cache" x="400" y="20" width="180" height="46"/><text class="diag-label" x="490" y="43" style="font-size:11px">Each Follower's Feed Cache</text></g>
+
+          <circle class="diag-flow-dot" data-flow="write" r="3.5" style="offset-path: path('M160,43 L580,43')"></circle>
+
+          <g data-tip="A post from a celebrity account (tens of millions of followers)"><rect class="diag-box role-client" x="10" y="110" width="150" height="46"/><text class="diag-label" x="85" y="133" style="font-size:11px">Celebrity Post</text></g>
+          <path class="diag-arrow-path" d="M160,133 L195,133" marker-end="url(#fanArrowPull)"/>
+          <g data-tip="Follower count over threshold — writing to millions of caches at once would be a storm"><rect class="diag-box role-async" x="195" y="110" width="170" height="46"/><text class="diag-label" x="280" y="129" style="font-size:11px">Marked Pull-Only</text><text class="diag-sublabel" x="280" y="144" style="font-size:8.5px">no fan-out write</text></g>
+          <path class="diag-arrow-path" d="M365,133 L400,133" marker-end="url(#fanArrowPull)" stroke-dasharray="3 3"/>
+          <g data-tip="Fetched live at read time instead of pushed at post time"><rect class="diag-box role-async" x="400" y="110" width="180" height="46"/><text class="diag-label" x="490" y="129" style="font-size:11px">Fan-out-on-Read</text><text class="diag-sublabel" x="490" y="144" style="font-size:8.5px">pulled when a follower opens feed</text></g>
+
+          <circle class="diag-flow-dot" data-flow="async" r="3.5" style="offset-path: path('M160,133 L580,133')"></circle>
+
+          <path class="diag-arrow-path" d="M490,66 L490,175" marker-end="url(#fanArrowN)"/>
+          <path class="diag-arrow-path" d="M490,110 L490,175" marker-end="url(#fanArrowN)"/>
+          <g data-tip="Combines pushed entries + live-pulled celebrity posts, ranks by time"><rect class="diag-box" x="330" y="185" width="240" height="50"/><text class="diag-label" x="450" y="207" style="font-size:11px">Feed Read Service</text><text class="diag-sublabel" x="450" y="223" style="font-size:8.5px">merges both sources, ranks, returns page</text></g>
+
+          <path class="diag-arrow-path" d="M330,210 L60,210 L60,180" marker-end="url(#fanArrowN)"/>
+          <g data-tip="Sees one merged, ranked feed regardless of source"><rect class="diag-box role-client" x="10" y="160" width="140" height="40" rx="6"/><text class="diag-label" x="80" y="184" style="font-size:11px">Follower's Feed</text></g>
+        </svg>
+        <div class="diag-legend">
+          <div class="diag-legend-item"><span class="diag-legend-dot role-cache"></span>Push (fan-out-on-write) — normal users, written at post time</div>
+          <div class="diag-legend-item"><span class="diag-legend-dot role-async"></span>Pull (fan-out-on-read) — celebrity accounts, fetched at view time</div>
+        </div>
+      </div>
+
+      <ol class="flow-steps-list">
+        <li><span>Feed Generation Worker checks follower count</span> — below the celebrity threshold, pushes a feed entry into every follower's cache immediately</li>
+        <li><span>Above the threshold, the post is marked pull-only</span> — no write fan-out happens; writing to tens of millions of caches for one post would be catastrophic</li>
+        <li><span>Follower opens their feed</span> — Feed Read Service reads their precomputed cache (push-based entries already there)</li>
+        <li><span>Feed Read Service also live-queries the small set of celebrities they follow</span> — cheap because a user follows only a handful of celebrities, not millions</li>
+        <li><span>Both sources are merged and ranked by recency</span> — the follower sees one unified feed, unaware of which posts were pushed vs pulled</li>
+      </ol>
+      <div class="callout warn">The threshold isn't a hard science — it's tuned against write amplification: a user with 5,000 followers fanning out on write costs 5,000 cache writes; a user with 100M followers doing the same would be a full write storm across the fleet. Pick a threshold (e.g. ~1M followers) where push cost stops being negligible.</div>
+    </section>
+
+    <section id="step6-deepdive-followgraph">
+      <h2>Deep dive: follow graph storage</h2>
+      <p style="font-size:13px;color:#999;margin-bottom:0.75rem">Modeled as an adjacency list in a wide-column store, not a relational join table — because the only query that matters at billions of edges is a fast single-partition lookup.</p>
+
+      <div class="diagram-wrap">
+        <svg viewBox="0 0 640 220" xmlns="http://www.w3.org/2000/svg">
+          <defs><marker id="fgArrow" markerWidth="8" markerHeight="8" refX="6" refY="3" orient="auto"><path d="M0,0 L6,3 L0,6 Z" fill="var(--border2)"/></marker></defs>
+
+          <g data-tip="Query: who does user 42 follow?"><rect class="diag-box role-client" x="10" y="80" width="140" height="46"/><text class="diag-label" x="80" y="103" style="font-size:11px">App Server</text></g>
+          <path class="diag-arrow-path" d="M150,103 L185,103" marker-end="url(#fgArrow)"/>
+          <g data-tip="Single-partition read on follower_id=42 — no join, no scan"><rect class="diag-box role-db" x="185" y="80" width="160" height="46"/><text class="diag-label" x="265" y="98" style="font-size:11px">Cassandra</text><text class="diag-sublabel" x="265" y="112" style="font-size:8.5px">partition key: follower_id</text></g>
+
+          <text class="diag-sublabel" x="490" y="20" style="font-size:10px;fill:var(--muted)">PARTITION follower_id = 42</text>
+          <rect class="diag-box role-db" x="400" y="30" width="220" height="26" rx="4"/>
+          <text class="diag-label" x="510" y="47" style="font-size:10px">followee_id: 7  followed_at: t1</text>
+          <rect class="diag-box role-db" x="400" y="60" width="220" height="26" rx="4"/>
+          <text class="diag-label" x="510" y="77" style="font-size:10px">followee_id: 91 followed_at: t2</text>
+          <rect class="diag-box role-db" x="400" y="90" width="220" height="26" rx="4"/>
+          <text class="diag-label" x="510" y="107" style="font-size:10px">followee_id: 156 followed_at: t3</text>
+          <text class="diag-sublabel" x="510" y="128" style="font-size:9px;fill:var(--muted)">... clustered by followed_at, all in one partition</text>
+
+          <path class="diag-arrow-path" d="M345,103 L400,60" marker-end="url(#fgArrow)"/>
+
+          <rect x="10" y="150" width="600" height="60" rx="6" fill="var(--surface)" stroke="var(--border2)" stroke-width="1"/>
+          <text class="diag-sublabel" x="30" y="170" style="font-size:10px;fill:var(--text)">Why not relational (foreign-key join table)?</text>
+          <text class="diag-sublabel" x="30" y="188" style="font-size:9.5px">Billions of edges, one access pattern ("who does X follow") — a join buys nothing here,</text>
+          <text class="diag-sublabel" x="30" y="202" style="font-size:9.5px">and costs index maintenance + join overhead at a scale relational engines don't handle cheaply.</text>
+        </svg>
+      </div>
+
+      <ol class="flow-steps-list">
+        <li><span>Model as an adjacency list</span> — one row per (follower, followee) edge, partitioned by follower_id</li>
+        <li><span>"Who does X follow" becomes a single-partition read</span> — no join, no cross-partition scan, sub-millisecond</li>
+        <li><span>A separate table, partitioned by followee_id, answers "who follows X"</span> — denormalized on purpose, written twice per follow action</li>
+        <li><span>Celebrity flag stored on the followee's row</span> — cheap to check at fan-out decision time without a separate lookup</li>
+        <li><span>No multi-row transactions needed</span> — a follow/unfollow is a single-partition write, naturally atomic</li>
+      </ol>
+      <div class="callout info">The relational instinct is to model this as a join table with foreign keys — but at billions of edges, joins don't help because there's exactly one query shape ("give me all edges for this key"). A wide-column store turns that into what it actually is: a fast key-value lookup, denormalized in both directions to avoid ever needing a join.</div>
+
+      <table class="grid-table" style="margin-top:1rem">
+        <thead><tr><th>Scenario</th><th>User impact</th><th>Detection signal</th><th>Mitigation</th></tr></thead>
+        <tbody>
+          <tr><td>CDN origin overload on a viral photo</td><td class="impact">Thundering herd of cache misses hits the S3 origin at once</td><td class="detect">Spike in S3 GET latency + origin error rate</td><td class="fix">Request coalescing at the CDN edge; pre-warm on upload so viral spread rarely reaches a cold origin</td></tr>
+          <tr><td>Feed cache cold start for a new user</td><td class="impact">Empty feed — no follow graph yet, no cached entries</td><td class="detect">Feed cache miss + empty follow graph on read</td><td class="fix">Fall back to a trending/popular-content pull query until the user builds a follow graph</td></tr>
+          <tr><td>Celebrity post fan-out storm</td><td class="impact">A 100M-follower account posting would trigger 100M cache writes if pushed</td><td class="detect">Follower count check at post time exceeds threshold</td><td class="fix">Route to pull-on-read instead of push; followers fetch the post live at feed-view time</td></tr>
+        </tbody>
+      </table>
+    </section>
+
+    <section id="interview-moves">
+      <h2>Interview moves</h2>
+      <ul class="moves-list">
+        <li><span class="move-num">01</span><div><strong>"Photo storage and feed generation are two completely separate scaling problems — one's a write-once-read-many blob problem, the other's a fan-out problem"</strong> — states the core insight unprompted</div></li>
+        <li><span class="move-num">02</span><div><strong>"The upload call should return the instant the blob hits S3 — thumbnailing and fan-out happen async off a queue"</strong> — signals you understand sync vs async latency budgets</div></li>
+        <li><span class="move-num">03</span><div><strong>"Feed generation here is the same shape as the Facebook News Feed problem — push for normal users, pull for celebrities, merged at read time"</strong> — connects to a well-known pattern instead of reinventing it</div></li>
+        <li><span class="move-num">04</span><div><strong>"I wouldn't model the follow graph relationally — at billions of edges there's one query shape, so a wide-column adjacency list beats a join table"</strong> — justifies a NoSQL choice with a concrete reason, not a buzzword</div></li>
+        <li><span class="move-num">05</span><div><strong>"A celebrity posting to 100M followers can't fan out on write — that's a write storm, so I'd pull those posts at read time instead"</strong> — proactively surfaces the hardest failure mode before being asked</div></li>
+        <li><span class="move-num">06</span><div><strong>"A brand-new user has no follow graph and no cached feed — I'd fall back to trending content rather than showing an empty screen"</strong> — handles the cold-start edge case unprompted</div></li>
+      </ul>
+    </section>
+
+    <section id="follow-ups">
+      <h2>Follow-up questions</h2>
+      <div class="qa-block">
+        <div class="qa-q">How do you decide the follower-count threshold for push vs pull?</div>
+        <div class="qa-a">Tune it against write amplification cost — pick the count where fan-out write volume per post starts to meaningfully strain the cache fleet, typically in the hundreds of thousands to low millions.</div>
+      </div>
+      <div class="qa-block">
+        <div class="qa-q">What happens if a user follows several celebrities — does every feed read get slow?</div>
+        <div class="qa-a">No — a user follows only a handful of celebrities even with a huge follow graph, so the live pull query touches a small, bounded set of accounts, not their whole feed.</div>
+      </div>
+      <div class="qa-block">
+        <div class="qa-q">How do you delete a photo and make sure it disappears everywhere, including the CDN?</div>
+        <div class="qa-a">Mark it deleted in Postgres immediately (stops new reads), issue a CDN cache invalidation for that key, and let feed caches skip it lazily on next read via a soft-delete check.</div>
+      </div>
+      <div class="qa-block">
+        <div class="qa-q">How would you support re-ordering the feed by engagement instead of pure recency?</div>
+        <div class="qa-a">Swap the sorted-set score from timestamp to a computed ranking score, recomputed periodically by a ranking worker — the cache structure doesn't change, only what "score" means.</div>
+      </div>
+      <div class="qa-block">
+        <div class="qa-q">How do you avoid unbounded growth of a user's feed cache?</div>
+        <div class="qa-a">Cap each per-user sorted set at a fixed size (e.g. ~800 entries) and evict the oldest on insert — old enough posts are past the point anyone scrolls to them anyway.</div>
+      </div>
+      <div class="qa-block">
+        <div class="qa-q">What's the impact of a follow-graph write during an active fan-out?</div>
+        <div class="qa-a">Fan-out is computed from a snapshot of followers at post time; a follow that lands mid-fan-out simply misses that one post and catches up on the next one — acceptable staleness, not a correctness bug.</div>
+      </div>
+    </section>
+
+  </main>
+  <script src="../../assets/nav.js"></script>
+</body>
+</html>
