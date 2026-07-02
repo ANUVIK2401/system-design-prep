@@ -1,0 +1,475 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Design a Distributed Cache — SD Prep</title>
+  <link rel="stylesheet" href="../../assets/style.css">
+</head>
+<body>
+  <aside id="sidebar"></aside>
+  <main>
+
+    <header class="page-head">
+      <div class="pill">Questions</div>
+      <h1>Design a Distributed Cache</h1>
+      <p class="sub">Tests whether you see this as a consistent-hashing + replication problem, not a "store key/value in a hash map" problem — the hard part is remapping keys cheaply and surviving node failure without a thundering herd.</p>
+      <div class="meta-row">
+        <span class="badge green">40-50 min interview</span>
+        <span class="badge blue">Hard</span>
+      </div>
+    </header>
+
+    <div class="flash-card">
+      <div class="flash-label">Say this in the first 2 minutes</div>
+      <ul>
+        <li>The core insight: distributing keys across nodes is a consistent-hashing problem — the goal is that adding/removing a node remaps the minimum number of keys, not the whole keyspace</li>
+        <li>Key scale number to anchor on: 10M ops/sec across the cluster at sub-millisecond p99 — this rules out any design that hits disk or crosses a network hop more than once per request</li>
+        <li>Primary tradeoff being probed: replication factor and consistency for replica reads vs raw throughput and memory cost</li>
+        <li>Component most candidates forget: a coordination/membership layer that tracks ring topology — without it, nodes disagree about who owns which key</li>
+        <li>Failure mode most candidates skip: thundering herd — when a hot key expires or a node dies, thousands of clients miss cache at once and hammer the database simultaneously</li>
+      </ul>
+    </div>
+
+    <section id="step1-requirements">
+      <div class="step-pill">Step 1 of 6 — Requirements</div>
+      <h2>Requirements</h2>
+
+      <div class="goal-arc-wrap">
+        <div class="goal-arc-row functional">
+          <div class="goal-arc-seg">1</div><div class="goal-arc-seg">2</div><div class="goal-arc-seg">3</div><div class="goal-arc-seg">4</div><div class="goal-arc-seg">5</div><div class="goal-arc-seg inactive">6</div>
+        </div>
+        <div class="goal-arc-label"><span>Arc 1 (steps 1-5) — <strong>Satisfy Functional Requirements</strong></span></div>
+        <div class="goal-arc-row nonfunctional" style="margin-top:8px">
+          <div class="goal-arc-seg">1</div><div class="goal-arc-seg">2</div><div class="goal-arc-seg">3</div><div class="goal-arc-seg">4</div><div class="goal-arc-seg">5</div><div class="goal-arc-seg">6</div>
+        </div>
+        <div class="goal-arc-label"><span>Arc 2 (all 6 steps) — <strong>Satisfy Non-Functional Requirements</strong></span></div>
+      </div>
+
+      <div class="compare-grid">
+        <div class="compare-card good">
+          <div class="compare-label">Functional</div>
+          <ul>
+            <li>GET/PUT/DELETE a key-value pair with sub-millisecond latency</li>
+            <li>Keys support a TTL after which they expire automatically</li>
+            <li>Cluster can grow or shrink by adding/removing nodes with minimal disruption</li>
+            <li>A single node failure does not lose the whole cache or stall traffic</li>
+          </ul>
+        </div>
+        <div class="compare-card bad">
+          <div class="compare-label">Non-Functional</div>
+          <ul>
+            <li>10M ops/sec sustained across the cluster</li>
+            <li>Sub-millisecond p99 latency per operation</li>
+            <li>Adding/removing a node remaps only a small fraction of keys, not the whole keyspace</li>
+            <li>No thundering herd on the backing database when keys expire or a node fails</li>
+          </ul>
+        </div>
+      </div>
+
+      <div class="callout warn"><strong>What NOT to build:</strong> no persistent durability guarantees like a database (data loss on full outage is acceptable), no complex query language (no joins, no secondary indexes, no range scans), no cross-datacenter replication (single-region cluster only).</div>
+
+      <div class="stat-grid">
+        <div class="stat-card"><div class="stat-val">10M/s</div><div class="stat-label">ops/sec across the cluster</div></div>
+        <div class="stat-card"><div class="stat-val">&lt;1ms</div><div class="stat-label">p99 latency target</div></div>
+        <div class="stat-card"><div class="stat-val">~200</div><div class="stat-label">cache nodes in the cluster</div></div>
+        <div class="stat-card"><div class="stat-val">2x</div><div class="stat-label">replication factor per shard</div></div>
+      </div>
+    </section>
+
+    <section id="step2-entities">
+      <div class="step-pill">Step 2 of 6 — Core Entities</div>
+      <h2>Core entities</h2>
+      <p style="font-size:13px;color:#999;margin-bottom:0.75rem">Everything here is in-memory except the ring topology metadata, which needs to be durable enough that a coordination service restart doesn't lose cluster shape.</p>
+
+      <div class="entity-grid">
+        <div class="entity-box">
+          <div class="entity-head"><span class="entity-name">CacheEntry</span><span class="entity-store redis">In-memory</span></div>
+          <div class="entity-fields">
+            <div class="entity-field"><span class="fname pk">key</span><span class="ftype">string, hashed onto ring</span></div>
+            <div class="entity-field"><span class="fname">value</span><span class="ftype">bytes, size-bounded</span></div>
+            <div class="entity-field"><span class="fname">ttl_expires_at</span><span class="ftype">epoch ms</span></div>
+            <div class="entity-field"><span class="fname">last_accessed_at</span><span class="ftype">for LRU tracking</span></div>
+          </div>
+          <div class="entity-why">Because it's the hot-path unit of work — read and written far more than any other entity, so it lives entirely in RAM with no disk round-trip. Tradeoff: a node crash loses every entry it held until a replica takes over.</div>
+        </div>
+
+        <div class="entity-box">
+          <div class="entity-head"><span class="entity-name">RingTopology</span><span class="entity-store cass">Coord service</span></div>
+          <div class="entity-fields">
+            <div class="entity-field"><span class="fname pk">node_id</span><span class="ftype">string</span></div>
+            <div class="entity-field"><span class="fname idx">vnode_hashes</span><span class="ftype">array of ring positions</span></div>
+            <div class="entity-field"><span class="fname">status</span><span class="ftype">alive / suspect / dead</span></div>
+            <div class="entity-field"><span class="fname">version</span><span class="ftype">monotonic, for gossip convergence</span></div>
+          </div>
+          <div class="entity-why">Because every client and node needs a consistent view of who owns which key range — this is metadata, not cached data, so it's held in a small, replicated coordination store, not the cache nodes themselves. Tradeoff: staleness here causes brief misrouting until gossip converges.</div>
+        </div>
+
+        <div class="entity-box">
+          <div class="entity-head"><span class="entity-name">ReplicaSet</span><span class="entity-store redis">In-memory + coord</span></div>
+          <div class="entity-fields">
+            <div class="entity-field"><span class="fname pk">shard_id</span><span class="ftype">ring range identifier</span></div>
+            <div class="entity-field"><span class="fname">primary_node</span><span class="ftype">node_id</span></div>
+            <div class="entity-field"><span class="fname">replica_nodes</span><span class="ftype">array of node_id, size = RF</span></div>
+          </div>
+          <div class="entity-why">Because a shard needs at least one standby copy to survive a primary failure without a full cache-miss storm on that shard's key range. Tradeoff: every write now costs one extra network hop for replication.</div>
+        </div>
+      </div>
+
+      <div class="callout info">Primary key: <code>CacheEntry.key</code>, hashed via consistent hashing (not a plain modulo) to determine ring position. Critical metadata index: <code>RingTopology.vnode_hashes</code> — this sorted structure is what lets any client or node answer "who owns this key" in O(log n) without asking the whole cluster.</div>
+    </section>
+
+    <section id="step3-api">
+      <div class="step-pill">Step 3 of 6 — API / Interface</div>
+      <h2>API design</h2>
+      <p style="font-size:13px;color:#999;margin-bottom:0.75rem">The client-facing API is a thin key-value contract; the interesting API is the internal one nodes use to gossip cluster membership.</p>
+
+      <div class="api-card">
+        <div class="api-line"><span class="api-method get">GET</span><span class="api-path">/cache/{key}</span><span class="api-auth">Auth: service-to-service token</span></div>
+        <div class="api-io">
+          <div class="api-io-block"><div class="api-io-label">Request</div><div class="api-io-body">key routed via client-side ring hash</div></div>
+          <div class="api-io-block"><div class="api-io-label">Response</div><div class="api-io-body">{ value, ttl_remaining_ms } or 404 on miss</div></div>
+        </div>
+      </div>
+
+      <div class="api-card">
+        <div class="api-line"><span class="api-method post">PUT</span><span class="api-path">/cache/{key}</span><span class="api-auth">Auth: service-to-service token</span></div>
+        <div class="api-io">
+          <div class="api-io-block"><div class="api-io-label">Request</div><div class="api-io-body">{ value, ttl_seconds }</div></div>
+          <div class="api-io-block"><div class="api-io-label">Response</div><div class="api-io-body">200 once primary + at least one replica ack</div></div>
+        </div>
+      </div>
+
+      <div class="api-card">
+        <div class="api-line"><span class="api-method delete">DELETE</span><span class="api-path">/cache/{key}</span><span class="api-auth">Auth: service-to-service token</span></div>
+        <div class="api-io">
+          <div class="api-io-block"><div class="api-io-label">Request</div><div class="api-io-body">no body</div></div>
+          <div class="api-io-block"><div class="api-io-label">Response</div><div class="api-io-body">204 whether or not the key existed</div></div>
+        </div>
+      </div>
+
+      <div class="api-card">
+        <div class="api-line"><span class="api-method ws">GOSSIP</span><span class="api-path">/internal/membership/sync</span><span class="api-auth">Auth: node-to-node mTLS</span></div>
+        <div class="api-io">
+          <div class="api-io-block"><div class="api-io-label">Message out</div><div class="api-io-body">{ node_id, vnode_hashes, status, version }</div></div>
+          <div class="api-io-block"><div class="api-io-label">Cadence</div><div class="api-io-body">every ~1s to a random peer subset (gossip fanout)</div></div>
+        </div>
+      </div>
+
+      <div class="callout good">Clients embed a thin ring-aware library rather than calling a proxy — hashing the key locally and connecting directly to the owning node skips an extra network hop, which matters when the latency budget is sub-millisecond.</div>
+    </section>
+
+    <section id="step4-dataflow">
+      <div class="step-pill">Step 4 of 6 — Data Flow</div>
+      <h2>Data flow</h2>
+      <p style="font-size:13px;color:#999;margin-bottom:0.75rem">Writes (blue) hash to the owning node then replicate to a standby; reads (mint) hash to the same owning node and return directly — no replication hop needed on the read path.</p>
+
+      <div class="diagram-wrap" data-paths='{"write":{"boxes":["w-client","w-hash","w-primary","w-replica"],"arrows":["w1","w2","w3"]},"read":{"boxes":["r-client","r-hash","r-primary"],"arrows":["r1","r2"]}}'>
+        <svg viewBox="0 0 740 220" xmlns="http://www.w3.org/2000/svg">
+          <defs>
+            <marker id="dcFlowW" markerWidth="8" markerHeight="8" refX="6" refY="3" orient="auto"><path d="M0,0 L6,3 L0,6 Z" fill="var(--blue)"/></marker>
+            <marker id="dcFlowR" markerWidth="8" markerHeight="8" refX="6" refY="3" orient="auto"><path d="M0,0 L6,3 L0,6 Z" fill="var(--accent)"/></marker>
+          </defs>
+
+          <text class="diag-sublabel" x="150" y="14" style="font-size:10px;fill:var(--blue)">WRITE PATH — PUT /cache/{key}</text>
+          <g data-target="step6-deepdive-ring" data-id="w-client" data-tip="Ring-aware client library, holds a copy of the topology"><rect class="diag-box role-client" x="10" y="24" width="110" height="46"/><text class="diag-label" x="65" y="47" style="font-size:11px">Client Lib</text></g>
+          <path class="diag-arrow-path" data-id="w1" d="M120,47 L155,47" marker-end="url(#dcFlowW)"/>
+          <g data-target="step6-deepdive-ring" data-id="w-hash" data-tip="Hashes key onto the ring, finds next node clockwise"><rect class="diag-box" x="155" y="24" width="110" height="46"/><text class="diag-label" x="210" y="47" style="font-size:11px">Ring Hash</text></g>
+          <path class="diag-arrow-path" data-id="w2" d="M265,47 L300,47" marker-end="url(#dcFlowW)"/>
+          <g data-target="step5-hld" data-id="w-primary" data-tip="Owning node for this key's ring position"><rect class="diag-box role-cache" x="300" y="24" width="130" height="46"/><text class="diag-label" x="365" y="47" style="font-size:11px">Primary Node</text></g>
+          <path class="diag-arrow-path" data-id="w3" d="M430,47 L465,47" marker-end="url(#dcFlowW)"/>
+          <g data-target="step5-hld" data-id="w-replica" data-tip="Async or sync replicate before ack, per consistency setting"><rect class="diag-box role-cache" x="465" y="24" width="130" height="46"/><text class="diag-label" x="530" y="47" style="font-size:11px">Replica Node</text></g>
+          <circle class="diag-dot diag-flow-dot" data-flow="write" r="3.5" style="offset-path: path('M10,47 L120,47 L120,47 L300,47 L300,47 L465,47')"></circle>
+
+          <text class="diag-sublabel" x="140" y="105" style="font-size:10px;fill:var(--accent)">READ PATH — GET /cache/{key}</text>
+          <g data-target="step6-deepdive-ring" data-id="r-client" data-tip="Same client library, same ring lookup logic"><rect class="diag-box role-client" x="10" y="115" width="110" height="46"/><text class="diag-label" x="65" y="143" style="font-size:11px">Client Lib</text></g>
+          <path class="diag-arrow-path" data-id="r1" d="M120,138 L155,138" marker-end="url(#dcFlowR)"/>
+          <g data-target="step6-deepdive-ring" data-id="r-hash" data-tip="Same deterministic hash — reads and writes agree on ownership"><rect class="diag-box" x="155" y="115" width="110" height="46"/><text class="diag-label" x="210" y="143" style="font-size:11px">Ring Hash</text></g>
+          <path class="diag-arrow-path" data-id="r2" d="M265,138 L300,138" marker-end="url(#dcFlowR)"/>
+          <g data-target="step5-hld" data-id="r-primary" data-tip="Returns value directly from RAM, no replication hop needed"><rect class="diag-box role-cache" x="300" y="115" width="130" height="46"/><text class="diag-label" x="365" y="143" style="font-size:11px">Primary Node</text></g>
+          <circle class="diag-dot diag-flow-dot" data-flow="read" r="3.5" style="offset-path: path('M10,138 L120,138 L120,138 L300,138')"></circle>
+        </svg>
+        <div class="diag-legend">
+          <div class="diag-legend-item"><span class="diag-legend-dot role-client"></span>Client library — hashes locally, no proxy hop</div>
+          <div class="diag-legend-item"><span class="diag-legend-dot role-cache"></span>Cache nodes — primary owns the shard, replica is standby</div>
+        </div>
+      </div>
+
+      <ol class="flow-steps-list">
+        <li><span>Client hashes the key</span> — onto the consistent-hashing ring using the locally cached topology</li>
+        <li><span>Request routes directly to the owning node</span> — no intermediate proxy or load balancer hop</li>
+        <li><span>Write replicates to the shard's replica(s)</span> — synchronously or asynchronously depending on the consistency dial</li>
+        <li><span>Read returns straight from the primary's memory</span> — sub-millisecond since it's a single RAM lookup</li>
+        <li><span>On primary failure, client retries against the promoted replica</span> — using the same ring lookup with updated topology</li>
+      </ol>
+    </section>
+
+    <section id="step5-hld">
+      <div class="step-pill">Step 5 of 6 — High-Level Design</div>
+      <h2>High-level design</h2>
+      <p style="font-size:13px;color:#999;margin-bottom:0.75rem">Client library, sharded cache nodes with primary/replica pairs, a gossip-based membership layer for topology, and a backing database that the cache shields from load.</p>
+
+      <div class="diagram-wrap">
+        <svg viewBox="0 0 780 320" xmlns="http://www.w3.org/2000/svg">
+          <defs><marker id="dcHldArrow" markerWidth="8" markerHeight="8" refX="6" refY="3" orient="auto"><path d="M0,0 L6,3 L0,6 Z" fill="var(--border2)"/></marker></defs>
+
+          <g data-tip="Ring-aware, holds cached copy of cluster topology"><rect class="diag-box role-client" x="10" y="30" width="140" height="50"/><text class="diag-label" x="80" y="52" style="font-size:11px">Client Library</text><text class="diag-sublabel" x="80" y="68" style="font-size:8.5px">consistent-hash aware</text></g>
+
+          <path class="diag-arrow-path" d="M150,55 L185,55" marker-end="url(#dcHldArrow)"/>
+          <g data-tip="Owns shard A's key range"><rect class="diag-box role-cache" x="185" y="20" width="130" height="46"/><text class="diag-label" x="250" y="43" style="font-size:11px">Cache Node 1</text><text class="diag-sublabel" x="250" y="57" style="font-size:8px">shard A — primary</text></g>
+          <path class="diag-arrow-path" d="M150,80 L185,110" marker-end="url(#dcHldArrow)"/>
+          <g data-tip="Owns shard B's key range"><rect class="diag-box role-cache" x="185" y="90" width="130" height="46"/><text class="diag-label" x="250" y="113" style="font-size:11px">Cache Node 2</text><text class="diag-sublabel" x="250" y="127" style="font-size:8px">shard B — primary</text></g>
+          <path class="diag-arrow-path" d="M150,105 L185,170" marker-end="url(#dcHldArrow)"/>
+          <g data-tip="Owns shard C's key range"><rect class="diag-box role-cache" x="185" y="160" width="130" height="46"/><text class="diag-label" x="250" y="183" style="font-size:11px">Cache Node 3</text><text class="diag-sublabel" x="250" y="197" style="font-size:8px">shard C — primary</text></g>
+
+          <path class="diag-arrow-path" d="M315,43 L350,90" marker-end="url(#dcHldArrow)" stroke-dasharray="3 3"/>
+          <path class="diag-arrow-path" d="M315,113 L350,113" marker-end="url(#dcHldArrow)" stroke-dasharray="3 3"/>
+          <path class="diag-arrow-path" d="M315,183 L350,140" marker-end="url(#dcHldArrow)" stroke-dasharray="3 3"/>
+          <g data-tip="Standby copies — one per shard, replication factor 2"><rect class="diag-box role-cache" x="350" y="95" width="140" height="50"/><text class="diag-label" x="420" y="117" style="font-size:11px">Replica Nodes</text><text class="diag-sublabel" x="420" y="133" style="font-size:8px">1 per shard, RF=2</text></g>
+
+          <path class="diag-arrow-path" d="M250,66 L250,250" marker-end="url(#dcHldArrow)" stroke-dasharray="2 3"/>
+          <path class="diag-arrow-path" d="M250,206 L250,250" marker-end="url(#dcHldArrow)" stroke-dasharray="2 3"/>
+          <g data-tip="Gossip protocol or ZooKeeper/etcd — tracks ring topology, node health"><rect class="diag-box role-async" x="140" y="250" width="220" height="50"/><text class="diag-label" x="250" y="272" style="font-size:11px">Coordination / Membership</text><text class="diag-sublabel" x="250" y="288" style="font-size:8px">gossip protocol or etcd/ZooKeeper</text></g>
+
+          <path class="diag-arrow-path" d="M490,120 L525,60" marker-end="url(#dcHldArrow)"/>
+          <path class="diag-arrow-path" d="M150,55 L525,60" marker-end="url(#dcHldArrow)" stroke-dasharray="3 3"/>
+          <g data-tip="Only hit on a cache miss — request coalescing shields it from thundering herd"><rect class="diag-box role-db" x="525" y="35" width="150" height="50"/><text class="diag-label" x="600" y="57" style="font-size:11px">Backing Database</text><text class="diag-sublabel" x="600" y="73" style="font-size:8px">source of truth, miss path only</text></g>
+
+          <path class="diag-arrow-path" d="M360,275 L680,275 L680,90" marker-end="url(#dcHldArrow)" stroke-dasharray="2 3"/>
+          <text class="diag-sublabel" x="520" y="270" style="font-size:8px;fill:var(--muted)">membership also tracks DB health for failover routing</text>
+        </svg>
+        <div class="diag-legend">
+          <div class="diag-legend-item"><span class="diag-legend-dot role-client"></span>Client library — ring-topology aware, routes directly</div>
+          <div class="diag-legend-item"><span class="diag-legend-dot role-cache"></span>Cache nodes — sharded via consistent hashing, primary + replica</div>
+          <div class="diag-legend-item"><span class="diag-legend-dot role-async"></span>Coordination layer — decoupled from the hot read/write path</div>
+          <div class="diag-legend-item"><span class="diag-legend-dot role-db"></span>Backing database — only touched on a miss</div>
+        </div>
+      </div>
+
+      <table class="def-table">
+        <thead><tr><th>Component</th><th>Role</th><th>Tech + why</th></tr></thead>
+        <tbody>
+          <tr><td>Client Library</td><td>Ring-aware routing</td><td>Embedded consistent-hashing client — because routing at the client skips a proxy hop, which matters directly against a sub-millisecond p99 budget; tradeoff is every client needs topology updates pushed to it.</td></tr>
+          <tr><td>Cache Nodes</td><td>In-memory key-value storage, sharded</td><td>Consistent hashing ring with virtual nodes — because it bounds key remapping to a small arc on add/remove instead of the whole keyspace; tradeoff is extra memory and gossip overhead per vnode.</td></tr>
+          <tr><td>Replica Nodes</td><td>Standby copy per shard</td><td>Async or semi-sync replication — because losing a primary shouldn't mean losing that shard's data or availability; tradeoff is replica lag under strict eventual consistency.</td></tr>
+          <tr><td>Coordination / Membership</td><td>Tracks ring topology and node health</td><td>Gossip protocol (or a config service like ZooKeeper/etcd) — because nodes and clients need a shared, eventually-consistent view of who owns what; tradeoff is convergence lag during topology changes.</td></tr>
+          <tr><td>Backing Database</td><td>Source of truth on a miss</td><td>Whatever durable store the cache sits in front of — because the cache is not durable by design; tradeoff is it must be protected from simultaneous miss storms.</td></tr>
+        </tbody>
+      </table>
+
+      <table class="grid-table">
+        <thead><tr><th>Bottleneck</th><th>Triggers at</th><th>Exact fix</th></tr></thead>
+        <tbody>
+          <tr><td>Single shard hot key</td><td>One key gets disproportionate traffic vs the rest of its shard</td><td class="fix">Client-side local caching for that key, or split it into N sub-keys hashed to different shards</td></tr>
+          <tr><td>Gossip convergence lag</td><td>Large cluster (200+ nodes) or high churn (frequent adds/removes)</td><td class="fix">Increase gossip fanout, shorten gossip interval, or move to a centralized but replicated config service</td></tr>
+          <tr><td>Coordination service overload</td><td>Every node polling it instead of gossiping peer-to-peer</td><td class="fix">Push to gossip-based membership so nodes only sync with a random peer subset, not a central service</td></tr>
+        </tbody>
+      </table>
+
+      <h3 style="font-size:13px;color:var(--text);margin:1.25rem 0 0.6rem;font-weight:600">Scaling levers — cheapest to most complex</h3>
+      <ol class="levers-list">
+        <li><strong>Increase virtual nodes per physical node</strong> for smoother key distribution<span class="cost">low complexity</span></li>
+        <li><strong>Add read replicas per shard</strong> for read-heavy hot shards<span class="cost">low complexity</span></li>
+        <li><strong>Client-side local (L1) cache</strong> for the hottest handful of keys<span class="cost">medium complexity</span></li>
+        <li><strong>Grow the ring</strong> by adding physical nodes, remapping only adjacent arcs<span class="cost">medium complexity</span></li>
+        <li><strong>Move from centralized coordinator to gossip-based membership</strong> at very large cluster sizes<span class="cost">high complexity — last resort</span></li>
+      </ol>
+
+      <div class="dial-wrap">
+        <div class="dial-title">Consistency: strong vs eventual for replica reads</div>
+        <div class="dial-track"><div class="dial-marker" style="left:82%"></div></div>
+        <div class="dial-labels"><span class="end-left">Strong</span><span class="end-right">Eventual</span></div>
+      </div>
+      <div class="dial-wrap">
+        <div class="dial-title">Eviction policy: LRU vs LFU under memory pressure</div>
+        <div class="dial-track"><div class="dial-marker" style="left:30%"></div></div>
+        <div class="dial-labels"><span class="end-left">LRU</span><span class="end-right">LFU</span></div>
+      </div>
+    </section>
+
+    <section id="step6-deepdive-ring">
+      <div class="step-pill">Step 6 of 6 — Deep Dives</div>
+      <h2>Deep dive: consistent hashing ring</h2>
+      <p style="font-size:13px;color:#999;margin-bottom:0.75rem">Nodes and keys both hash onto the same circular keyspace. A key is owned by the first node found moving clockwise. Virtual nodes (vnodes) spread each physical node's ownership around the ring so load stays even.</p>
+
+      <div class="diagram-wrap">
+        <svg viewBox="0 0 480 480" xmlns="http://www.w3.org/2000/svg">
+          <defs><marker id="ringArrow" markerWidth="8" markerHeight="8" refX="6" refY="3" orient="auto"><path d="M0,0 L6,3 L0,6 Z" fill="var(--muted)"/></marker></defs>
+          <text class="diag-sublabel" x="240" y="18" style="font-size:10px;fill:var(--muted)">HASH RING — 0 to 2^32, wraps around</text>
+
+          <circle cx="240" cy="250" r="170" fill="none" stroke="var(--border2)" stroke-width="2"/>
+
+          <!-- vnodes for Node A (mint) -->
+          <circle cx="240" cy="80" r="7" class="diag-box role-cache" style="fill:var(--surface)"/>
+          <text class="diag-sublabel" x="240" y="65" style="font-size:8.5px;fill:var(--accent)">A-v1</text>
+          <circle cx="378" cy="163" r="7" class="diag-box role-cache" style="fill:var(--surface)"/>
+          <text class="diag-sublabel" x="400" y="163" style="font-size:8.5px;fill:var(--accent)">A-v2</text>
+          <circle cx="145" cy="360" r="7" class="diag-box role-cache" style="fill:var(--surface)"/>
+          <text class="diag-sublabel" x="110" y="378" style="font-size:8.5px;fill:var(--accent)">A-v3</text>
+
+          <!-- vnodes for Node B (blue) -->
+          <circle cx="378" cy="337" r="7" class="diag-box role-client" style="fill:var(--surface)"/>
+          <text class="diag-sublabel" x="400" y="352" style="font-size:8.5px;fill:var(--blue)">B-v1</text>
+          <circle cx="102" cy="163" r="7" class="diag-box role-client" style="fill:var(--surface)"/>
+          <text class="diag-sublabel" x="60" y="163" style="font-size:8.5px;fill:var(--blue)">B-v2</text>
+          <circle cx="240" cy="420" r="7" class="diag-box role-client" style="fill:var(--surface)"/>
+          <text class="diag-sublabel" x="240" y="438" style="font-size:8.5px;fill:var(--blue)">B-v3</text>
+
+          <!-- vnodes for Node C (amber) -->
+          <circle cx="145" cy="140" r="7" class="diag-box role-async" style="fill:var(--surface)"/>
+          <text class="diag-sublabel" x="105" y="130" style="font-size:8.5px;fill:var(--amber)">C-v1</text>
+          <circle cx="335" cy="360" r="7" class="diag-box role-async" style="fill:var(--surface)"/>
+          <text class="diag-sublabel" x="358" y="378" style="font-size:8.5px;fill:var(--amber)">C-v2</text>
+          <circle cx="335" cy="140" r="7" class="diag-box role-async" style="fill:var(--surface)"/>
+          <text class="diag-sublabel" x="358" y="128" style="font-size:8.5px;fill:var(--amber)">C-v3</text>
+
+          <!-- keys hashed onto the ring -->
+          <circle cx="300" cy="100" r="4" fill="var(--text)"/>
+          <text class="diag-sublabel" x="300" y="90" style="font-size:8px">key:"user:42"</text>
+          <path d="M300,100 A170,170 0 0,1 378,163" fill="none" stroke="var(--text)" stroke-width="1" stroke-dasharray="2 2" marker-end="url(#ringArrow)"/>
+
+          <circle cx="200" cy="405" r="4" fill="var(--text)"/>
+          <text class="diag-sublabel" x="200" y="418" style="font-size:8px">key:"sess:9a1"</text>
+          <path d="M200,405 A170,170 0 0,1 240,420" fill="none" stroke="var(--text)" stroke-width="1" stroke-dasharray="2 2" marker-end="url(#ringArrow)"/>
+
+          <text class="diag-sublabel" x="240" y="255" style="font-size:9px;fill:var(--muted)" text-anchor="middle">key owned by next</text>
+          <text class="diag-sublabel" x="240" y="267" style="font-size:9px;fill:var(--muted)" text-anchor="middle">vnode found clockwise</text>
+        </svg>
+        <div class="diag-legend">
+          <div class="diag-legend-item"><span class="diag-legend-dot role-cache"></span>Node A's 3 vnodes — spread around the ring for even load</div>
+          <div class="diag-legend-item"><span class="diag-legend-dot role-client"></span>Node B's 3 vnodes</div>
+          <div class="diag-legend-item"><span class="diag-legend-dot role-async"></span>Node C's 3 vnodes</div>
+        </div>
+      </div>
+
+      <ol class="flow-steps-list">
+        <li><span>Every physical node gets many vnodes</span> — hashing the node ID with several salts places dozens-to-hundreds of points per node around the ring</li>
+        <li><span>A key is hashed to a single ring position</span> — the same hash function used for nodes, so keys and nodes share one keyspace</li>
+        <li><span>Ownership is "next vnode clockwise"</span> — walk the ring from the key's position until a vnode is found; that vnode's physical node owns the key</li>
+        <li><span>Adding a node only remaps its adjacent arc</span> — new vnodes slice into existing arcs, and only the keys that fell in the sliced portion move; everything else is untouched</li>
+        <li><span>Removing a node merges its arc into the next vnode clockwise</span> — again, only that node's keys remap, bounded to roughly 1/N of the keyspace, not all of it</li>
+      </ol>
+      <div class="callout good">This is the entire reason to use consistent hashing over a plain <code>hash(key) % N</code> scheme: with modulo hashing, changing N reshuffles almost every key. With a ring, changing node count only touches the keys owned by the adjacent arc — typically ~1/N of the keyspace.</div>
+    </section>
+
+    <section id="step6-deepdive-eviction">
+      <h2>Deep dive: eviction and invalidation</h2>
+      <p style="font-size:13px;color:#999;margin-bottom:0.75rem">Two separate questions: which entries get evicted under memory pressure (LRU vs LFU), and how the cache stays consistent with the backing store as data changes (write-through vs write-back vs cache-aside). TTL expiry is a third, independent mechanism that interacts with both.</p>
+
+      <table class="grid-table">
+        <thead><tr><th>Eviction policy</th><th>Evicts</th><th>Good for</th><th>Weak point</th></tr></thead>
+        <tbody>
+          <tr><td>LRU (Least Recently Used)</td><td class="detect">Oldest-accessed entry first</td><td class="fix">Simple, cheap to implement (linked list + hash map)</td><td class="impact">A single large scan can evict genuinely hot keys</td></tr>
+          <tr><td>LFU (Least Frequently Used)</td><td class="detect">Lowest access-count entry first</td><td class="fix">Resists scan pollution, protects truly hot keys</td><td class="impact">More bookkeeping; slow-to-decay counts can keep stale-but-once-popular keys too long</td></tr>
+        </tbody>
+      </table>
+
+      <table class="def-table" style="margin-top:0.75rem">
+        <thead><tr><th>Write pattern</th><th>Consistency behavior</th><th>Tradeoff</th></tr></thead>
+        <tbody>
+          <tr><td>Cache-aside</td><td>App checks cache, on miss reads DB and populates cache; writes go straight to DB and the cache entry is invalidated</td><td>Simplest pattern, but a brief inconsistency window exists between DB write and cache invalidation.</td></tr>
+          <tr><td>Write-through</td><td>Every write goes to the cache first, which synchronously writes through to the DB before acknowledging</td><td>Cache and DB never disagree, but every write pays DB latency — no write-speed benefit from the cache.</td></tr>
+          <tr><td>Write-back</td><td>Write lands in the cache and is acknowledged immediately; DB write happens asynchronously afterward</td><td>Fastest writes, but a cache node failure before flush can lose data the client thinks is durable.</td></tr>
+        </tbody>
+      </table>
+
+      <div class="callout info">TTL expiry and eviction are independent triggers for the same outcome — a key can be evicted early under memory pressure even with time left on its TTL, or it can sit untouched at low memory and still expire exactly at its TTL. Both paths must trigger the same invalidation/refetch logic, or a candidate leaves consistency bugs at the boundary.</div>
+    </section>
+
+    <section id="step6-deepdive-thunderingherd">
+      <h2>Deep dive: thundering herd protection</h2>
+      <p style="font-size:13px;color:#999;margin-bottom:0.75rem">A hot key expiring or a node dying can turn thousands of simultaneous cache misses into thousands of simultaneous identical database queries — the database sees a spike that looks like an attack.</p>
+
+      <div class="diagram-wrap">
+        <svg viewBox="0 0 720 260" xmlns="http://www.w3.org/2000/svg">
+          <defs>
+            <marker id="thBad" markerWidth="8" markerHeight="8" refX="6" refY="3" orient="auto"><path d="M0,0 L6,3 L0,6 Z" fill="var(--red)"/></marker>
+            <marker id="thGood" markerWidth="8" markerHeight="8" refX="6" refY="3" orient="auto"><path d="M0,0 L6,3 L0,6 Z" fill="var(--accent)"/></marker>
+          </defs>
+
+          <text class="diag-sublabel" x="150" y="16" style="font-size:10px;fill:var(--red)">WITHOUT PROTECTION</text>
+          <g data-tip="1,000s of clients all requesting the same expired hot key"><rect class="diag-box role-client" x="10" y="30" width="150" height="46"/><text class="diag-label" x="85" y="53" style="font-size:11px">1,000s of Clients</text></g>
+          <path class="diag-arrow-path" d="M160,53 L195,53" marker-end="url(#thBad)"/>
+          <g data-tip="Every request misses the same key at the same instant"><rect class="diag-box role-cache" x="195" y="30" width="130" height="46"/><text class="diag-label" x="260" y="53" style="font-size:11px">Cache (miss)</text></g>
+          <path class="diag-arrow-path" d="M325,53 L360,53" marker-end="url(#thBad)" style="stroke:var(--red)"/>
+          <g data-tip="All 1,000s of misses hit the DB simultaneously — thundering herd"><rect class="diag-box role-db" x="360" y="30" width="150" height="46" style="stroke:var(--red)"/><text class="diag-label" x="435" y="53" style="font-size:11px">Database</text><text class="diag-sublabel" x="435" y="69" style="font-size:8px;fill:var(--red)">overwhelmed</text></g>
+
+          <text class="diag-sublabel" x="150" y="122" style="font-size:10px;fill:var(--accent)">WITH REQUEST COALESCING</text>
+          <g data-tip="Same 1,000s of clients, same expired key"><rect class="diag-box role-client" x="10" y="136" width="150" height="46"/><text class="diag-label" x="85" y="159" style="font-size:11px">1,000s of Clients</text></g>
+          <path class="diag-arrow-path" d="M160,159 L195,159" marker-end="url(#thGood)"/>
+          <g data-tip="Single-flight: first miss registers an in-flight marker for the key"><rect class="diag-box role-cache" x="195" y="136" width="150" height="46"/><text class="diag-label" x="270" y="155" style="font-size:11px">Cache + Coalescer</text><text class="diag-sublabel" x="270" y="171" style="font-size:8px">single-flight per key</text></g>
+          <path class="diag-arrow-path" d="M345,159 L380,159" marker-end="url(#thGood)"/>
+          <g data-tip="Only ONE request per key reaches the DB; rest wait on it"><rect class="diag-box role-db" x="380" y="136" width="150" height="46"/><text class="diag-label" x="455" y="155" style="font-size:11px">Database</text><text class="diag-sublabel" x="455" y="171" style="font-size:8px;fill:var(--accent)">1 query, not 1,000s</text></g>
+          <path class="diag-arrow-path" d="M270,182 L270,215" marker-end="url(#thGood)"/>
+          <g data-tip="Result fans back out to every waiting client from the single fetch"><rect class="diag-box role-async" x="195" y="215" width="150" height="38"/><text class="diag-label" x="270" y="238" style="font-size:10.5px">Fan-out result to waiters</text></g>
+        </svg>
+        <div class="diag-legend">
+          <div class="diag-legend-item"><span class="diag-legend-dot role-client"></span>Clients — many simultaneous requesters for one key</div>
+          <div class="diag-legend-item"><span class="diag-legend-dot role-cache"></span>Cache + coalescer — collapses concurrent misses into one fetch</div>
+          <div class="diag-legend-item"><span class="diag-legend-dot role-db"></span>Database — protected from duplicate simultaneous load</div>
+        </div>
+      </div>
+
+      <ol class="flow-steps-list">
+        <li><span>First miss on a key registers an in-flight marker</span> — request coalescing/single-flight: subsequent misses for the same key see the marker and wait instead of re-querying</li>
+        <li><span>Only one request actually reaches the database</span> — its result is cached and fanned out to every client that was waiting</li>
+        <li><span>TTLs are staggered with jitter</span> — instead of every replica of a dataset expiring at exactly T+60s, each gets T+60s ± random jitter so misses spread out over time</li>
+        <li><span>Stale-while-revalidate serves the old value during refresh</span> — a client gets the slightly-stale cached value immediately while one background request refreshes it, instead of everyone blocking on a fresh fetch</li>
+        <li><span>Node failure triggers the same coalescing on the promoted replica</span> — the replica that takes over a dead primary's shard applies identical single-flight logic rather than accepting every re-routed request as a fresh miss</li>
+      </ol>
+      <div class="callout danger">Request coalescing must be scoped correctly — coalescing across different keys (not just the same key) either does nothing useful or, worse, serves the wrong value to the wrong request. The single-flight lock key must be the exact cache key.</div>
+
+      <table class="grid-table" style="margin-top:1rem">
+        <thead><tr><th>Failure mode</th><th>User impact</th><th>Detection signal</th><th>Mitigation</th></tr></thead>
+        <tbody>
+          <tr><td>Cache node fails, shard temporarily unavailable</td><td class="impact">Brief latency spike, not full unavailability</td><td class="detect">Node health check fails in gossip/membership layer</td><td class="fix">Replica promotion for that shard; client library re-routes using updated ring topology within one gossip cycle</td></tr>
+          <tr><td>Hot key overwhelms a single shard</td><td class="impact">One shard's latency degrades while others stay healthy</td><td class="detect">Per-shard QPS metrics show one shard far above the mean</td><td class="fix">Client-side local caching for that key, or split it into N sub-keys hashed across multiple shards</td></tr>
+          <tr><td>Coordination/membership service becomes a bottleneck</td><td class="impact">Slow or stale topology updates cluster-wide</td><td class="detect">Rising node-to-coordinator request latency or a growing gossip convergence delay</td><td class="fix">Move from a centralized coordinator to gossip-based membership so nodes sync peer-to-peer instead of all hitting one service</td></tr>
+        </tbody>
+      </table>
+    </section>
+
+    <section id="interview-moves">
+      <h2>Interview moves</h2>
+      <ul class="moves-list">
+        <li><span class="move-num">01</span><div><strong>"The hard part here isn't storing key/value — it's distributing keys across nodes so adding or removing one remaps the minimum number of keys, which means consistent hashing, not modulo hashing"</strong> — states the core insight unprompted</div></li>
+        <li><span class="move-num">02</span><div><strong>"I'd use virtual nodes so each physical node owns many small arcs of the ring instead of one big one — that keeps load even as the cluster grows"</strong> — shows you know the practical refinement, not just the textbook algorithm</div></li>
+        <li><span class="move-num">03</span><div><strong>"A node failure should cause a brief latency spike from replica promotion, not full unavailability of that shard's keys"</strong> — frames failure handling around replication, not just retries</div></li>
+        <li><span class="move-num">04</span><div><strong>"When a hot key expires, I don't want a thundering herd — I'd add request coalescing so only one request per key reaches the database while the rest wait on it"</strong> — names the specific failure and the specific mechanism</div></li>
+        <li><span class="move-num">05</span><div><strong>"I'd jitter TTLs so a batch of keys written together don't all expire at the exact same millisecond"</strong> — proactively surfaces a subtle correlated-failure mode</div></li>
+        <li><span class="move-num">06</span><div><strong>"The coordination layer tracking cluster topology can't be a single point of failure itself — I'd lean toward gossip over a single centralized coordinator at this scale"</strong> — extends the design's own failure-tolerance principle to its own control plane</div></li>
+      </ul>
+    </section>
+
+    <section id="follow-ups">
+      <h2>Follow-up questions</h2>
+      <div class="qa-block">
+        <div class="qa-q">How do virtual nodes actually improve load distribution?</div>
+        <div class="qa-a">Without vnodes, one unlucky hash placement can give a node a disproportionate arc; with dozens of vnodes per physical node, individual bad placements average out across the whole node.</div>
+      </div>
+      <div class="qa-block">
+        <div class="qa-q">How would you handle a client with a stale view of the ring topology?</div>
+        <div class="qa-a">The owning node detects it doesn't actually own the key, returns a redirect/hint with the correct node, and the client refreshes its topology copy from the coordination layer.</div>
+      </div>
+      <div class="qa-block">
+        <div class="qa-q">Why not just always use strong consistency for replica reads?</div>
+        <div class="qa-a">Strong consistency means every read waits on cross-replica confirmation, which conflicts directly with a sub-millisecond latency target — eventual consistency is the deliberate tradeoff for speed.</div>
+      </div>
+      <div class="qa-block">
+        <div class="qa-q">What happens if the coordination service itself goes down?</div>
+        <div class="qa-a">With gossip-based membership, nodes keep operating on their last-known topology and keep converging peer-to-peer; a centralized coordinator instead needs its own HA setup (e.g. a Raft-backed quorum).</div>
+      </div>
+      <div class="qa-block">
+        <div class="qa-q">How do you decide between write-through and write-back?</div>
+        <div class="qa-a">Write-through when losing an unflushed write is unacceptable; write-back when write latency matters more and a short data-loss window on cache-node crash is tolerable.</div>
+      </div>
+      <div class="qa-block">
+        <div class="qa-q">How would you detect a hot key before it becomes a problem?</div>
+        <div class="qa-a">Sample per-key access counts on each node with a rolling window; a key crossing a threshold relative to its shard's average triggers client-side caching or key-splitting proactively.</div>
+      </div>
+    </section>
+
+  </main>
+  <script src="../../assets/nav.js"></script>
+</body>
+</html>

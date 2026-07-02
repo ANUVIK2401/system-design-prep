@@ -1,0 +1,443 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Design a Metrics Monitoring & Alerting System — SD Prep</title>
+  <link rel="stylesheet" href="../../assets/style.css">
+</head>
+<body>
+  <aside id="sidebar"></aside>
+  <main>
+
+    <header class="page-head">
+      <div class="pill">Questions</div>
+      <h1>Design a Metrics Monitoring & Alerting System</h1>
+      <p class="sub">Tests whether you separate a write-scale time-series storage problem (millions of points/sec) from a latency-critical alerting problem instead of serving both off the same slow query path.</p>
+      <div class="meta-row">
+        <span class="badge green">45-55 min interview</span>
+        <span class="badge blue">Hard</span>
+      </div>
+    </header>
+
+    <div class="flash-card">
+      <div class="flash-label">Say this in the first 2 minutes</div>
+      <ul>
+        <li>The core insight: this is a time-series data problem at extreme write scale — write throughput and query flexibility pull in opposite directions, which forces specialized TSDB storage instead of a general-purpose database</li>
+        <li>Key scale number to anchor on: 10M metric data points/sec across the fleet, which rules out row-oriented storage and demands columnar, compressed, downsampled layout</li>
+        <li>Primary tradeoff being probed: query freshness vs storage cost — high-resolution data is expensive to keep forever, so old data gets progressively downsampled</li>
+        <li>Component most candidates forget: alerting cannot share the same query path as dashboards — a &lt;1 minute evaluation latency target means a separate low-latency streaming path is mandatory</li>
+        <li>Failure mode most candidates skip: cardinality explosion — one bad label (like user_id) can take down the whole TSDB index, not just one metric</li>
+      </ul>
+    </div>
+
+    <section id="step1-requirements">
+      <div class="step-pill">Step 1 of 6 — Requirements</div>
+      <h2>Requirements</h2>
+
+      <div class="goal-arc-wrap">
+        <div class="goal-arc-row functional">
+          <div class="goal-arc-seg">1</div><div class="goal-arc-seg">2</div><div class="goal-arc-seg">3</div><div class="goal-arc-seg">4</div><div class="goal-arc-seg">5</div><div class="goal-arc-seg inactive">6</div>
+        </div>
+        <div class="goal-arc-label"><span>Arc 1 (steps 1-5) — <strong>Satisfy Functional Requirements</strong></span></div>
+        <div class="goal-arc-row nonfunctional" style="margin-top:8px">
+          <div class="goal-arc-seg">1</div><div class="goal-arc-seg">2</div><div class="goal-arc-seg">3</div><div class="goal-arc-seg">4</div><div class="goal-arc-seg">5</div><div class="goal-arc-seg">6</div>
+        </div>
+        <div class="goal-arc-label"><span>Arc 2 (all 6 steps) — <strong>Satisfy Non-Functional Requirements</strong></span></div>
+      </div>
+
+      <div class="compare-grid">
+        <div class="compare-card good">
+          <div class="compare-label">Functional</div>
+          <ul>
+            <li>Agents/services emit metric data points (name, value, labels, timestamp)</li>
+            <li>Dashboards query arbitrary time ranges and label-dimension aggregations</li>
+            <li>Users define alert rules (threshold + evaluation window) on any metric</li>
+            <li>Alerts fire notifications within a tight latency bound of a threshold breach</li>
+          </ul>
+        </div>
+        <div class="compare-card bad">
+          <div class="compare-label">Non-Functional</div>
+          <ul>
+            <li>10M metric data points/sec ingested across the fleet</li>
+            <li>Months of retention, with resolution degrading gracefully over time</li>
+            <li>Alert evaluation latency &lt;1 minute from threshold breach to notification</li>
+            <li>Ingestion must not silently drop data during traffic bursts — especially during incidents</li>
+          </ul>
+        </div>
+      </div>
+
+      <div class="callout warn"><strong>What NOT to build:</strong> a full distributed tracing system (spans/traces are a different data shape and product), log aggregation/search (logs are unstructured text, not numeric time series), or synthetic/uptime monitoring (external blackbox probing is a separate concern from metrics emitted by the fleet itself).</div>
+
+      <div class="stat-grid">
+        <div class="stat-card"><div class="stat-val">10M/s</div><div class="stat-label">metric data points ingested</div></div>
+        <div class="stat-card"><div class="stat-val">13 mo</div><div class="stat-label">retention (downsampled)</div></div>
+        <div class="stat-card"><div class="stat-val">&lt;1 min</div><div class="stat-label">alert evaluation latency target</div></div>
+        <div class="stat-card"><div class="stat-val">3 tiers</div><div class="stat-label">downsampling resolutions (10s/1min/1hr)</div></div>
+      </div>
+    </section>
+
+    <section id="step2-entities">
+      <div class="step-pill">Step 2 of 6 — Core Entities</div>
+      <h2>Core entities</h2>
+      <p style="font-size:13px;color:#999;margin-bottom:0.75rem">Raw and rolled-up points live in a specialized TSDB sharded by series identity; alert rule config lives in Postgres because it's low-volume and needs relational integrity.</p>
+
+      <div class="entity-grid">
+        <div class="entity-box">
+          <div class="entity-head"><span class="entity-name">MetricDataPoint</span><span class="entity-store cass">TSDB (columnar)</span></div>
+          <div class="entity-fields">
+            <div class="entity-field"><span class="fname pk">series_id</span><span class="ftype">hash(metric_name + labels)</span></div>
+            <div class="entity-field"><span class="fname idx">timestamp</span><span class="ftype">TIMESTAMP, 10s resolution</span></div>
+            <div class="entity-field"><span class="fname">value</span><span class="ftype">DOUBLE</span></div>
+            <div class="entity-field"><span class="fname">labels</span><span class="ftype">MAP&lt;TEXT,TEXT&gt; — host, region, service</span></div>
+          </div>
+          <div class="entity-why">Because 10M writes/sec of append-only numeric data needs columnar layout and compression, not row-oriented storage — a general-purpose DB would fall over on write volume alone. Tradeoff: sharded by metric name + labels, so a single high-cardinality metric can still overload one shard.</div>
+        </div>
+
+        <div class="entity-box">
+          <div class="entity-head"><span class="entity-name">RollupSeries</span><span class="entity-store cass">TSDB (long-term, S3-backed)</span></div>
+          <div class="entity-fields">
+            <div class="entity-field"><span class="fname pk">series_id</span><span class="ftype">same key space as raw</span></div>
+            <div class="entity-field"><span class="fname idx">bucket_start</span><span class="ftype">TIMESTAMP, resolution-tagged</span></div>
+            <div class="entity-field"><span class="fname">resolution</span><span class="ftype">ENUM — 10s / 1min / 1hr</span></div>
+            <div class="entity-field"><span class="fname">agg</span><span class="ftype">avg, min, max, p99 (pre-aggregated)</span></div>
+          </div>
+          <div class="entity-why">Because keeping 13 months at 10s resolution is both cost-prohibitive and pointless — nobody zooms into a second-level spike from 6 months ago. Tradeoff: querying a long historical range only ever sees aggregated values, never the original raw points.</div>
+        </div>
+
+        <div class="entity-box">
+          <div class="entity-head"><span class="entity-name">AlertRule</span><span class="entity-store pg">Postgres</span></div>
+          <div class="entity-fields">
+            <div class="entity-field"><span class="fname pk">rule_id</span><span class="ftype">UUID</span></div>
+            <div class="entity-field"><span class="fname">metric_selector</span><span class="ftype">TEXT — name + label matchers</span></div>
+            <div class="entity-field"><span class="fname">threshold</span><span class="ftype">DOUBLE, comparator (&gt;, &lt;, ==)</span></div>
+            <div class="entity-field"><span class="fname">eval_window</span><span class="ftype">INT seconds — e.g. breach for 60s</span></div>
+          </div>
+          <div class="entity-why">Because rule configuration is low-volume and relational (owned by teams, versioned, needs joins to notification channels) — ACID guarantees matter far more here than throughput. Tradeoff: the streaming alerting engine caches rules in memory and only polls Postgres for config changes, never per-evaluation.</div>
+        </div>
+      </div>
+
+      <div class="callout info">Primary key: <code>series_id</code>, a hash of metric name plus the full label set — this is the unit of sharding. Critical index: <code>(series_id, timestamp)</code> for the raw tier, and <code>(series_id, resolution, bucket_start)</code> for rollups — this is what lets a query pick the right resolution tier without scanning raw data.</div>
+    </section>
+
+    <section id="step3-api">
+      <div class="step-pill">Step 3 of 6 — API / Interface</div>
+      <h2>API design</h2>
+      <p style="font-size:13px;color:#999;margin-bottom:0.75rem">Ingestion is a high-frequency push/scrape endpoint; queries and alert rule management are ordinary REST since they're comparatively low-volume.</p>
+
+      <div class="api-card">
+        <div class="api-line"><span class="api-method post">POST</span><span class="api-path">/api/v1/metrics</span><span class="api-auth">Auth: required (agent API key)</span></div>
+        <div class="api-io">
+          <div class="api-io-block"><div class="api-io-label">Request</div><div class="api-io-body">{ points: [{ metric, labels, value, ts }] } — batched</div></div>
+          <div class="api-io-block"><div class="api-io-label">Response</div><div class="api-io-body">202 Accepted, or 400 with rejected series on cardinality limit</div></div>
+        </div>
+      </div>
+
+      <div class="api-card">
+        <div class="api-line"><span class="api-method get">GET</span><span class="api-path">/api/v1/query?metric=&range=&step=</span><span class="api-auth">Auth: required (dashboard)</span></div>
+        <div class="api-io">
+          <div class="api-io-block"><div class="api-io-label">Request</div><div class="api-io-body">metric=cpu.usage, range=6h, labels=region:us-east</div></div>
+          <div class="api-io-block"><div class="api-io-label">Response</div><div class="api-io-body">{ series: [{ ts, value }], resolution_used }</div></div>
+        </div>
+      </div>
+
+      <div class="api-card">
+        <div class="api-line"><span class="api-method post">POST</span><span class="api-path">/api/v1/alerts/rules</span><span class="api-auth">Auth: required (team owner)</span></div>
+        <div class="api-io">
+          <div class="api-io-block"><div class="api-io-label">Request</div><div class="api-io-body">{ metric_selector, threshold, comparator, eval_window }</div></div>
+          <div class="api-io-block"><div class="api-io-label">Response</div><div class="api-io-body">{ rule_id, status: "active" }</div></div>
+        </div>
+      </div>
+
+      <div class="api-card">
+        <div class="api-line"><span class="api-method get">GET</span><span class="api-path">/api/v1/alerts/active</span><span class="api-auth">Auth: required</span></div>
+        <div class="api-io">
+          <div class="api-io-block"><div class="api-io-label">Request</div><div class="api-io-body">team_id (optional filter)</div></div>
+          <div class="api-io-block"><div class="api-io-label">Response</div><div class="api-io-body">[{ rule_id, series_id, breached_since, severity }]</div></div>
+        </div>
+      </div>
+
+      <div class="callout good">Ingestion accepts batches, not single points: at 10M points/sec, one HTTP request per data point would collapse under connection overhead alone — agents buffer briefly and flush in batches of hundreds to thousands.</div>
+    </section>
+
+    <section id="step4-dataflow">
+      <div class="step-pill">Step 4 of 6 — Data Flow</div>
+      <h2>Data flow</h2>
+      <p style="font-size:13px;color:#999;margin-bottom:0.75rem">Ingestion (blue, fanning into an async downsampling path in amber) and dashboard queries (mint) are fully separate flows that only meet at the TSDB.</p>
+
+      <div class="diagram-wrap" data-paths='{"ingest":{"boxes":["d-agent","d-kafka","d-tsdb","d-rollup"],"arrows":["d1","d2","d3"]},"query":{"boxes":["q-dash","q-svc","q-tsdb"],"arrows":["q1","q2"]}}'>
+        <svg viewBox="0 0 760 220" xmlns="http://www.w3.org/2000/svg">
+          <defs>
+            <marker id="mmW" markerWidth="8" markerHeight="8" refX="6" refY="3" orient="auto"><path d="M0,0 L6,3 L0,6 Z" fill="var(--blue)"/></marker>
+            <marker id="mmA" markerWidth="8" markerHeight="8" refX="6" refY="3" orient="auto"><path d="M0,0 L6,3 L0,6 Z" fill="var(--amber)"/></marker>
+            <marker id="mmR" markerWidth="8" markerHeight="8" refX="6" refY="3" orient="auto"><path d="M0,0 L6,3 L0,6 Z" fill="var(--accent)"/></marker>
+          </defs>
+
+          <text class="diag-sublabel" x="150" y="14" style="font-size:10px;fill:var(--blue)">WRITE PATH — ingestion, ~10M points/sec</text>
+          <g data-target="step6-deepdive-cardinality" data-id="d-agent" data-tip="Scrapes or pushes metric points on an interval"><rect class="diag-box role-client" x="10" y="24" width="120" height="46"/><text class="diag-label" x="70" y="47" style="font-size:11px">Agent/Exporter</text></g>
+          <path class="diag-arrow-path" data-id="d1" d="M130,47 L165,47" marker-end="url(#mmW)"/>
+          <circle class="diag-dot diag-flow-dot" data-flow="write" r="3.5" style="offset-path: path('M130,47 L165,47')"></circle>
+          <g data-target="step5-hld" data-id="d-kafka" data-tip="Ingestion tier — buffers bursts, absorbs backpressure"><rect class="diag-box role-async" x="165" y="24" width="120" height="46"/><text class="diag-label" x="225" y="47" style="font-size:11px">Ingestion (Kafka)</text></g>
+          <path class="diag-arrow-path" data-id="d2" d="M285,47 L320,47" marker-end="url(#mmW)"/>
+          <circle class="diag-dot diag-flow-dot" data-flow="write" r="3.5" style="offset-path: path('M285,47 L320,47')"></circle>
+          <g data-target="step2-entities" data-id="d-tsdb" data-tip="Sharded write of raw, high-resolution points"><rect class="diag-box role-db" x="320" y="24" width="120" height="46"/><text class="diag-label" x="380" y="47" style="font-size:11px">TSDB (raw)</text></g>
+          <path class="diag-arrow-path" data-id="d3" d="M440,47 L475,47" marker-end="url(#mmA)"/>
+          <circle class="diag-dot diag-flow-dot" data-flow="async" r="3.5" style="offset-path: path('M440,47 L475,47')"></circle>
+          <g data-target="step6-deepdive-downsampling" data-id="d-rollup" data-tip="Background worker compacts old data into lower resolutions"><rect class="diag-box role-async" x="475" y="24" width="130" height="46"/><text class="diag-label" x="540" y="47" style="font-size:11px">Downsample Worker</text></g>
+
+          <text class="diag-sublabel" x="150" y="105" style="font-size:10px;fill:var(--accent)">READ PATH — dashboard query</text>
+          <g data-target="step2-entities" data-id="q-dash" data-tip="Requests a metric over a time range"><rect class="diag-box role-client" x="10" y="115" width="120" height="46"/><text class="diag-label" x="70" y="143" style="font-size:11px">Dashboard UI</text></g>
+          <path class="diag-arrow-path" data-id="q1" d="M130,138 L165,138" marker-end="url(#mmR)"/>
+          <circle class="diag-dot diag-flow-dot" data-flow="read" r="3.5" style="offset-path: path('M130,138 L165,138')"></circle>
+          <g data-target="step6-deepdive-downsampling" data-id="q-svc" data-tip="Picks the resolution tier based on requested time range"><rect class="diag-box" x="165" y="115" width="120" height="46"/><text class="diag-label" x="225" y="143" style="font-size:11px">Query Service</text></g>
+          <path class="diag-arrow-path" data-id="q2" d="M285,138 L320,138" marker-end="url(#mmR)"/>
+          <circle class="diag-dot diag-flow-dot" data-flow="read" r="3.5" style="offset-path: path('M285,138 L320,138')"></circle>
+          <g data-target="step2-entities" data-id="q-tsdb" data-tip="Same physical store the write path populates"><rect class="diag-box role-db" x="320" y="115" width="120" height="46"/><text class="diag-label" x="380" y="143" style="font-size:11px">TSDB (raw + rollup)</text></g>
+        </svg>
+        <div class="diag-legend">
+          <div class="diag-legend-item"><span class="diag-legend-dot role-client"></span>Agents + dashboard UI — entry points</div>
+          <div class="diag-legend-item"><span class="diag-legend-dot role-async"></span>Kafka + downsample worker — absorb bursts, compact off the hot path</div>
+          <div class="diag-legend-item"><span class="diag-legend-dot role-db"></span>TSDB — shared store, written by ingestion, read by queries</div>
+        </div>
+      </div>
+
+      <ol class="flow-steps-list">
+        <li><span>Agent emits a batch of points</span> — pushed (or scraped, pull-model) every 10-15s from every host/service</li>
+        <li><span>Ingestion tier buffers the burst</span> — Kafka decouples producer rate from TSDB write rate</li>
+        <li><span>TSDB writes raw points</span> — sharded by series_id, compressed columnar layout</li>
+        <li><span>Downsample worker compacts in the background</span> — rolls old high-resolution data into lower-resolution long-term tiers</li>
+        <li><span>Dashboard queries the query service</span> — which picks raw or rolled-up data depending on the requested range</li>
+      </ol>
+    </section>
+
+    <section id="step5-hld">
+      <div class="step-pill">Step 5 of 6 — High-Level Design</div>
+      <h2>High-level design</h2>
+      <p style="font-size:13px;color:#999;margin-bottom:0.75rem">Two consumers of the same ingestion stream: the TSDB/query path for dashboards, and a separate low-latency alerting engine that never waits on the analytical query path.</p>
+
+      <div class="diagram-wrap">
+        <svg viewBox="0 0 800 320" xmlns="http://www.w3.org/2000/svg">
+          <defs><marker id="mmHld" markerWidth="8" markerHeight="8" refX="6" refY="3" orient="auto"><path d="M0,0 L6,3 L0,6 Z" fill="var(--border2)"/></marker></defs>
+
+          <g data-tip="Push or pull/scrape model, batched emission"><rect class="diag-box role-client" x="10" y="20" width="130" height="50"/><text class="diag-label" x="75" y="42" style="font-size:11px">Agents / Exporters</text><text class="diag-sublabel" x="75" y="58" style="font-size:8.5px">push or scrape</text></g>
+          <path class="diag-arrow-path" d="M140,45 L175,45" marker-end="url(#mmHld)"/>
+          <g data-tip="Buffers ingestion bursts, decouples producers from TSDB write rate"><rect class="diag-box role-async" x="175" y="20" width="130" height="50"/><text class="diag-label" x="240" y="42" style="font-size:11px">Ingestion Tier</text><text class="diag-sublabel" x="240" y="58" style="font-size:8.5px">Kafka</text></g>
+          <path class="diag-arrow-path" d="M305,45 L340,45" marker-end="url(#mmHld)"/>
+          <g data-tip="Sharded by metric name + labels, compressed columnar writes"><rect class="diag-box role-db" x="340" y="20" width="130" height="50"/><text class="diag-label" x="405" y="42" style="font-size:11px">TSDB (raw tier)</text><text class="diag-sublabel" x="405" y="58" style="font-size:8.5px">10s resolution</text></g>
+
+          <path class="diag-arrow-path" d="M405,70 L405,105" marker-end="url(#mmHld)"/>
+          <g data-tip="Background compaction to lower resolutions over time"><rect class="diag-box role-async" x="340" y="105" width="130" height="50"/><text class="diag-label" x="405" y="127" style="font-size:11px">Downsample Worker</text><text class="diag-sublabel" x="405" y="143" style="font-size:8.5px">1min / 1hr rollups</text></g>
+          <path class="diag-arrow-path" d="M470,130 L505,130" marker-end="url(#mmHld)"/>
+          <g data-tip="Long-term rollup storage, cheaper and coarser"><rect class="diag-box role-db" x="505" y="105" width="130" height="50"/><text class="diag-label" x="570" y="127" style="font-size:11px">TSDB (rollup tier)</text><text class="diag-sublabel" x="570" y="143" style="font-size:8.5px">S3-backed, months</text></g>
+
+          <path class="diag-arrow-path" d="M405,70 L200,105" marker-end="url(#mmHld)"/>
+          <g data-tip="Serves dashboards, picks resolution tier by requested range"><rect class="diag-box" x="135" y="105" width="140" height="50"/><text class="diag-label" x="205" y="127" style="font-size:11px">Query Service</text><text class="diag-sublabel" x="205" y="143" style="font-size:8.5px">dashboards, ad-hoc</text></g>
+          <path class="diag-arrow-path" d="M205,155 L205,190" marker-end="url(#mmHld)"/>
+          <g data-tip="Renders time-series charts and long-range history"><rect class="diag-box role-client" x="135" y="190" width="140" height="50"/><text class="diag-label" x="205" y="212" style="font-size:11px">Dashboard UI</text><text class="diag-sublabel" x="205" y="228" style="font-size:8.5px">seconds-old to months-old</text></g>
+
+          <path class="diag-arrow-path" d="M240,70 L620,105" marker-end="url(#mmHld)" stroke-dasharray="3 3"/>
+          <g data-tip="Streams every point as it arrives, evaluates rules in real time — never touches the historical query path"><rect class="diag-box role-cache" x="600" y="20" width="150" height="50"/><text class="diag-label" x="675" y="42" style="font-size:11px">Alerting Engine</text><text class="diag-sublabel" x="675" y="58" style="font-size:8.5px">streaming evaluation</text></g>
+          <path class="diag-arrow-path" d="M675,70 L675,190" marker-end="url(#mmHld)"/>
+          <g data-tip="Threshold + window rules, cached in memory from Postgres"><rect class="diag-box role-db" x="600" y="190" width="150" height="50"/><text class="diag-label" x="675" y="212" style="font-size:11px">AlertRule Store</text><text class="diag-sublabel" x="675" y="228" style="font-size:8.5px">Postgres</text></g>
+          <path class="diag-arrow-path" d="M675,70 L440,250" marker-end="url(#mmHld)"/>
+          <g data-tip="Pages, Slack, email — fired on rule breach"><rect class="diag-box role-async" x="370" y="250" width="150" height="50"/><text class="diag-label" x="445" y="272" style="font-size:11px">Notification Svc</text><text class="diag-sublabel" x="445" y="288" style="font-size:8.5px">&lt;1min from breach</text></g>
+        </svg>
+        <div class="diag-legend">
+          <div class="diag-legend-item"><span class="diag-legend-dot role-client"></span>Agents + dashboard UI</div>
+          <div class="diag-legend-item"><span class="diag-legend-dot role-cache"></span>Alerting engine — the low-latency path, separate from dashboards</div>
+          <div class="diag-legend-item"><span class="diag-legend-dot role-db"></span>TSDB tiers + AlertRule store — durable storage</div>
+          <div class="diag-legend-item"><span class="diag-legend-dot role-async"></span>Kafka, downsample worker, notification service — async/background</div>
+        </div>
+      </div>
+
+      <table class="def-table">
+        <thead><tr><th>Component</th><th>Role</th><th>Tech + why</th></tr></thead>
+        <tbody>
+          <tr><td>Ingestion Tier</td><td>Absorbs write bursts, decouples producer rate from TSDB rate</td><td>Kafka — because 10M points/sec arriving unevenly needs a buffer, or the TSDB itself becomes the bottleneck; tradeoff is added end-to-end latency of tens to hundreds of ms.</td></tr>
+          <tr><td>TSDB (raw tier)</td><td>Stores high-resolution recent data</td><td>Columnar, compressed, sharded by series_id — because row-oriented general-purpose DBs can't sustain this write volume with compression this good; tradeoff is limited ad-hoc query flexibility (no arbitrary joins).</td></tr>
+          <tr><td>Downsample Worker</td><td>Compacts old data into lower resolutions</td><td>Background batch job over cold shards — because keeping 10s resolution for 13 months is cost-prohibitive and unnecessary; tradeoff is old data loses fine-grained detail permanently.</td></tr>
+          <tr><td>Alerting Engine</td><td>Evaluates rules against live incoming data</td><td>Stream processor consuming directly off ingestion — because a &lt;1 minute target rules out polling the same query path dashboards use; tradeoff is a second, parallel consumer of the same firehose.</td></tr>
+        </tbody>
+      </table>
+
+      <h3 style="font-size:13px;color:var(--text);margin:1.25rem 0 0.6rem;font-weight:600">Scaling levers — cheapest to most complex</h3>
+      <ol class="levers-list">
+        <li><strong>Add TSDB read replicas per region</strong> for dashboard fan-out<span class="cost">low complexity</span></li>
+        <li><strong>Increase Kafka partition count</strong> to raise ingestion parallelism<span class="cost">low complexity</span></li>
+        <li><strong>Shard TSDB by metric name + label hash</strong> to spread hot metrics<span class="cost">medium complexity</span></li>
+        <li><strong>Pre-aggregate common dashboard queries</strong> as materialized rollups<span class="cost">medium complexity</span></li>
+        <li><strong>Federate the alerting engine per shard</strong> so one hot shard can't stall global alert evaluation<span class="cost">high complexity — last resort</span></li>
+      </ol>
+
+      <table class="grid-table">
+        <thead><tr><th>Bottleneck</th><th>Triggers at</th><th>Exact fix</th></tr></thead>
+        <tbody>
+          <tr><td>Single TSDB shard overload</td><td>One metric's label combinations concentrate writes on one shard</td><td class="fix">Cardinality guardrails at ingestion reject the offending series before they land</td></tr>
+          <tr><td>Query latency on long ranges</td><td>Dashboard queries months of raw data directly</td><td class="fix">Query service auto-selects the rollup tier instead of scanning raw points</td></tr>
+          <tr><td>Alert evaluation lag</td><td>Alerting engine falls behind the ingestion stream</td><td class="fix">Backpressure monitoring on the alerting pipeline itself, independent scaling from the TSDB write path</td></tr>
+        </tbody>
+      </table>
+
+      <div class="dial-wrap">
+        <div class="dial-title">Query freshness: real-time vs downsampled historical</div>
+        <div class="dial-track"><div class="dial-marker" style="left:70%"></div></div>
+        <div class="dial-labels"><span class="end-left">Seconds-old, raw</span><span class="end-right">Months-old, downsampled</span></div>
+      </div>
+      <div class="dial-wrap">
+        <div class="dial-title">Alerting latency: streaming evaluation vs periodic polling</div>
+        <div class="dial-track"><div class="dial-marker" style="left:8%"></div></div>
+        <div class="dial-labels"><span class="end-left">Streaming</span><span class="end-right">Polling</span></div>
+      </div>
+    </section>
+
+    <section id="step6-deepdive-downsampling">
+      <div class="step-pill">Step 6 of 6 — Deep Dives</div>
+      <h2>Deep dive: time-series storage + downsampling</h2>
+      <p style="font-size:13px;color:#999;margin-bottom:0.75rem">Raw 10s-resolution data is compacted over time into progressively coarser tiers — this is what makes both storage cost and long-range query performance tractable.</p>
+
+      <div class="diagram-wrap">
+        <svg viewBox="0 0 720 230" xmlns="http://www.w3.org/2000/svg">
+          <defs><marker id="dsArrow" markerWidth="8" markerHeight="8" refX="6" refY="3" orient="auto"><path d="M0,0 L6,3 L0,6 Z" fill="var(--amber)"/></marker></defs>
+
+          <text class="diag-sublabel" x="360" y="16" style="font-size:10px;fill:var(--muted)">RETENTION TIERS — resolution degrades as data ages</text>
+
+          <g data-tip="Every point, as written, kept for the most recent 24h"><rect class="diag-box role-cache" x="20" y="40" width="180" height="60"/><text class="diag-label" x="110" y="64" style="font-size:11px">Raw — 10s resolution</text><text class="diag-sublabel" x="110" y="80" style="font-size:8.5px">retained 24 hours</text></g>
+          <path class="state-arrow" d="M200,70 L245,70" marker-end="url(#dsArrow)"/>
+          <g data-tip="Compaction worker averages/aggregates 6 raw points into one"><rect class="diag-box role-async" x="245" y="40" width="180" height="60"/><text class="diag-label" x="335" y="64" style="font-size:11px">Rollup — 1min resolution</text><text class="diag-sublabel" x="335" y="80" style="font-size:8.5px">retained 7 days</text></g>
+          <path class="state-arrow" d="M425,70 L470,70" marker-end="url(#dsArrow)"/>
+          <g data-tip="Coarsest tier — cheap, S3-backed, still enough for a 6-month trend chart"><rect class="diag-box role-db" x="470" y="40" width="220" height="60"/><text class="diag-label" x="580" y="64" style="font-size:11px">Rollup — 1hr resolution</text><text class="diag-sublabel" x="580" y="80" style="font-size:8.5px">retained 13 months</text></g>
+
+          <path class="state-arrow" d="M110,100 L110,140" marker-end="url(#dsArrow)"/>
+          <path class="state-arrow" d="M335,100 L335,140" marker-end="url(#dsArrow)"/>
+          <path class="state-arrow" d="M580,100 L580,140" marker-end="url(#dsArrow)"/>
+          <g data-tip="Query service inspects the requested range and picks the coarsest tier that still covers it"><rect class="diag-box" x="200" y="150" width="320" height="55"/><text class="diag-label" x="360" y="173" style="font-size:11px">Query Service — auto-selects resolution</text><text class="diag-sublabel" x="360" y="190" style="font-size:8.5px">range &lt;24h → raw, &lt;7d → 1min, &gt;7d → 1hr</text></g>
+        </svg>
+      </div>
+
+      <ol class="flow-steps-list">
+        <li><span>Agent writes at 10s resolution</span> — every point kept exactly as emitted for the first 24 hours</li>
+        <li><span>Compaction worker runs on a schedule</span> — reads a window of raw points, aggregates (avg/min/max/p99), writes one rolled-up point</li>
+        <li><span>1-minute tier retained for 7 days</span> — enough detail for "what happened yesterday," at 1/6th the storage</li>
+        <li><span>1-hour tier retained for 13 months</span> — enough for long-range trend and capacity charts, at a fraction of raw storage cost</li>
+        <li><span>Query auto-picks the tier</span> — a 6-hour dashboard query hits raw data; a 6-month capacity chart hits the 1hr tier automatically, transparent to the user</li>
+      </ol>
+      <div class="callout warn">This isn't just a cost optimization — querying 13 months of 10s-resolution points would also be too slow to render a dashboard interactively. Downsampling solves storage cost and query latency at the same time.</div>
+    </section>
+
+    <section id="step6-deepdive-cardinality">
+      <h2>Deep dive: cardinality explosion</h2>
+      <p style="font-size:13px;color:#999;margin-bottom:0.75rem">A single high-cardinality label turns one metric into millions of unique time series, overwhelming the TSDB's index — the classic way a monitoring system takes itself down.</p>
+
+      <div class="diagram-wrap">
+        <svg viewBox="0 0 720 210" xmlns="http://www.w3.org/2000/svg">
+          <defs><marker id="cardArrow" markerWidth="8" markerHeight="8" refX="6" refY="3" orient="auto"><path d="M0,0 L6,3 L0,6 Z" fill="var(--red)"/></marker></defs>
+
+          <text class="diag-sublabel" x="360" y="16" style="font-size:10px;fill:var(--muted)">SAFE vs DANGEROUS LABEL CHOICES</text>
+
+          <g data-tip="Bounded set: a handful of regions, a few hundred hosts"><rect class="diag-box role-cache" x="20" y="35" width="300" height="70"/><text class="diag-label" x="170" y="60" style="font-size:11px">http.requests{region, host, status_code}</text><text class="diag-sublabel" x="170" y="78" style="font-size:8.5px">~10^4 unique series — bounded, healthy</text></g>
+
+          <g data-tip="Unbounded set: one new series per unique user, forever"><rect class="diag-box" x="400" y="35" width="300" height="70" style="stroke:var(--red)"/><text class="diag-label" x="550" y="60" style="font-size:11px">http.requests{..., user_id, request_id}</text><text class="diag-sublabel" x="550" y="78" style="font-size:8.5px;fill:var(--red)">~10^9 unique series — unbounded, fatal</text></g>
+
+          <path class="state-arrow" d="M550,105 L550,140" marker-end="url(#cardArrow)" style="stroke:var(--red)"/>
+          <g data-tip="Index has to track one entry per unique label combination — this is what falls over"><rect class="diag-box" x="400" y="140" width="300" height="55" style="stroke:var(--red)"/><text class="diag-label" x="550" y="163" style="font-size:11px">TSDB index overwhelmed</text><text class="diag-sublabel" x="550" y="180" style="font-size:8.5px;fill:var(--red)">memory exhaustion, slow queries fleet-wide</text></g>
+        </svg>
+      </div>
+
+      <ol class="flow-steps-list">
+        <li><span>A label is added without thinking about its value space</span> — user_id or request_id looks harmless per-metric, but each unique value is a brand-new time series</li>
+        <li><span>Series count multiplies combinatorially</span> — every existing label combination now multiplies by every distinct user_id ever seen</li>
+        <li><span>The TSDB index grows unbounded</span> — the index tracking which series exist, not the data itself, is what runs out of memory first</li>
+        <li><span>Every query against that metric slows down</span> — and because shards are shared, other unrelated metrics on the same shard degrade too</li>
+        <li><span>Mitigation is enforced at ingestion, not after the fact</span> — reject or drop series once a per-metric cardinality limit is hit, and alert the emitting team immediately</li>
+      </ol>
+      <div class="callout danger">High-cardinality dimensions like user_id or request_id belong in logs or traces, which are built to index arbitrary high-cardinality fields — not in a metrics system, which is optimized for a bounded, slowly-changing set of series.</div>
+    </section>
+
+    <section id="step6-deepdive-alerting">
+      <h2>Deep dive: alerting pipeline separate from dashboards</h2>
+      <p style="font-size:13px;color:#999;margin-bottom:0.75rem">Alert evaluation reads the ingestion stream directly as it arrives — it never queries the same TSDB path dashboards use, because that path is both too slow and contended by expensive analytical queries.</p>
+
+      <div class="diagram-wrap">
+        <svg viewBox="0 0 740 230" xmlns="http://www.w3.org/2000/svg">
+          <defs>
+            <marker id="alArrowBad" markerWidth="8" markerHeight="8" refX="6" refY="3" orient="auto"><path d="M0,0 L6,3 L0,6 Z" fill="var(--red)"/></marker>
+            <marker id="alArrowGood" markerWidth="8" markerHeight="8" refX="6" refY="3" orient="auto"><path d="M0,0 L6,3 L0,6 Z" fill="var(--accent)"/></marker>
+          </defs>
+
+          <text class="diag-sublabel" x="180" y="16" style="font-size:10px;fill:var(--red)">WRONG — polling the dashboard query path</text>
+          <g data-tip="Naive design: alerting runs the same query dashboards do, on a timer"><rect class="diag-box" x="20" y="30" width="150" height="50" style="stroke:var(--red)"/><text class="diag-label" x="95" y="52" style="font-size:11px">Alert Poller</text><text class="diag-sublabel" x="95" y="68" style="font-size:8.5px">polls every 30-60s</text></g>
+          <path class="state-arrow" d="M170,55 L215,55" marker-end="url(#alArrowBad)" style="stroke:var(--red)"/>
+          <g data-tip="Same path serving expensive ad-hoc dashboard queries — contention and slow scans"><rect class="diag-box role-db" x="215" y="30" width="180" height="50" style="stroke:var(--red)"/><text class="diag-label" x="305" y="52" style="font-size:11px">TSDB Query Path</text><text class="diag-sublabel" x="305" y="68" style="font-size:8.5px;fill:var(--red)">shared, contended, seconds of latency</text></g>
+
+          <text class="diag-sublabel" x="180" y="120" style="font-size:10px;fill:var(--accent)">RIGHT — dedicated streaming evaluation</text>
+          <g data-tip="Consumes the raw ingestion stream directly, no query round-trip"><rect class="diag-box role-cache" x="20" y="135" width="150" height="50"/><text class="diag-label" x="95" y="157" style="font-size:11px">Alerting Engine</text><text class="diag-sublabel" x="95" y="173" style="font-size:8.5px">stream processor</text></g>
+          <path class="state-arrow" d="M170,160 L215,160" marker-end="url(#alArrowGood)"/>
+          <g data-tip="Evaluates each rule's window as points arrive — no polling, no shared contention"><rect class="diag-box role-async" x="215" y="135" width="180" height="50"/><text class="diag-label" x="305" y="157" style="font-size:11px">In-memory Rule State</text><text class="diag-sublabel" x="305" y="173" style="font-size:8.5px">per-series breach windows</text></g>
+          <path class="state-arrow" d="M395,160 L440,160" marker-end="url(#alArrowGood)"/>
+          <g data-tip="Fired the moment a window's breach condition is satisfied"><rect class="diag-box role-async" x="440" y="135" width="150" height="50"/><text class="diag-label" x="515" y="157" style="font-size:11px">Notification Svc</text><text class="diag-sublabel" x="515" y="173" style="font-size:8.5px">&lt;1min end-to-end</text></g>
+        </svg>
+      </div>
+
+      <ol class="flow-steps-list">
+        <li><span>Ingestion stream is tapped twice</span> — once into the TSDB for storage, once directly into the alerting engine</li>
+        <li><span>Alerting engine keeps rule state in memory</span> — per series, tracking how long a threshold has been breached against the configured evaluation window</li>
+        <li><span>Evaluation happens as data arrives</span> — no polling interval to wait out, no query queue to sit behind</li>
+        <li><span>Breach triggers immediately</span> — once the window condition is met, notification fires without a query round-trip</li>
+        <li><span>Dashboards remain free to run expensive queries</span> — because they no longer share a path with the latency-critical alerting workload</li>
+      </ol>
+      <div class="callout warn">Polling-based alerting has two independent failure modes: the poll interval itself adds latency that can blow past a &lt;1 minute target, and an expensive ad-hoc dashboard query can starve the same query path an alert poll is waiting on — exactly when an incident is generating more dashboard traffic too.</div>
+
+      <table class="grid-table" style="margin-top:1rem">
+        <thead><tr><th>Scenario</th><th>User impact</th><th>Detection signal</th><th>Mitigation</th></tr></thead>
+        <tbody>
+          <tr><td>High-cardinality metric overwhelms a TSDB shard</td><td class="impact">Query latency spikes for every metric on that shard, not just the offender</td><td class="detect">Per-metric series count crosses a cardinality limit</td><td class="fix">Ingestion rejects/drops the offending series past the limit and alerts the emitting team</td></tr>
+          <tr><td>Alerting engine itself lags behind real-time</td><td class="impact">Alerts fire late or not at all — silent blind spot exactly when needed most</td><td class="detect">Consumer lag metric on the alerting engine's own stream offset</td><td class="fix">Dedicated backpressure monitoring and alerting on the alerting pipeline — "who alerts on the alerting system"</td></tr>
+          <tr><td>Ingestion burst during an incident</td><td class="impact">The moment monitoring matters most is when the system emits far more data than usual</td><td class="detect">Ingestion queue depth and per-agent emission rate spike together</td><td class="fix">Headroom and backpressure handling that queues and drains rather than silently dropping points</td></tr>
+        </tbody>
+      </table>
+    </section>
+
+    <section id="interview-moves">
+      <h2>Interview moves</h2>
+      <ul class="moves-list">
+        <li><span class="move-num">01</span><div><strong>"This is fundamentally a time-series data problem at extreme write scale — the tension is write throughput vs query flexibility, and that's why it needs a specialized TSDB instead of a general-purpose database"</strong> — states the core insight unprompted</div></li>
+        <li><span class="move-num">02</span><div><strong>"At 10M points/sec, keeping raw resolution forever is both a storage cost problem and a query performance problem — I'd downsample old data into progressively coarser tiers"</strong> — shows you understand downsampling solves two problems at once</div></li>
+        <li><span class="move-num">03</span><div><strong>"Alerting can't share the same query path as dashboards — a sub-minute latency target means it needs its own streaming evaluation off the ingestion firehose"</strong> — the single most commonly missed architectural split in this problem</div></li>
+        <li><span class="move-num">04</span><div><strong>"I'd put hard cardinality limits at ingestion — a metric that accidentally includes user_id as a label can take down an entire TSDB shard, not just itself"</strong> — names the classic TSDB failure mode by name</div></li>
+        <li><span class="move-num">05</span><div><strong>"High-cardinality data like user IDs or request IDs belongs in logs or traces, not metrics — metrics are optimized for a bounded, slowly-changing set of series"</strong> — draws a clean boundary between observability pillars</div></li>
+        <li><span class="move-num">06</span><div><strong>"I'd monitor the alerting pipeline itself with the same rigor as the system it watches — if the alerting engine falls behind, that's a silent blind spot at the worst possible time"</strong> — surfaces a second-order failure mode most candidates never mention</div></li>
+      </ul>
+    </section>
+
+    <section id="follow-ups">
+      <h2>Follow-up questions</h2>
+      <div class="qa-block">
+        <div class="qa-q">How do you decide the right downsampling schedule?</div>
+        <div class="qa-a">Balance query patterns against cost: keep raw resolution only as long as engineers actually zoom into second-level detail, then step down tiers where storage savings outweigh lost precision.</div>
+      </div>
+      <div class="qa-block">
+        <div class="qa-q">What happens if the downsample worker falls behind?</div>
+        <div class="qa-a">Raw data is retained until compaction catches up — queries transparently fall back to scanning raw data for that window, slower but not lossy, with lag surfaced as its own monitored metric.</div>
+      </div>
+      <div class="qa-block">
+        <div class="qa-q">How would you enforce a cardinality limit without silently losing important data?</div>
+        <div class="qa-a">Reject only the excess series past the limit, keep the rest flowing, and immediately alert the emitting team with the exact label combination that tripped the limit.</div>
+      </div>
+      <div class="qa-block">
+        <div class="qa-q">Why not just run alert queries more frequently to hit the latency target?</div>
+        <div class="qa-a">Frequent polling of an analytical query path multiplies load on shared TSDB infrastructure and still adds interval-length latency — streaming evaluation removes both problems at once.</div>
+      </div>
+      <div class="qa-block">
+        <div class="qa-q">How do you scale the alerting engine independently from ingestion?</div>
+        <div class="qa-a">Partition rule evaluation by series_id shard, same key space as the TSDB, so alerting horizontal scale tracks ingestion scale without a shared bottleneck.</div>
+      </div>
+      <div class="qa-block">
+        <div class="qa-q">How would this design change for push (agent-initiated) vs pull (scrape) metric collection?</div>
+        <div class="qa-a">Push suits ephemeral or high-cardinality-risk sources needing immediate delivery; pull suits stable long-running services and centralizes scrape-interval and target discovery control.</div>
+      </div>
+    </section>
+
+  </main>
+  <script src="../../assets/nav.js"></script>
+</body>
+</html>

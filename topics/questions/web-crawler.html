@@ -1,0 +1,482 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Design a Web Crawler — SD Prep</title>
+  <link rel="stylesheet" href="../../assets/style.css">
+</head>
+<body>
+  <aside id="sidebar"></aside>
+  <main>
+
+    <header class="page-head">
+      <div class="pill">Questions</div>
+      <h1>Design a Web Crawler</h1>
+      <p class="sub">Tests whether you treat the URL frontier and dedup index as the hard distributed-systems problems they are, instead of hand-waving "we just fetch pages with HTTP."</p>
+      <div class="meta-row">
+        <span class="badge green">40-50 min interview</span>
+        <span class="badge blue">Hard</span>
+      </div>
+    </header>
+
+    <div class="flash-card">
+      <div class="flash-label">Say this in the first 2 minutes</div>
+      <ul>
+        <li>The core insight: this is a distributed BFS over the web, constrained by politeness — the frontier and the dedup index are the hard data-structure problems, not the HTTP fetching</li>
+        <li>Key scale number to anchor on: 10B pages to crawl, ~5,000 pages/sec sustained across the fleet, which is fetch-worker-bound, not bandwidth-bound</li>
+        <li>Primary tradeoff being probed: dedup accuracy vs memory — a naive hash-set of 10B seen URLs doesn't fit in memory, so a Bloom filter trades a tunable false-positive rate for a 20-30x memory win</li>
+        <li>Component most candidates forget: politeness — the frontier must be sharded/queued per domain so the fetcher fleet never hammers one site, no matter how parallel it is</li>
+        <li>Failure mode most candidates skip: a crawler trap — a site that generates near-infinite URLs via query parameters or calendar links can consume the entire fetch budget if not capped</li>
+      </ul>
+    </div>
+
+    <section id="step1-requirements">
+      <div class="step-pill">Step 1 of 6 — Requirements</div>
+      <h2>Requirements</h2>
+
+      <div class="goal-arc-wrap">
+        <div class="goal-arc-row functional">
+          <div class="goal-arc-seg">1</div><div class="goal-arc-seg">2</div><div class="goal-arc-seg">3</div><div class="goal-arc-seg">4</div><div class="goal-arc-seg">5</div><div class="goal-arc-seg inactive">6</div>
+        </div>
+        <div class="goal-arc-label"><span>Arc 1 (steps 1-5) — <strong>Satisfy Functional Requirements</strong></span></div>
+        <div class="goal-arc-row nonfunctional" style="margin-top:8px">
+          <div class="goal-arc-seg">1</div><div class="goal-arc-seg">2</div><div class="goal-arc-seg">3</div><div class="goal-arc-seg">4</div><div class="goal-arc-seg">5</div><div class="goal-arc-seg">6</div>
+        </div>
+        <div class="goal-arc-label"><span>Arc 2 (all 6 steps) — <strong>Satisfy Non-Functional Requirements</strong></span></div>
+      </div>
+
+      <div class="compare-grid">
+        <div class="compare-card good">
+          <div class="compare-label">Functional</div>
+          <ul>
+            <li>Given a set of seed URLs, discover and fetch reachable pages web-wide</li>
+            <li>Extract links from fetched pages and feed newly discovered URLs back into the crawl queue</li>
+            <li>Respect each site's robots.txt and per-domain crawl-delay directives</li>
+            <li>Avoid re-fetching a URL already crawled, and re-crawl pages at a frequency matched to how often they change</li>
+          </ul>
+        </div>
+        <div class="compare-card bad">
+          <div class="compare-label">Non-Functional</div>
+          <ul>
+            <li>10B pages in the crawlable set, sustained fetch rate of ~5,000 pages/sec fleet-wide</li>
+            <li>No single domain receives more than one request per configured politeness delay</li>
+            <li>Dedup index must hold ~10B seen URLs without a linear memory blow-up</li>
+            <li>Crawler must self-limit against traps (infinite URL spaces) without operator intervention</li>
+          </ul>
+        </div>
+      </div>
+
+      <div class="callout warn"><strong>What NOT to build:</strong> full-text search indexing/ranking (a downstream consumer of the crawl output, not this system), JavaScript-rendering or headless-browser crawling (assume static HTML fetches only), or image/video content extraction. This is URL discovery, fetching, and storage of raw content — not search relevance.</div>
+
+      <div class="stat-grid">
+        <div class="stat-card"><div class="stat-val">10B</div><div class="stat-label">pages in the crawlable web set</div></div>
+        <div class="stat-card"><div class="stat-val">~5,000/s</div><div class="stat-label">sustained fetch rate, fleet-wide</div></div>
+        <div class="stat-card"><div class="stat-val">1 req / delay</div><div class="stat-label">politeness cap per domain</div></div>
+        <div class="stat-card"><div class="stat-val">~10B keys</div><div class="stat-label">dedup index size (seen URLs)</div></div>
+      </div>
+    </section>
+
+    <section id="step2-entities">
+      <div class="step-pill">Step 2 of 6 — Core Entities</div>
+      <h2>Core entities</h2>
+      <p style="font-size:13px;color:#999;margin-bottom:0.75rem">Three entities split by access pattern: the frontier is a hot, constantly-reordered queue; crawled content is write-once and huge; domain policy is small, cached, and read on every single fetch.</p>
+
+      <div class="entity-grid">
+        <div class="entity-box">
+          <div class="entity-head"><span class="entity-name">URLFrontierEntry</span><span class="entity-store redis">Redis</span></div>
+          <div class="entity-fields">
+            <div class="entity-field"><span class="fname pk">url_hash</span><span class="ftype">CHAR(64) — SHA-256(url)</span></div>
+            <div class="entity-field"><span class="fname idx">domain</span><span class="ftype">TEXT — shard key</span></div>
+            <div class="entity-field"><span class="fname">next_allowed_time</span><span class="ftype">TIMESTAMP — priority score</span></div>
+            <div class="entity-field"><span class="fname">priority</span><span class="ftype">FLOAT — freshness/depth weighted</span></div>
+            <div class="entity-field"><span class="fname">depth</span><span class="ftype">INT — hops from seed</span></div>
+          </div>
+          <div class="entity-why">Because the frontier is popped and re-scored constantly at fleet scale — an in-memory priority structure keyed by per-domain next-allowed-time is what makes politeness enforcement O(log n) instead of a scan. Tradeoff: a node failure can lose recent re-prioritization, self-heals on next discovery pass.</div>
+        </div>
+
+        <div class="entity-box">
+          <div class="entity-head"><span class="entity-name">CrawledPage</span><span class="entity-store pg">Postgres</span></div>
+          <div class="entity-fields">
+            <div class="entity-field"><span class="fname pk">url_hash</span><span class="ftype">CHAR(64) UNIQUE</span></div>
+            <div class="entity-field"><span class="fname">domain, fetched_at</span><span class="ftype">TEXT, TIMESTAMP</span></div>
+            <div class="entity-field"><span class="fname">content_key</span><span class="ftype">VARCHAR(200) → S3 object</span></div>
+            <div class="entity-field"><span class="fname">change_rate</span><span class="ftype">FLOAT — observed edits/week</span></div>
+            <div class="entity-field"><span class="fname idx">next_recrawl_at</span><span class="ftype">TIMESTAMP</span></div>
+          </div>
+          <div class="entity-why">Because metadata needs indexed lookups by URL and by recrawl due-time, while raw HTML is large and touched only by the parser and rare re-fetches — splitting them keeps the hot metadata table small. Tradeoff: fetching full content is always a second hop to blob storage.</div>
+        </div>
+
+        <div class="entity-box">
+          <div class="entity-head"><span class="entity-name">DomainPolicy</span><span class="entity-store redis">Redis (cached)</span></div>
+          <div class="entity-fields">
+            <div class="entity-field"><span class="fname pk">domain</span><span class="ftype">TEXT</span></div>
+            <div class="entity-field"><span class="fname">crawl_delay_ms</span><span class="ftype">INT — from robots.txt</span></div>
+            <div class="entity-field"><span class="fname">disallow_patterns</span><span class="ftype">TEXT[]</span></div>
+            <div class="entity-field"><span class="fname">fetched_at</span><span class="ftype">TIMESTAMP — TTL ~24h</span></div>
+          </div>
+          <div class="entity-why">Because every single fetch decision reads this — re-parsing robots.txt per request would be both slow and itself impolite. Tradeoff: a stale cached policy briefly under- or over-restricts a domain until the TTL expires and it's refetched.</div>
+        </div>
+      </div>
+
+      <div class="callout info">Primary key: <code>CrawledPage.url_hash</code>, a SHA-256 hash of the canonicalized URL (used everywhere instead of the raw URL string). Critical index: <code>next_recrawl_at</code> on CrawledPage and the frontier's per-domain <code>next_allowed_time</code> score — both are what turn "what should we fetch right now" into an O(log n) pop instead of a scan.</div>
+    </section>
+
+    <section id="step3-api">
+      <div class="step-pill">Step 3 of 6 — API / Interface</div>
+      <h2>API design</h2>
+      <p style="font-size:13px;color:#999;margin-bottom:0.75rem">Two operator-facing endpoints (seed submission, page lookup), one policy lookup, and one internal claim endpoint the fetcher fleet uses to pull work — the fleet never talks to the frontier directly over a public API.</p>
+
+      <div class="api-card">
+        <div class="api-line"><span class="api-method post">POST</span><span class="api-path">/api/v1/seeds</span><span class="api-auth">Auth: required (operator)</span></div>
+        <div class="api-io">
+          <div class="api-io-block"><div class="api-io-label">Request</div><div class="api-io-body">{ urls: [...], priority?: "high"|"normal" }</div></div>
+          <div class="api-io-block"><div class="api-io-label">Response</div><div class="api-io-body">{ accepted: N, deduped: M } — deduped counts URLs already seen</div></div>
+        </div>
+      </div>
+
+      <div class="api-card">
+        <div class="api-line"><span class="api-method get">GET</span><span class="api-path">/api/v1/pages/{urlHash}</span><span class="api-auth">Auth: required (internal consumer)</span></div>
+        <div class="api-io">
+          <div class="api-io-block"><div class="api-io-label">Request</div><div class="api-io-body">path param only</div></div>
+          <div class="api-io-block"><div class="api-io-label">Response</div><div class="api-io-body">{ url, fetched_at, content_key, links_found: N }</div></div>
+        </div>
+      </div>
+
+      <div class="api-card">
+        <div class="api-line"><span class="api-method get">GET</span><span class="api-path">/api/v1/domains/{domain}/policy</span><span class="api-auth">Auth: internal only</span></div>
+        <div class="api-io">
+          <div class="api-io-block"><div class="api-io-label">Request</div><div class="api-io-body">path param only</div></div>
+          <div class="api-io-block"><div class="api-io-label">Response</div><div class="api-io-body">{ crawl_delay_ms, disallow_patterns[], cached_at }</div></div>
+        </div>
+      </div>
+
+      <div class="api-card">
+        <div class="api-line"><span class="api-method post">POST</span><span class="api-path">/internal/fetch-tasks/claim</span><span class="api-auth">Auth: internal (fetcher worker)</span></div>
+        <div class="api-io">
+          <div class="api-io-block"><div class="api-io-label">Request</div><div class="api-io-body">{ worker_id, batch_size }</div></div>
+          <div class="api-io-block"><div class="api-io-label">Response</div><div class="api-io-body">{ tasks: [{url, url_hash, domain}] } — only domains past their politeness delay</div></div>
+        </div>
+      </div>
+
+      <div class="callout good">The claim endpoint is the only way a fetcher worker gets a URL — it never reads the frontier directly. That single choke point is where politeness is enforced: the scheduler behind it will not hand out a URL for a domain whose <code>next_allowed_time</code> hasn't passed yet, no matter how many idle workers are asking.</div>
+    </section>
+
+    <section id="step4-dataflow">
+      <div class="step-pill">Step 4 of 6 — Data Flow</div>
+      <h2>Data flow</h2>
+      <p style="font-size:13px;color:#999;margin-bottom:0.75rem">Write path (blue) is a fetch-and-parse cycle that feeds itself — new links flow back into the frontier (amber). Read path (mint) is a page lookup, fully decoupled from crawling.</p>
+
+      <div class="diagram-wrap" data-paths='{"write":{"boxes":["w-frontier","w-fetcher","w-parser","w-store"],"arrows":["w1","w2","w3"]},"async":{"boxes":["w-parser","w-frontier"],"arrows":["a1"]},"read":{"boxes":["r-client","r-svc","r-db"],"arrows":["r1","r2"]}}'>
+        <svg viewBox="0 0 740 230" xmlns="http://www.w3.org/2000/svg">
+          <defs>
+            <marker id="wcW" markerWidth="8" markerHeight="8" refX="6" refY="3" orient="auto"><path d="M0,0 L6,3 L0,6 Z" fill="var(--blue)"/></marker>
+            <marker id="wcA" markerWidth="8" markerHeight="8" refX="6" refY="3" orient="auto"><path d="M0,0 L6,3 L0,6 Z" fill="var(--amber)"/></marker>
+            <marker id="wcR" markerWidth="8" markerHeight="8" refX="6" refY="3" orient="auto"><path d="M0,0 L6,3 L0,6 Z" fill="var(--accent)"/></marker>
+          </defs>
+
+          <text class="diag-sublabel" x="150" y="14" style="font-size:10px;fill:var(--blue)">WRITE PATH — fetch and parse, ~5,000/s</text>
+          <circle class="diag-dot diag-flow-dot" data-flow="write" r="3.5" style="offset-path: path('M10,24 L120,24 L120,24 L280,24 L280,24 L440,24')"></circle>
+          <g data-target="step6-deepdive-frontier" data-id="w-frontier" data-tip="Per-domain queues keyed by earliest allowed next-crawl-time"><rect class="diag-box role-async" x="10" y="24" width="120" height="46"/><text class="diag-label" x="70" y="47" style="font-size:11px">URL Frontier</text></g>
+          <path class="diag-arrow-path" data-id="w1" d="M130,47 L165,47" marker-end="url(#wcW)"/>
+          <g data-target="step6-deepdive-frontier" data-id="w-fetcher" data-tip="Distributed pool, claims work only for domains past their delay"><rect class="diag-box" x="165" y="24" width="130" height="46"/><text class="diag-label" x="230" y="47" style="font-size:11px">Fetcher Fleet</text></g>
+          <path class="diag-arrow-path" data-id="w2" d="M295,47 L330,47" marker-end="url(#wcW)"/>
+          <g data-target="step6-deepdive-recrawl" data-id="w-parser" data-tip="Extracts links, normalizes URLs, checks dedup"><rect class="diag-box" x="330" y="24" width="130" height="46"/><text class="diag-label" x="395" y="47" style="font-size:11px">Parser</text></g>
+          <path class="diag-arrow-path" data-id="w3" d="M460,47 L495,47" marker-end="url(#wcW)"/>
+          <g data-target="step2-entities" data-id="w-store" data-tip="Raw HTML to S3, metadata row to Postgres"><rect class="diag-box role-db" x="495" y="24" width="120" height="46"/><text class="diag-label" x="555" y="47" style="font-size:11px">Content Store</text></g>
+
+          <text class="diag-sublabel" x="150" y="105" style="font-size:10px;fill:var(--amber)">ASYNC PATH — newly discovered URLs loop back</text>
+          <circle class="diag-dot diag-flow-dot" data-flow="async" r="3.5" style="offset-path: path('M395,70 L395,95 L70,95 L70,70')"></circle>
+          <path class="diag-arrow-path" data-id="a1" d="M395,70 L395,95 L130,95" marker-end="url(#wcA)" stroke-dasharray="3 3"/>
+          <text class="diag-sublabel" x="260" y="90" style="font-size:9px">new URLs, deduped against Bloom filter first</text>
+
+          <text class="diag-sublabel" x="150" y="150" style="font-size:10px;fill:var(--accent)">READ PATH — page lookup by consumers</text>
+          <circle class="diag-dot diag-flow-dot" data-flow="read" r="3.5" style="offset-path: path('M10,170 L120,170 L120,170 L280,170')"></circle>
+          <g data-target="step3-api" data-id="r-client" data-tip="Downstream indexer or operator tooling"><rect class="diag-box role-client" x="10" y="170" width="120" height="46"/><text class="diag-label" x="70" y="198" style="font-size:11px">Consumer</text></g>
+          <path class="diag-arrow-path" data-id="r1" d="M130,193 L165,193" marker-end="url(#wcR)"/>
+          <g data-target="step3-api" data-id="r-svc" data-tip="Stateless read API over CrawledPage metadata"><rect class="diag-box" x="165" y="170" width="130" height="46"/><text class="diag-label" x="230" y="198" style="font-size:11px">Page Lookup Svc</text></g>
+          <path class="diag-arrow-path" data-id="r2" d="M295,193 L330,193" marker-end="url(#wcR)"/>
+          <g data-target="step2-entities" data-id="r-db" data-tip="Indexed by url_hash"><rect class="diag-box role-db" x="330" y="170" width="120" height="46"/><text class="diag-label" x="390" y="198" style="font-size:11px">Postgres</text></g>
+        </svg>
+        <div class="diag-legend">
+          <div class="diag-legend-item"><span class="diag-legend-dot role-async"></span>Frontier — politeness-gated queue</div>
+          <div class="diag-legend-item"><span class="diag-legend-dot role-db"></span>Content store + Postgres metadata</div>
+          <div class="diag-legend-item"><span class="diag-legend-dot role-client"></span>Downstream consumers — fully decoupled from crawling</div>
+        </div>
+      </div>
+
+      <ol class="flow-steps-list">
+        <li><span>Fetcher claims a URL</span> — only from a domain whose politeness delay has already elapsed</li>
+        <li><span>Fetcher retrieves the page</span> — respects robots.txt disallow rules pulled from the cached DomainPolicy</li>
+        <li><span>Parser extracts links and normalizes them</span> — strips tracking params, resolves relative paths to absolute URLs</li>
+        <li><span>Each extracted URL is checked against the Bloom filter</span> — likely-seen URLs are dropped before touching the frontier</li>
+        <li><span>Genuinely new URLs are pushed back into the frontier</span> — this is what makes the crawl a self-feeding BFS instead of a fixed list</li>
+      </ol>
+    </section>
+
+    <section id="step5-hld">
+      <div class="step-pill">Step 5 of 6 — High-Level Design</div>
+      <h2>High-level design</h2>
+      <p style="font-size:13px;color:#999;margin-bottom:0.75rem">Seeds enter the frontier, DNS is resolved and cached ahead of fetch time, a distributed fetcher pool respects politeness, and a dedup service gates what re-enters the frontier at all.</p>
+
+      <div class="diagram-wrap">
+        <svg viewBox="0 0 800 320" xmlns="http://www.w3.org/2000/svg">
+          <defs><marker id="wcHldArrow" markerWidth="8" markerHeight="8" refX="6" refY="3" orient="auto"><path d="M0,0 L6,3 L0,6 Z" fill="var(--border2)"/></marker></defs>
+
+          <g data-tip="Operator-submitted starting URLs"><rect class="diag-box role-client" x="10" y="20" width="120" height="46"/><text class="diag-label" x="70" y="43" style="font-size:11px">Seed URLs</text><text class="diag-sublabel" x="70" y="58" style="font-size:8.5px">operator input</text></g>
+          <path class="diag-arrow-path" d="M130,43 L165,80" marker-end="url(#wcHldArrow)"/>
+
+          <g data-tip="Per-domain queues keyed by next-allowed-time, priority-weighted by change rate"><rect class="diag-box role-async" x="165" y="80" width="140" height="50"/><text class="diag-label" x="235" y="102" style="font-size:11px">URL Frontier</text><text class="diag-sublabel" x="235" y="118" style="font-size:8.5px">sharded by domain</text></g>
+
+          <path class="diag-arrow-path" d="M305,105 L340,105" marker-end="url(#wcHldArrow)"/>
+          <g data-tip="Resolves and caches hostnames ahead of fetch to hide DNS latency"><rect class="diag-box" x="340" y="60" width="120" height="46"/><text class="diag-label" x="400" y="83" style="font-size:11px">DNS Cache</text></g>
+          <path class="diag-arrow-path" d="M460,83 L495,105" marker-end="url(#wcHldArrow)"/>
+
+          <path class="diag-arrow-path" d="M305,115 L340,140" marker-end="url(#wcHldArrow)"/>
+          <g data-tip="Distributed workers, claim URLs only for domains past their delay"><rect class="diag-box" x="340" y="120" width="150" height="50"/><text class="diag-label" x="415" y="142" style="font-size:11px">Fetcher Worker Pool</text><text class="diag-sublabel" x="415" y="158" style="font-size:8.5px">respects per-domain rate limit</text></g>
+
+          <path class="diag-arrow-path" d="M340,150 L305,150" marker-end="url(#wcHldArrow)" stroke-dasharray="3 3"/>
+          <g data-tip="Cached robots.txt rules and crawl-delay, ~24h TTL"><rect class="diag-box role-cache" x="150" y="150" width="140" height="46"/><text class="diag-label" x="220" y="169" style="font-size:11px">Robots.txt Cache</text><text class="diag-sublabel" x="220" y="184" style="font-size:8.5px">politeness rules</text></g>
+
+          <path class="diag-arrow-path" d="M490,145 L525,145" marker-end="url(#wcHldArrow)"/>
+          <g data-tip="Extracts links, normalizes URLs, strips tracking params"><rect class="diag-box" x="525" y="120" width="130" height="50"/><text class="diag-label" x="590" y="148" style="font-size:11px">Parser / Link Extractor</text></g>
+
+          <path class="diag-arrow-path" d="M590,120 L590,90" marker-end="url(#wcHldArrow)"/>
+          <g data-tip="Raw HTML written once, rarely re-read except by re-parses"><rect class="diag-box role-db" x="525" y="45" width="130" height="46"/><text class="diag-label" x="590" y="73" style="font-size:11px">Content Store</text><text class="diag-sublabel" x="590" y="86" style="font-size:8.5px">blob storage</text></g>
+
+          <path class="diag-arrow-path" d="M655,145 L690,145" marker-end="url(#wcHldArrow)"/>
+          <g data-tip="Bloom filter gates every candidate URL before it can re-enter the frontier"><rect class="diag-box role-cache" x="690" y="120" width="100" height="50"/><text class="diag-label" x="740" y="140" style="font-size:11px">Dedup /</text><text class="diag-label" x="740" y="153" style="font-size:11px">Bloom Svc</text></g>
+
+          <path class="diag-arrow-path" d="M740,120 L740,60 L305,60 L305,90" marker-end="url(#wcHldArrow)" stroke-dasharray="3 3"/>
+          <text class="diag-sublabel" x="520" y="52" style="font-size:8.5px;fill:var(--amber)">new, deduped URLs loop back to frontier</text>
+
+          <path class="diag-arrow-path" d="M590,170 L590,200" marker-end="url(#wcHldArrow)"/>
+          <g data-tip="Recrawl priority recomputed from observed change rate"><rect class="diag-box role-async" x="525" y="200" width="130" height="46"/><text class="diag-label" x="590" y="223" style="font-size:11px">Recrawl Scheduler</text></g>
+          <path class="diag-arrow-path" d="M525,223 L305,155" marker-end="url(#wcHldArrow)" stroke-dasharray="3 3"/>
+        </svg>
+        <div class="diag-legend">
+          <div class="diag-legend-item"><span class="diag-legend-dot role-client"></span>Seed input — operator-facing</div>
+          <div class="diag-legend-item"><span class="diag-legend-dot role-cache"></span>Robots.txt cache + dedup/Bloom service — hot-path gates</div>
+          <div class="diag-legend-item"><span class="diag-legend-dot role-db"></span>Content store — durable raw HTML</div>
+          <div class="diag-legend-item"><span class="diag-legend-dot role-async"></span>Frontier, fetcher pool, recrawl scheduler — the crawl loop itself</div>
+        </div>
+      </div>
+
+      <table class="def-table">
+        <thead><tr><th>Component</th><th>Role</th><th>Tech + why</th></tr></thead>
+        <tbody>
+          <tr><td>URL Frontier</td><td>Decides what to fetch next, enforces politeness</td><td>Sharded priority queues keyed by (domain, next_allowed_time) — because a priority pop must be O(log n) at fleet scale while guaranteeing no domain is over-hit; tradeoff is added coordination cost across shards.</td></tr>
+          <tr><td>DNS Cache</td><td>Resolves hostnames ahead of fetch time</td><td>Local resolver cache with TTL honoring DNS records — because a cold DNS lookup per fetch would add 20-200ms to every request at 5,000 req/s; tradeoff is occasional stale resolution on IP changes.</td></tr>
+          <tr><td>Fetcher Worker Pool</td><td>Executes HTTP fetches, respects rate limits</td><td>Horizontally scaled stateless workers pulling from the claim API — because raw fetch throughput scales linearly with workers, the frontier is the actual bottleneck to guard; tradeoff is workers must never bypass the claim gate.</td></tr>
+          <tr><td>Dedup / Bloom Service</td><td>Rejects already-seen URLs before they re-enter the frontier</td><td>Bloom filter backed by a durable store for positive-match confirmation — because a real 10B-entry hash set doesn't fit in memory; tradeoff is a tunable false-positive rate that can silently skip a genuinely new URL.</td></tr>
+          <tr><td>Content Store</td><td>Stores raw fetched HTML</td><td>Object storage (blob) — because write-once, rarely-read pages at web scale are exactly what object storage is priced for; tradeoff is no query capability, metadata must live in Postgres.</td></tr>
+          <tr><td>Robots.txt Cache</td><td>Serves politeness rules without a live fetch per request</td><td>Redis, ~24h TTL per domain — because re-fetching robots.txt on every crawl decision would itself be impolite and slow; tradeoff is up to 24h staleness if a site changes its rules.</td></tr>
+        </tbody>
+      </table>
+
+      <h3 style="font-size:13px;color:var(--text);margin:1.25rem 0 0.6rem;font-weight:600">Scaling levers — cheapest to most complex</h3>
+      <ol class="levers-list">
+        <li><strong>Add more fetcher workers</strong> horizontally, bounded by per-domain politeness caps<span class="cost">low complexity</span></li>
+        <li><strong>Shard the frontier by domain hash</strong> across more nodes as URL volume grows<span class="cost">low complexity</span></li>
+        <li><strong>Batch DNS resolution ahead of the fetch queue</strong> to hide resolver latency<span class="cost">medium complexity</span></li>
+        <li><strong>Resize or rotate the Bloom filter</strong> as the seen-URL set grows past its sized capacity<span class="cost">medium complexity</span></li>
+        <li><strong>Move to a distributed, coordinated multi-datacenter crawl</strong> for geo-local fetch latency<span class="cost">high complexity — last resort</span></li>
+      </ol>
+
+      <table class="grid-table">
+        <thead><tr><th>Bottleneck</th><th>Triggers at</th><th>Exact fix</th></tr></thead>
+        <tbody>
+          <tr><td>Frontier hot-shard on one domain</td><td>A single large domain (e.g. a huge e-commerce site) dominates one shard's queue</td><td class="fix">Sub-shard large domains by URL-path prefix while keeping one politeness clock per domain</td></tr>
+          <tr><td>Bloom filter false-positive creep</td><td>Filter fill ratio grows past its sized capacity</td><td class="fix">Periodic resize or rotate to a scalable variant (counting Bloom filter / cuckoo filter)</td></tr>
+          <tr><td>DNS resolution latency</td><td>Fetcher pool stalls waiting on cold lookups</td><td class="fix">Pre-resolve domains ahead of the claim queue, cache aggressively within TTL bounds</td></tr>
+        </tbody>
+      </table>
+
+      <div class="dial-wrap">
+        <div class="dial-title">Crawl freshness vs crawl budget</div>
+        <div class="dial-track"><div class="dial-marker" style="left:45%"></div></div>
+        <div class="dial-labels"><span class="end-left">Recrawl aggressively</span><span class="end-right">Conserve fetch budget</span></div>
+      </div>
+      <div class="dial-wrap">
+        <div class="dial-title">Dedup accuracy vs memory — Bloom filter false-positive rate</div>
+        <div class="dial-track"><div class="dial-marker" style="left:75%"></div></div>
+        <div class="dial-labels"><span class="end-left">Exact, memory-heavy</span><span class="end-right">Probabilistic, compact</span></div>
+      </div>
+    </section>
+
+    <section id="step6-deepdive-frontier">
+      <div class="step-pill">Step 6 of 6 — Deep Dives</div>
+      <h2>Deep dive: URL frontier and politeness</h2>
+      <p style="font-size:13px;color:#999;margin-bottom:0.75rem">The frontier isn't one global queue — it's effectively one priority queue per domain, and the scheduler will only ever pop from a domain that's past its politeness delay.</p>
+
+      <div class="diagram-wrap">
+        <svg viewBox="0 0 720 260" xmlns="http://www.w3.org/2000/svg">
+          <defs><marker id="frArrow" markerWidth="8" markerHeight="8" refX="6" refY="3" orient="auto"><path d="M0,0 L6,3 L0,6 Z" fill="var(--amber)"/></marker></defs>
+
+          <text class="diag-sublabel" x="360" y="14" style="font-size:10px;fill:var(--muted)">PER-DOMAIN QUEUES — scored by earliest allowed next-crawl-time</text>
+
+          <g data-tip="12 URLs queued, next_allowed_time already passed — eligible now"><rect class="diag-box role-async" x="10" y="30" width="180" height="50"/><text class="diag-label" x="100" y="50" style="font-size:11px">domain: news-site.com</text><text class="diag-sublabel" x="100" y="66" style="font-size:8.5px">next_allowed: now - 2s → eligible</text></g>
+
+          <g data-tip="Still inside its crawl-delay window — not eligible yet"><rect class="diag-box" x="10" y="95" width="180" height="50"/><text class="diag-label" x="100" y="115" style="font-size:11px">domain: shop-example.com</text><text class="diag-sublabel" x="100" y="131" style="font-size:8.5px">next_allowed: now + 8s → blocked</text></g>
+
+          <g data-tip="Large crawl-delay directive from robots.txt — long wait"><rect class="diag-box" x="10" y="160" width="180" height="50"/><text class="diag-label" x="100" y="180" style="font-size:11px">domain: slow-api.org</text><text class="diag-sublabel" x="100" y="196" style="font-size:8.5px">next_allowed: now + 45s → blocked</text></g>
+
+          <path class="diag-arrow-path" d="M190,55 L260,90" marker-end="url(#frArrow)"/>
+          <path class="diag-arrow-path" d="M190,120 L260,105" marker-end="url(#frArrow)" stroke-dasharray="3 3"/>
+          <path class="diag-arrow-path" d="M190,185 L260,115" marker-end="url(#frArrow)" stroke-dasharray="3 3"/>
+
+          <g data-tip="Merges all per-domain queues, pops only eligible entries"><rect class="diag-box role-cache" x="260" y="70" width="150" height="60"/><text class="diag-label" x="335" y="95" style="font-size:11px">Scheduler</text><text class="diag-sublabel" x="335" y="110" style="font-size:8.5px">pops only eligible domains</text><text class="diag-sublabel" x="335" y="122" style="font-size:8.5px;fill:var(--amber)">skips blocked ones entirely</text></g>
+
+          <path class="diag-arrow-path" d="M410,100 L445,100" marker-end="url(#frArrow)"/>
+          <g data-tip="After a claimed fetch, this domain's next_allowed_time is pushed forward by its crawl-delay"><rect class="diag-box role-async" x="445" y="70" width="150" height="60"/><text class="diag-label" x="520" y="95" style="font-size:11px">Fetcher Fleet</text><text class="diag-sublabel" x="520" y="112" style="font-size:8.5px">claims one URL at a time</text></g>
+
+          <path class="diag-arrow-path" d="M520,130 L520,160 L100,160 L100,140" marker-end="url(#frArrow)" stroke-dasharray="3 3"/>
+          <text class="diag-sublabel" x="310" y="153" style="font-size:8.5px;fill:var(--amber)">re-scores next_allowed_time = now + crawl_delay after every claim</text>
+
+          <text class="diag-sublabel" x="360" y="235" style="font-size:9px">Result: 500 idle fetcher workers cannot force a fetch against a domain still inside its delay window</text>
+        </svg>
+      </div>
+
+      <ol class="flow-steps-list">
+        <li><span>Each domain gets its own logical queue</span> — scored by <code>next_allowed_time</code>, the earliest moment a fetch is allowed again</li>
+        <li><span>Scheduler merges all per-domain queues</span> — but only exposes entries whose domain's time has already passed</li>
+        <li><span>Fetcher claims one URL</span> — via the claim endpoint, never by reading the frontier directly</li>
+        <li><span>Domain's next_allowed_time is pushed forward</span> — by the domain's crawl_delay (from DomainPolicy), immediately after the claim</li>
+        <li><span>Blocked domains simply wait</span> — no matter how many fetcher workers are idle, a domain inside its delay window yields nothing</li>
+      </ol>
+      <div class="callout warn">Politeness has to be enforced at the frontier/scheduler level, not left to individual fetcher workers — if each worker independently decided "am I allowed to hit this domain," a large fleet would still race past the limit in aggregate before any single worker noticed.</div>
+    </section>
+
+    <section id="step6-deepdive-bloom">
+      <h2>Deep dive: dedup at scale with Bloom filters</h2>
+      <p style="font-size:13px;color:#999;margin-bottom:0.75rem">A naive hash-set of 10B seen URLs at ~64 bytes/entry (hash + overhead) is well over half a terabyte — too large to keep resident for a sub-millisecond membership check on every discovered link.</p>
+
+      <div class="stat-grid">
+        <div class="stat-card"><div class="stat-val">10B</div><div class="stat-label">expected inserted URLs (n)</div></div>
+        <div class="stat-card"><div class="stat-val">~17.1 Gb</div><div class="stat-label">bit array size (m) at target FP rate</div></div>
+        <div class="stat-card"><div class="stat-val">7</div><div class="stat-label">optimal hash functions (k)</div></div>
+        <div class="stat-card"><div class="stat-val">0.1%</div><div class="stat-label">target false-positive rate (p)</div></div>
+      </div>
+
+      <p style="font-size:13px;color:#ccc;margin:0.75rem 0">Sized from the standard formulas <code>m = -(n · ln p) / (ln 2)²</code> and <code>k = (m/n) · ln 2</code>. At n=10B and p=0.1%, that's <code>m ≈ 1.44×10¹¹ bits ≈ 18GB</code> — versus roughly 640GB to store 10B full 64-byte hash-set entries. Close to a 35x memory reduction for a 1-in-1000 chance of wrongly treating a genuinely new URL as already seen.</p>
+
+      <div class="diagram-wrap">
+        <svg viewBox="0 0 700 190" xmlns="http://www.w3.org/2000/svg">
+          <defs><marker id="blArrow" markerWidth="8" markerHeight="8" refX="6" refY="3" orient="auto"><path d="M0,0 L6,3 L0,6 Z" fill="var(--accent)"/></marker></defs>
+
+          <g data-tip="New URL discovered by the parser"><rect class="diag-box role-client" x="10" y="70" width="130" height="46"/><text class="diag-label" x="75" y="98" style="font-size:11px">Candidate URL</text></g>
+          <path class="diag-arrow-path" d="M140,93 L175,93" marker-end="url(#blArrow)"/>
+          <g data-tip="k=7 hash functions check bits in the array"><rect class="diag-box role-cache" x="175" y="70" width="150" height="46"/><text class="diag-label" x="250" y="93" style="font-size:11px">Bloom Filter</text><text class="diag-sublabel" x="250" y="108" style="font-size:8.5px">~18GB bit array</text></g>
+
+          <path class="diag-arrow-path" d="M325,80 L380,40" marker-end="url(#blArrow)"/>
+          <text class="diag-sublabel" x="420" y="30" style="font-size:9px;fill:var(--accent)">any bit unset → definitely not seen</text>
+          <g data-tip="Fast path — most links are genuinely new"><rect class="diag-box" x="380" y="15" width="160" height="40"/><text class="diag-label" x="460" y="40" style="font-size:11px">Push to Frontier</text></g>
+
+          <path class="diag-arrow-path" d="M325,106 L380,140" marker-end="url(#blArrow)"/>
+          <text class="diag-sublabel" x="420" y="155" style="font-size:9px;fill:var(--amber)">all bits set → maybe seen</text>
+          <g data-tip="Definitive check only on a possible match, not on every URL"><rect class="diag-box role-db" x="380" y="120" width="160" height="46"/><text class="diag-label" x="460" y="143" style="font-size:11px">Postgres url_hash</text><text class="diag-sublabel" x="460" y="158" style="font-size:8.5px">lookup, unique index</text></g>
+
+          <path class="diag-arrow-path" d="M540,143 L590,105" marker-end="url(#blArrow)" stroke-dasharray="3 3"/>
+          <text class="diag-sublabel" x="640" y="95" style="font-size:8.5px" text-anchor="middle">confirmed dup</text>
+          <path class="diag-arrow-path" d="M540,135 L570,50" marker-end="url(#blArrow)" stroke-dasharray="3 3"/>
+          <text class="diag-sublabel" x="620" y="45" style="font-size:8.5px" text-anchor="middle">false positive → push anyway</text>
+        </svg>
+      </div>
+
+      <ol class="flow-steps-list">
+        <li><span>Candidate URL hashed by k independent functions</span> — each sets/checks one bit position in the shared bit array</li>
+        <li><span>Any unset bit means definitely not seen</span> — the vast majority of genuinely new URLs resolve here in O(k), no external lookup needed</li>
+        <li><span>All bits set means maybe seen</span> — this is the only case that pays for a definitive lookup, keeping the expensive path rare by design</li>
+        <li><span>Durable store gives the authoritative answer</span> — a Postgres unique-index lookup on url_hash confirms or refutes the match</li>
+        <li><span>A false positive silently drops one new URL</span> — accepted at a fixed, tunable rate rather than paying for a fully durable set</li>
+      </ol>
+      <div class="callout warn">The false-positive rate isn't a bug to eliminate, it's a dial to set deliberately — going from 0.1% to 0.01% roughly doubles the bit array size. State the accepted rate out loud rather than promising zero false positives, since a real hash set at this scale isn't a serious option.</div>
+    </section>
+
+    <section id="step6-deepdive-recrawl">
+      <h2>Deep dive: recrawl scheduling and freshness</h2>
+      <p style="font-size:13px;color:#999;margin-bottom:0.75rem">Not every page deserves the same recrawl cadence — a news homepage that changes hourly and a static documentation page that hasn't changed in a year are wasting the same fetch budget if polled identically.</p>
+
+      <div class="diagram-wrap">
+        <svg viewBox="0 0 700 200" xmlns="http://www.w3.org/2000/svg">
+          <defs><marker id="rcArrow" markerWidth="8" markerHeight="8" refX="6" refY="3" orient="auto"><path d="M0,0 L6,3 L0,6 Z" fill="var(--border2)"/></marker></defs>
+
+          <g data-tip="Each recrawl compares a content hash/checksum against the last fetch"><rect class="diag-box" x="10" y="20" width="160" height="46"/><text class="diag-label" x="90" y="43" style="font-size:11px">Recrawl Fetch</text><text class="diag-sublabel" x="90" y="58" style="font-size:8.5px">content hash compare</text></g>
+          <path class="diag-arrow-path" d="M170,43 L205,43" marker-end="url(#rcArrow)"/>
+          <g data-tip="Exponential moving average of how often the page's content actually changes"><rect class="diag-box role-cache" x="205" y="20" width="170" height="46"/><text class="diag-label" x="290" y="43" style="font-size:11px">Change-Rate Estimator</text></g>
+          <path class="diag-arrow-path" d="M375,43 L410,43" marker-end="url(#rcArrow)"/>
+          <g data-tip="Combines change rate, page importance, and staleness into one score"><rect class="diag-box" x="410" y="20" width="150" height="46"/><text class="diag-label" x="485" y="43" style="font-size:11px">Freshness Score</text></g>
+          <path class="diag-arrow-path" d="M485,66 L485,100" marker-end="url(#rcArrow)"/>
+          <g data-tip="Recomputed next_recrawl_at pushed back into CrawledPage"><rect class="diag-box role-db" x="410" y="100" width="150" height="46"/><text class="diag-label" x="485" y="123" style="font-size:11px">next_recrawl_at</text></g>
+          <path class="diag-arrow-path" d="M410,123 L90,123 L90,100" marker-end="url(#rcArrow)" stroke-dasharray="3 3"/>
+          <path class="diag-arrow-path" d="M90,100 L205,90" marker-end="url(#rcArrow)" stroke-dasharray="3 3"/>
+          <g data-tip="Feeds back into the same frontier used for first-time discovery"><rect class="diag-box role-async" x="10" y="100" width="160" height="46"/><text class="diag-label" x="90" y="123" style="font-size:11px">URL Frontier</text><text class="diag-sublabel" x="90" y="138" style="font-size:8.5px">re-enqueued at due time</text></g>
+
+          <text class="diag-sublabel" x="90" y="180" style="font-size:9px">High-change page (news homepage): next_recrawl_at = now + hours</text>
+          <text class="diag-sublabel" x="480" y="180" style="font-size:9px">Low-change page (static doc): next_recrawl_at = now + weeks</text>
+        </svg>
+      </div>
+
+      <ol class="flow-steps-list">
+        <li><span>Every recrawl computes a content hash</span> — compared against the hash stored from the previous fetch</li>
+        <li><span>Change-rate is updated as a rolling estimate</span> — a page that changed on this check nudges its estimated change frequency up, one that didn't nudges it down</li>
+        <li><span>Freshness score blends change-rate with importance</span> — a high-traffic page that rarely changes can still outrank a low-traffic page that changes constantly</li>
+        <li><span>next_recrawl_at is recomputed</span> — shorter intervals for volatile pages, longer for stable ones, always within a min/max bound</li>
+        <li><span>Page re-enters the frontier at its due time</span> — competing for fetch budget against both first-time discoveries and other due recrawls</li>
+      </ol>
+      <div class="callout good">Recrawl and first-discovery share one frontier and one fetch budget on purpose — treating them as separate systems would let an aggressive recrawl policy starve discovery of brand-new pages, or vice versa.</div>
+
+      <table class="grid-table" style="margin-top:1rem">
+        <thead><tr><th>Failure mode</th><th>User impact</th><th>Detection signal</th><th>Mitigation</th></tr></thead>
+        <tbody>
+          <tr><td>Crawler trap (infinite URL generation)</td><td class="impact">One malicious/misconfigured site consumes the entire fetch budget</td><td class="detect">URL count for a single domain grows far past historical norms</td><td class="fix">URL normalization (strip session/tracking params) plus a hard max-depth and max-URLs-per-domain cap</td></tr>
+          <tr><td>Fetcher stuck on a slow-responding server</td><td class="impact">Worker capacity silently drains as connections hang</td><td class="detect">Per-request latency and open-connection count spike for one domain</td><td class="fix">Per-request timeout plus a circuit breaker that stops sending new requests to a domain after repeated timeouts</td></tr>
+          <tr><td>Bloom filter false-positive rate grows too high</td><td class="impact">Genuinely new URLs get silently skipped at a rising rate</td><td class="detect">Fill ratio (bits set / total bits) crosses a monitored threshold</td><td class="fix">Periodic resizing, or migrate to a scalable variant like a counting Bloom filter or cuckoo filter that supports deletion and cleaner growth</td></tr>
+        </tbody>
+      </table>
+    </section>
+
+    <section id="interview-moves">
+      <h2>Interview moves</h2>
+      <ul class="moves-list">
+        <li><span class="move-num">01</span><div><strong>"The hard problems here are the URL frontier and dedup index, not the HTTP fetching itself — any worker can issue a GET request"</strong> — states the core insight unprompted and reframes the whole problem correctly</div></li>
+        <li><span class="move-num">02</span><div><strong>"Politeness has to be enforced at the frontier or scheduler level, not trusted to individual fetcher workers, or a large fleet still races past the limit in aggregate"</strong> — shows you understand distributed rate-limiting, not just single-node rate-limiting</div></li>
+        <li><span class="move-num">03</span><div><strong>"A real hash set of 10 billion seen URLs is hundreds of gigabytes — I'd use a Bloom filter and explicitly state the false-positive rate I'm accepting"</strong> — quantifies the tradeoff instead of just naming the data structure</div></li>
+        <li><span class="move-num">04</span><div><strong>"A crawler trap — infinite URLs from query parameters or calendar links — will silently eat the whole fetch budget unless I cap max-depth and max-URLs-per-domain up front"</strong> — proactively surfaces a failure mode most candidates only discover when prompted</div></li>
+        <li><span class="move-num">05</span><div><strong>"Recrawl frequency should be driven by each page's observed change rate, not a flat schedule — a news homepage and a static doc don't deserve the same fetch budget"</strong> — ties freshness directly to a measurable signal</div></li>
+        <li><span class="move-num">06</span><div><strong>"I'd put a timeout and a per-domain circuit breaker on every fetch, because one slow-responding server can otherwise drain fetcher capacity indefinitely"</strong> — names a concrete resilience mechanism instead of hand-waving "handle timeouts"</div></li>
+      </ul>
+    </section>
+
+    <section id="follow-ups">
+      <h2>Follow-up questions</h2>
+      <div class="qa-block">
+        <div class="qa-q">How do you avoid crawling the same content reachable via two different URLs?</div>
+        <div class="qa-a">URL normalization first (sort query params, strip session IDs, lowercase host) collapses many duplicates before dedup even runs; a content-hash comparison catches the rest post-fetch.</div>
+      </div>
+      <div class="qa-block">
+        <div class="qa-q">What happens when the Bloom filter reports a false positive?</div>
+        <div class="qa-a">A genuinely new URL is silently never crawled — no error, no retry. It's mitigated by periodic resizing/rotation and accepted as a fixed, tunable cost rather than something to eliminate entirely.</div>
+      </div>
+      <div class="qa-block">
+        <div class="qa-q">How would you prioritize which domains get crawled first when the frontier has a backlog?</div>
+        <div class="qa-a">A priority score blending page importance (e.g. inbound link count), change rate, and staleness — high-value, fast-changing, overdue pages surface first within each domain's politeness budget.</div>
+      </div>
+      <div class="qa-block">
+        <div class="qa-q">How do you detect and stop a crawler trap in real time, not after the fact?</div>
+        <div class="qa-a">Track URL count and unique-path-depth per domain against a running baseline; crossing a hard cap on max-URLs-per-domain or max-depth halts further enqueuing from that domain automatically.</div>
+      </div>
+      <div class="qa-block">
+        <div class="qa-q">Why keep DNS resolution as a separate cached step instead of resolving inline per fetch?</div>
+        <div class="qa-a">A cold DNS lookup can add tens to hundreds of milliseconds — at thousands of fetches/sec that latency compounds across the fleet, so pre-resolving and caching within TTL bounds is a cheap win.</div>
+      </div>
+      <div class="qa-block">
+        <div class="qa-q">How would this design change for a scoped, single-site crawl instead of web-scale?</div>
+        <div class="qa-a">The Bloom filter and sharded frontier become overkill — a single in-memory set and one politeness queue suffice; the design only earns its complexity at the 10B-URL, multi-domain scale.</div>
+      </div>
+    </section>
+
+  </main>
+  <script src="../../assets/nav.js"></script>
+</body>
+</html>

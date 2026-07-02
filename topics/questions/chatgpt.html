@@ -1,0 +1,467 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Design ChatGPT — SD Prep</title>
+  <link rel="stylesheet" href="../../assets/style.css">
+</head>
+<body>
+  <aside id="sidebar"></aside>
+  <main>
+
+    <header class="page-head">
+      <div class="pill">Questions</div>
+      <h1>Design ChatGPT</h1>
+      <p class="sub">Tests whether you recognize this as a GPU-inference-capacity-and-scheduling problem, not a CRUD problem — the scarce resource is GPU compute, and everything else (batching, streaming, context management) exists to squeeze more useful work out of it.</p>
+      <div class="meta-row">
+        <span class="badge green">45-55 min interview</span>
+        <span class="badge blue">Hard</span>
+      </div>
+    </header>
+
+    <div class="flash-card">
+      <div class="flash-label">Say this in the first 2 minutes</div>
+      <ul>
+        <li>The core insight: this is a GPU-inference-capacity-and-scheduling problem, not a storage problem — GPUs are the expensive, limited resource everything else is designed around</li>
+        <li>Key scale number to anchor on: 100M weekly active users generating concurrent requests against a GPU fleet that can only run so many forward passes at once</li>
+        <li>Primary tradeoff being probed: time-to-first-token (must feel instant, &lt;1s) vs total generation time (can legitimately take several seconds) — solved by streaming, not by generating faster</li>
+        <li>Component most candidates forget: continuous batching — naively running one request per GPU call wastes most of the GPU's capacity</li>
+        <li>Failure mode most candidates skip: a conversation growing past the model's context window mid-session needs a graceful truncation/summarization strategy, not a hard error</li>
+      </ul>
+    </div>
+
+    <section id="step1-requirements">
+      <div class="step-pill">Step 1 of 6 — Requirements</div>
+      <h2>Requirements</h2>
+
+      <div class="goal-arc-wrap">
+        <div class="goal-arc-row functional">
+          <div class="goal-arc-seg">1</div><div class="goal-arc-seg">2</div><div class="goal-arc-seg">3</div><div class="goal-arc-seg">4</div><div class="goal-arc-seg">5</div><div class="goal-arc-seg inactive">6</div>
+        </div>
+        <div class="goal-arc-label"><span>Arc 1 (steps 1-5) — <strong>Satisfy Functional Requirements</strong></span></div>
+        <div class="goal-arc-row nonfunctional" style="margin-top:8px">
+          <div class="goal-arc-seg">1</div><div class="goal-arc-seg">2</div><div class="goal-arc-seg">3</div><div class="goal-arc-seg">4</div><div class="goal-arc-seg">5</div><div class="goal-arc-seg">6</div>
+        </div>
+        <div class="goal-arc-label"><span>Arc 2 (all 6 steps) — <strong>Satisfy Non-Functional Requirements</strong></span></div>
+      </div>
+
+      <div class="compare-grid">
+        <div class="compare-card good">
+          <div class="compare-label">Functional</div>
+          <ul>
+            <li>User sends a message and receives a generated response in the same conversation</li>
+            <li>Response streams back token-by-token as it's generated, not all at once</li>
+            <li>Conversation history persists so follow-up turns have context</li>
+            <li>Input and output are checked by a content moderation/safety filter</li>
+          </ul>
+        </div>
+        <div class="compare-card bad">
+          <div class="compare-label">Non-Functional</div>
+          <ul>
+            <li>100M weekly active users, bursty concurrent load across time zones</li>
+            <li>Time-to-first-token &lt;1s even though full generation takes several seconds</li>
+            <li>Maximize GPU utilization — inference capacity is the scarce, expensive resource</li>
+            <li>Long conversations must stay within the model's context window without abrupt context loss</li>
+          </ul>
+        </div>
+      </div>
+
+      <div class="callout warn"><strong>What NOT to build:</strong> the model training/fine-tuning pipeline, a plugin/tool-calling ecosystem, or billing/subscription tiers. This is the inference-serving path for an existing trained model only.</div>
+
+      <div class="stat-grid">
+        <div class="stat-card"><div class="stat-val">100M</div><div class="stat-label">weekly active users</div></div>
+        <div class="stat-card"><div class="stat-val">&lt;1s</div><div class="stat-label">time-to-first-token target</div></div>
+        <div class="stat-card"><div class="stat-val">~30-50/s</div><div class="stat-label">tokens generated per second, per request</div></div>
+        <div class="stat-card"><div class="stat-val">128k tokens</div><div class="stat-label">context window size</div></div>
+      </div>
+    </section>
+
+    <section id="step2-entities">
+      <div class="step-pill">Step 2 of 6 — Core Entities</div>
+      <h2>Core entities</h2>
+      <p style="font-size:13px;color:#999;margin-bottom:0.75rem">Conversation and Message are durable records in a relational store; InferenceRequest is ephemeral in-flight scheduler state that only exists for the seconds a generation is running.</p>
+
+      <div class="entity-grid">
+        <div class="entity-box">
+          <div class="entity-head"><span class="entity-name">Conversation</span><span class="entity-store pg">Postgres</span></div>
+          <div class="entity-fields">
+            <div class="entity-field"><span class="fname pk">conversation_id</span><span class="ftype">UUID</span></div>
+            <div class="entity-field"><span class="fname">user_id</span><span class="ftype">BIGINT</span></div>
+            <div class="entity-field"><span class="fname">title</span><span class="ftype">TEXT — auto-generated</span></div>
+            <div class="entity-field"><span class="fname">model</span><span class="ftype">TEXT</span></div>
+            <div class="entity-field"><span class="fname">updated_at</span><span class="ftype">TIMESTAMP</span></div>
+          </div>
+          <div class="entity-why">Because conversation metadata is small, low-write-frequency, and needs to support listing/sorting by recency — a standard relational row is the right fit. Tradeoff: needs a per-user index on updated_at for the conversation list view.</div>
+        </div>
+
+        <div class="entity-box">
+          <div class="entity-head"><span class="entity-name">Message</span><span class="entity-store pg">Postgres</span></div>
+          <div class="entity-fields">
+            <div class="entity-field"><span class="fname pk">message_id</span><span class="ftype">UUID</span></div>
+            <div class="entity-field"><span class="fname idx">conversation_id</span><span class="ftype">UUID → Conversation</span></div>
+            <div class="entity-field"><span class="fname">role</span><span class="ftype">TEXT — user/assistant/system</span></div>
+            <div class="entity-field"><span class="fname">content</span><span class="ftype">TEXT — full turn text</span></div>
+            <div class="entity-field"><span class="fname">seq</span><span class="ftype">INT — ordering within conversation</span></div>
+          </div>
+          <div class="entity-why">Because every turn must be retrievable in order to reconstruct context for the next generation, and appended-only writes are cheap in a relational store at this scale. Tradeoff: long conversations mean a growing row set per conversation_id — needs the context-window strategy from Step 6.</div>
+        </div>
+
+        <div class="entity-box">
+          <div class="entity-head"><span class="entity-name">InferenceRequest</span><span class="entity-store redis">Redis / in-memory</span></div>
+          <div class="entity-fields">
+            <div class="entity-field"><span class="fname pk">request_id</span><span class="ftype">UUID</span></div>
+            <div class="entity-field"><span class="fname">conversation_id</span><span class="ftype">UUID</span></div>
+            <div class="entity-field"><span class="fname">prompt_tokens</span><span class="ftype">encoded input, in scheduler queue</span></div>
+            <div class="entity-field"><span class="fname">generated_tokens</span><span class="ftype">growing list, streamed as produced</span></div>
+            <div class="entity-field"><span class="fname">status</span><span class="ftype">queued / batching / streaming / done</span></div>
+          </div>
+          <div class="entity-why">Because in-flight generation state lives only as long as the GPU worker holds it in memory — it's ephemeral scheduler/KV-cache state, not something worth persisting durably. Tradeoff: a worker crash loses this state entirely, which is why retry/resume design matters (see Step 6 failure modes).</div>
+        </div>
+      </div>
+
+      <div class="callout info">Primary key: <code>Message.message_id</code> with a composite index on <code>(conversation_id, seq)</code> for fast ordered retrieval of the last N turns. <code>InferenceRequest</code> has no durable index at all — it's scheduler state, not a queryable entity.</div>
+    </section>
+
+    <section id="step3-api">
+      <div class="step-pill">Step 3 of 6 — API / Interface</div>
+      <h2>API design</h2>
+      <p style="font-size:13px;color:#999;margin-bottom:0.75rem">Sending a message returns a streamed response over SSE so the client can render tokens as they arrive; everything else is plain REST since it's low-frequency metadata access.</p>
+
+      <div class="api-card">
+        <div class="api-line"><span class="api-method post">POST</span><span class="api-path">/api/v1/conversations/{id}/messages</span><span class="api-auth">Auth: required — SSE streaming response</span></div>
+        <div class="api-io">
+          <div class="api-io-block"><div class="api-io-label">Request</div><div class="api-io-body">{ content: "user message text" }</div></div>
+          <div class="api-io-block"><div class="api-io-label">Response (stream)</div><div class="api-io-body">event: token → { text } ... event: done → { message_id, usage }</div></div>
+        </div>
+      </div>
+
+      <div class="api-card">
+        <div class="api-line"><span class="api-method get">GET</span><span class="api-path">/api/v1/conversations/{id}</span><span class="api-auth">Auth: required</span></div>
+        <div class="api-io">
+          <div class="api-io-block"><div class="api-io-label">Request</div><div class="api-io-body">path param: conversation id</div></div>
+          <div class="api-io-block"><div class="api-io-label">Response</div><div class="api-io-body">{ conversation_id, title, messages: [...] }</div></div>
+        </div>
+      </div>
+
+      <div class="api-card">
+        <div class="api-line"><span class="api-method get">GET</span><span class="api-path">/api/v1/conversations</span><span class="api-auth">Auth: required</span></div>
+        <div class="api-io">
+          <div class="api-io-block"><div class="api-io-label">Request</div><div class="api-io-body">?cursor&amp;limit — paginated, sorted by updated_at</div></div>
+          <div class="api-io-block"><div class="api-io-label">Response</div><div class="api-io-body">{ conversations: [{ id, title, updated_at }], next_cursor }</div></div>
+        </div>
+      </div>
+
+      <div class="api-card">
+        <div class="api-line"><span class="api-method delete">DELETE</span><span class="api-path">/api/v1/conversations/{id}</span><span class="api-auth">Auth: required (owner only)</span></div>
+        <div class="api-io">
+          <div class="api-io-block"><div class="api-io-label">Request</div><div class="api-io-body">path param: conversation id</div></div>
+          <div class="api-io-block"><div class="api-io-label">Response</div><div class="api-io-body">204 on success, 403 if not owner</div></div>
+        </div>
+      </div>
+
+      <div class="callout good">SSE over plain REST for the message endpoint: generation legitimately takes seconds, and the whole point of the design is that the user should see tokens the instant they're produced rather than staring at a blank screen until the full response is ready.</div>
+    </section>
+
+    <section id="step4-dataflow">
+      <div class="step-pill">Step 4 of 6 — Data Flow</div>
+      <h2>Data flow</h2>
+      <p style="font-size:13px;color:#999;margin-bottom:0.75rem">A new message triggers a write/batch path (blue write, amber async batching) that queues the request for GPU inference, and a read path (mint) that streams generated tokens back as they're produced.</p>
+
+      <div class="diagram-wrap" data-paths='{"write":{"boxes":["w-client","w-mod","w-store","w-sched"],"arrows":["w1","w2","w3"]},"stream":{"boxes":["s-gpu","s-router","s-client"],"arrows":["s1","s2"]}}'>
+        <svg viewBox="0 0 760 220" xmlns="http://www.w3.org/2000/svg">
+          <defs>
+            <marker id="cgW" markerWidth="8" markerHeight="8" refX="6" refY="3" orient="auto"><path d="M0,0 L6,3 L0,6 Z" fill="var(--blue)"/></marker>
+            <marker id="cgA" markerWidth="8" markerHeight="8" refX="6" refY="3" orient="auto"><path d="M0,0 L6,3 L0,6 Z" fill="var(--amber)"/></marker>
+            <marker id="cgR" markerWidth="8" markerHeight="8" refX="6" refY="3" orient="auto"><path d="M0,0 L6,3 L0,6 Z" fill="var(--accent)"/></marker>
+          </defs>
+
+          <text class="diag-sublabel" x="180" y="14" style="font-size:10px;fill:var(--blue)">WRITE + BATCH PATH — new user message</text>
+          <circle class="diag-dot diag-flow-dot dot-write" r="3.5" style="offset-path: path('M10,60 L150,60 L150,60 L300,60 L300,60 L440,60')"></circle>
+          <g data-target="step2-entities" data-id="w-client" data-tip="Sends the user's message, opens an SSE connection for the reply"><rect class="diag-box role-client" x="10" y="37" width="130" height="46"/><text class="diag-label" x="75" y="60" style="font-size:11px">Client (Web/App)</text></g>
+          <path class="diag-arrow-path" data-id="w1" d="M140,60 L165,60" marker-end="url(#cgW)"/>
+          <g data-target="step6-deepdive-context" data-id="w-mod" data-tip="Input safety filter runs before the prompt reaches the model"><rect class="diag-box" x="165" y="37" width="130" height="46"/><text class="diag-label" x="230" y="55" style="font-size:11px">Moderation</text><text class="diag-sublabel" x="230" y="70" style="font-size:8.5px">input filter</text></g>
+          <path class="diag-arrow-path" data-id="w2" d="M295,60 L325,60" marker-end="url(#cgW)"/>
+          <g data-target="step2-entities" data-id="w-store" data-tip="Appends the message, assembles conversation context for the prompt"><rect class="diag-box role-db" x="325" y="37" width="130" height="46"/><text class="diag-label" x="390" y="60" style="font-size:11px">Conversation DB</text></g>
+          <path class="diag-arrow-path" data-id="w3" d="M455,60 L490,60" marker-end="url(#cgA)"/>
+          <g data-target="step6-deepdive-batching" data-id="w-sched" data-tip="Queues the request, joins it into an in-progress GPU batch"><rect class="diag-box role-async" x="490" y="37" width="140" height="46"/><text class="diag-label" x="560" y="55" style="font-size:11px">Scheduler</text><text class="diag-sublabel" x="560" y="70" style="font-size:8.5px">continuous batching</text></g>
+
+          <text class="diag-sublabel" x="180" y="130" style="font-size:10px;fill:var(--accent)">STREAM PATH — tokens as they're generated</text>
+          <circle class="diag-dot diag-flow-dot dot-read" r="3.5" style="offset-path: path('M630,175 L470,175 L470,175 L310,175 L310,175 L150,175')"></circle>
+          <g data-target="step6-deepdive-streaming" data-id="s-gpu" data-tip="Emits one token at a time as the forward pass produces it"><rect class="diag-box role-async" x="560" y="152" width="140" height="46"/><text class="diag-label" x="630" y="175" style="font-size:11px">GPU Worker</text></g>
+          <path class="diag-arrow-path" data-id="s1" d="M560,175 L470,175" marker-end="url(#cgR)"/>
+          <g data-target="step6-deepdive-streaming" data-id="s-router" data-tip="Forwards each token immediately over the open connection"><rect class="diag-box" x="330" y="152" width="140" height="46"/><text class="diag-label" x="400" y="170" style="font-size:11px">Stream Router</text><text class="diag-sublabel" x="400" y="185" style="font-size:8.5px">SSE fan-out</text></g>
+          <path class="diag-arrow-path" data-id="s2" d="M330,175 L150,175" marker-end="url(#cgR)"/>
+          <g data-target="step2-entities" data-id="s-client" data-tip="Renders each token the instant it arrives"><rect class="diag-box role-client" x="10" y="152" width="140" height="46"/><text class="diag-label" x="80" y="175" style="font-size:11px">Client (Web/App)</text></g>
+        </svg>
+        <div class="diag-legend">
+          <div class="diag-legend-item"><span class="diag-legend-dot role-client"></span>Client — sends message, renders streamed tokens</div>
+          <div class="diag-legend-item"><span class="diag-legend-dot role-db"></span>Conversation DB — durable message history</div>
+          <div class="diag-legend-item"><span class="diag-legend-dot role-async"></span>Scheduler + GPU worker — batching and generation, off the synchronous request path</div>
+        </div>
+      </div>
+
+      <ol class="flow-steps-list">
+        <li><span>Client sends the message, opens a stream</span> — POST with an SSE connection kept open for the reply</li>
+        <li><span>Moderation filters the input</span> — blocks disallowed content before it reaches the model</li>
+        <li><span>Conversation DB records the turn and assembles context</span> — recent history is packed into the prompt</li>
+        <li><span>Scheduler queues the request into a batch</span> — joins an in-progress continuous batch rather than waiting for a dedicated GPU call</li>
+        <li><span>GPU worker streams tokens as generated</span> — each token is pushed to the client within milliseconds of being produced, not buffered until the end</li>
+      </ol>
+    </section>
+
+    <section id="step5-hld">
+      <div class="step-pill">Step 5 of 6 — High-Level Design</div>
+      <h2>High-level design</h2>
+      <p style="font-size:13px;color:#999;margin-bottom:0.75rem">Everything upstream of the GPU fleet exists to keep GPUs fed with work and to get tokens back to the client the instant they exist — that's the entire design philosophy.</p>
+
+      <div class="diagram-wrap">
+        <svg viewBox="0 0 800 320" xmlns="http://www.w3.org/2000/svg">
+          <defs><marker id="cgHld" markerWidth="8" markerHeight="8" refX="6" refY="3" orient="auto"><path d="M0,0 L6,3 L0,6 Z" fill="var(--border2)"/></marker></defs>
+
+          <g data-tip="Sends messages, receives streamed tokens over SSE"><rect class="diag-box role-client" x="10" y="30" width="130" height="50"/><text class="diag-label" x="75" y="52" style="font-size:11px">Client</text><text class="diag-sublabel" x="75" y="68" style="font-size:8.5px">web / mobile app</text></g>
+          <path class="diag-arrow-path" d="M140,55 L175,55" marker-end="url(#cgHld)"/>
+          <g data-tip="AuthN, rate limiting, routes to the moderation + scheduling path"><rect class="diag-box" x="175" y="30" width="130" height="50"/><text class="diag-label" x="240" y="52" style="font-size:11px">API Gateway</text><text class="diag-sublabel" x="240" y="68" style="font-size:8.5px">auth, rate limit</text></g>
+
+          <path class="diag-arrow-path" d="M240,80 L240,110" marker-end="url(#cgHld)"/>
+          <g data-tip="Checks both incoming prompts and outgoing tokens for disallowed content"><rect class="diag-box" x="175" y="110" width="130" height="46"/><text class="diag-label" x="240" y="128" style="font-size:11px">Moderation</text><text class="diag-sublabel" x="240" y="143" style="font-size:8.5px">input + output filter</text></g>
+
+          <path class="diag-arrow-path" d="M175,133 L145,133" marker-end="url(#cgHld)"/>
+          <g data-tip="Durable conversation + message history, used to build prompt context"><rect class="diag-box role-db" x="10" y="110" width="130" height="46"/><text class="diag-label" x="75" y="128" style="font-size:11px">Conversation DB</text><text class="diag-sublabel" x="75" y="143" style="font-size:8.5px">Postgres</text></g>
+
+          <path class="diag-arrow-path" d="M305,133 L340,133" marker-end="url(#cgHld)"/>
+          <g data-tip="Continuous batching — groups concurrent requests to maximize GPU throughput"><rect class="diag-box role-async" x="340" y="110" width="150" height="46"/><text class="diag-label" x="415" y="128" style="font-size:11px">Scheduler / Batcher</text><text class="diag-sublabel" x="415" y="143" style="font-size:8.5px">continuous batching</text></g>
+
+          <path class="diag-arrow-path" d="M490,133 L525,133" marker-end="url(#cgHld)"/>
+          <g data-tip="Runs the model forward pass, holds KV-cache per active request"><rect class="diag-box role-async" x="525" y="90" width="150" height="46"/><text class="diag-label" x="600" y="108" style="font-size:11px">GPU Worker Fleet</text><text class="diag-sublabel" x="600" y="123" style="font-size:8.5px">model + KV cache</text></g>
+          <g data-tip="Runs the model forward pass, holds KV-cache per active request"><rect class="diag-box role-async" x="525" y="142" width="150" height="46"/><text class="diag-label" x="600" y="160" style="font-size:11px">GPU Worker Fleet</text><text class="diag-sublabel" x="600" y="175" style="font-size:8.5px">model + KV cache</text></g>
+
+          <path class="diag-arrow-path" d="M600,90 L600,60 L680,60" marker-end="url(#cgHld)" stroke-dasharray="3 3"/>
+          <path class="diag-arrow-path" d="M600,188 L600,220 L680,220" marker-end="url(#cgHld)" stroke-dasharray="3 3"/>
+          <g data-tip="Streams generated tokens back as they're produced, fans out over SSE"><rect class="diag-box role-cache" x="680" y="36" width="110" height="46"/><text class="diag-label" x="735" y="55" style="font-size:11px">Stream Router</text><text class="diag-sublabel" x="735" y="70" style="font-size:8.5px">SSE fan-out</text></g>
+          <g data-tip="Same router handles the return path for all workers"><rect class="diag-box role-cache" x="680" y="196" width="110" height="46"/><text class="diag-label" x="735" y="215" style="font-size:11px">Stream Router</text><text class="diag-sublabel" x="735" y="230" style="font-size:8.5px">SSE fan-out</text></g>
+
+          <path class="diag-arrow-path" d="M735,82 L735,150 L735,196" marker-end="url(#cgHld)"/>
+          <path class="diag-arrow-path" d="M680,59 L500,20 L140,20 L140,55" marker-end="url(#cgHld)" stroke-dasharray="3 3"/>
+          <text class="diag-sublabel" x="410" y="14" style="font-size:9px;fill:var(--muted)">tokens streamed back to the same open client connection</text>
+        </svg>
+        <div class="diag-legend">
+          <div class="diag-legend-item"><span class="diag-legend-dot role-client"></span>Client — holds the open SSE connection for the whole generation</div>
+          <div class="diag-legend-item"><span class="diag-legend-dot role-db"></span>Conversation DB — durable history, read to build context each turn</div>
+          <div class="diag-legend-item"><span class="diag-legend-dot role-async"></span>Scheduler + GPU fleet — the scarce resource, kept busy via batching</div>
+          <div class="diag-legend-item"><span class="diag-legend-dot role-cache"></span>Stream Router — the hot path this whole design optimizes for</div>
+        </div>
+      </div>
+
+      <table class="def-table">
+        <thead><tr><th>Component</th><th>Role</th><th>Tech + why</th></tr></thead>
+        <tbody>
+          <tr><td>API Gateway</td><td>AuthN, rate limiting, request routing</td><td>Standard edge gateway — because per-user rate limits protect scarce GPU capacity from any single abusive client; tradeoff is one more network hop before generation even starts.</td></tr>
+          <tr><td>Moderation</td><td>Filters input prompts and output tokens</td><td>Lightweight classifier model, run inline on both sides — because letting disallowed content reach the model or the user is a product and legal risk; tradeoff is added latency on the critical path, so it must be fast and cheap relative to the LLM itself.</td></tr>
+          <tr><td>Scheduler / Batcher</td><td>Groups concurrent requests into GPU-efficient batches</td><td>Continuous/dynamic batching queue — because GPUs are dramatically more efficient processing many requests together than one at a time; tradeoff is added scheduling complexity and a queuing delay under load spikes.</td></tr>
+          <tr><td>GPU Worker Fleet</td><td>Runs the model forward pass, generates tokens</td><td>Model replicas across a GPU cluster, each holding per-request KV-cache — because this is the actual expensive resource; tradeoff is that worker state is not easily checkpointed, so a crash loses in-flight generations.</td></tr>
+          <tr><td>Stream Router</td><td>Delivers tokens to the client as produced</td><td>SSE (or WebSocket) fan-out layer — because time-to-first-token matters far more than total transfer time; tradeoff is holding one open connection per active generation.</td></tr>
+        </tbody>
+      </table>
+
+      <table class="grid-table">
+        <thead><tr><th>Bottleneck</th><th>Triggers at</th><th>Exact fix</th></tr></thead>
+        <tbody>
+          <tr><td>GPU inference capacity</td><td>Concurrent request count exceeds what the fleet can batch and serve within latency targets</td><td class="fix">Add GPU capacity; prioritize shorter/simpler requests; quantize the model for higher throughput per GPU</td></tr>
+          <tr><td>Context assembly latency</td><td>Long conversations require reading and re-encoding large history on every turn</td><td class="fix">Cache the KV-state across turns where possible; apply the summarization/truncation strategy from Step 6</td></tr>
+          <tr><td>Stream fan-out under load</td><td>Very high concurrent open-connection count</td><td class="fix">Horizontally scale the stream router layer; connections are lightweight compared to GPU work</td></tr>
+        </tbody>
+      </table>
+
+      <h3 style="font-size:13px;color:var(--text);margin:1.25rem 0 0.6rem;font-weight:600">Scaling levers — cheapest to most complex</h3>
+      <ol class="levers-list">
+        <li><strong>Increase max batch size within latency budget</strong><span class="cost">low complexity</span></li>
+        <li><strong>Add request prioritization</strong> (e.g. shorter prompts first) to smooth queue wait<span class="cost">low complexity</span></li>
+        <li><strong>Add more GPU worker replicas</strong> behind the scheduler<span class="cost">medium complexity — costly, but straightforward</span></li>
+        <li><strong>Quantize the model</strong> to trade a little quality for significantly higher tokens/sec per GPU<span class="cost">medium complexity</span></li>
+        <li><strong>Speculative decoding</strong> with a smaller draft model to generate multiple tokens per full-model pass<span class="cost">high complexity — last resort</span></li>
+      </ol>
+
+      <div class="dial-wrap">
+        <div class="dial-title">Batching: single-request latency vs GPU throughput</div>
+        <div class="dial-track"><div class="dial-marker" style="left:78%"></div></div>
+        <div class="dial-labels"><span class="end-left">Per-request latency</span><span class="end-right">GPU throughput</span></div>
+      </div>
+      <div class="dial-wrap">
+        <div class="dial-title">Context management: full history vs summarized/truncated</div>
+        <div class="dial-track"><div class="dial-marker" style="left:35%"></div></div>
+        <div class="dial-labels"><span class="end-left">Full history</span><span class="end-right">Summarized/truncated</span></div>
+      </div>
+    </section>
+
+    <section id="step6-deepdive-batching">
+      <div class="step-pill">Step 6 of 6 — Deep Dives</div>
+      <h2>Deep dive: continuous batching for GPU efficiency</h2>
+      <p style="font-size:13px;color:#999;margin-bottom:0.75rem">A naive one-request-per-GPU-call model wastes most of the GPU's capacity, because each forward pass can process many requests' tokens at once for nearly the same cost as one.</p>
+
+      <div class="diagram-wrap">
+        <svg viewBox="0 0 760 260" xmlns="http://www.w3.org/2000/svg">
+          <defs><marker id="cgBatchArrow" markerWidth="8" markerHeight="8" refX="6" refY="3" orient="auto"><path d="M0,0 L6,3 L0,6 Z" fill="var(--border2)"/></marker></defs>
+
+          <text class="diag-sublabel" x="180" y="16" style="font-size:10px;fill:var(--amber)">NAIVE — one request per GPU call</text>
+          <g data-tip="Request A occupies the whole GPU alone for its full duration"><rect class="diag-box role-async" x="10" y="30" width="150" height="30"/><text class="diag-label" x="85" y="49" style="font-size:10px">Request A (GPU idle for rest)</text></g>
+          <g data-tip="Request B has to wait for A to fully finish before it can start"><rect class="diag-box" x="170" y="30" width="150" height="30"/><text class="diag-label" x="245" y="49" style="font-size:10px">Request B waits</text></g>
+          <g data-tip="Most of the GPU's capacity per call goes unused"><rect class="diag-box" x="330" y="30" width="150" height="30"/><text class="diag-label" x="405" y="49" style="font-size:10px">Request C waits</text></g>
+          <text class="diag-sublabel" x="400" y="78" style="font-size:9px;fill:var(--muted)">total time = A + B + C, run one after another — GPU mostly idle relative to its batch capacity</text>
+
+          <text class="diag-sublabel" x="180" y="110" style="font-size:10px;fill:var(--accent)">CONTINUOUS BATCHING — requests share the GPU concurrently</text>
+          <g data-tip="Joins the batch when it arrives, generating tokens alongside whatever is already in-flight"><rect class="diag-box role-cache" x="10" y="130" width="220" height="30"/><text class="diag-label" x="120" y="149" style="font-size:10px">Request A — tokens 1..N</text></g>
+          <g data-tip="Joins mid-batch as soon as it arrives, no need to wait for A or C to finish"><rect class="diag-box role-cache" x="60" y="166" width="220" height="30"/><text class="diag-label" x="170" y="185" style="font-size:10px">Request B — joins in-progress batch</text></g>
+          <g data-tip="Finishes early and leaves; its GPU slot is immediately reused by the next arrival"><rect class="diag-box role-cache" x="30" y="202" width="150" height="30"/><text class="diag-label" x="105" y="221" style="font-size:10px">Request C — finishes, leaves</text></g>
+          <path class="diag-arrow-path" d="M230,145 L280,145" marker-end="url(#cgBatchArrow)"/>
+          <g data-tip="A new request slots into the batch the moment a GPU cycle is free, no fixed batch boundary"><rect class="diag-box role-async" x="280" y="130" width="180" height="30"/><text class="diag-label" x="370" y="149" style="font-size:10px">Request D — joins as C leaves</text></g>
+          <text class="diag-sublabel" x="400" y="245" style="font-size:9px;fill:var(--muted)">GPU batch stays near-full at all times; requests of different lengths enter and exit independently</text>
+        </svg>
+      </div>
+      <ol class="flow-steps-list">
+        <li><span>New request arrives at the scheduler</span> — it doesn't wait for a fresh batch to form</li>
+        <li><span>It's inserted into the current in-flight batch</span> — the next GPU forward pass processes it alongside whatever requests are already generating</li>
+        <li><span>Each request advances one token per pass</span> — requests are not forced to share the same total length</li>
+        <li><span>A request that finishes generating leaves the batch immediately</span> — its GPU slot is freed for the next arrival</li>
+        <li><span>The batch composition changes continuously</span> — this is what "continuous" or "dynamic" batching means, as opposed to static batches that wait to fill up before starting</li>
+      </ol>
+      <div class="callout good">The key mental model: a GPU forward pass costs roughly the same whether it's processing 1 request's token or 64 requests' tokens simultaneously — so the entire scheduling problem is about keeping that batch as full as possible, at all times, without forcing requests to align in length.</div>
+    </section>
+
+    <section id="step6-deepdive-streaming">
+      <h2>Deep dive: token streaming to the client</h2>
+      <p style="font-size:13px;color:#999;margin-bottom:0.75rem">Full generation can take several seconds, but the user should see the first token in well under a second — streaming decouples perceived latency from total generation time.</p>
+
+      <div class="diagram-wrap">
+        <svg viewBox="0 0 740 280" xmlns="http://www.w3.org/2000/svg">
+          <defs><marker id="cgStreamArrow" markerWidth="8" markerHeight="8" refX="6" refY="3" orient="auto"><path d="M0,0 L6,3 L0,6 Z" fill="var(--accent)"/></marker></defs>
+
+          <text class="diag-sublabel" x="150" y="16" style="font-size:10px;fill:var(--accent)">GOOD — stream each token immediately</text>
+          <g data-tip="Client opens the connection and waits for the first byte"><rect class="diag-box role-client" x="10" y="30" width="110" height="40"/><text class="diag-label" x="65" y="54" style="font-size:10px">Client</text></g>
+          <g data-tip="Generates token 1, pushes it immediately — no buffering"><rect class="diag-box role-async" x="160" y="30" width="140" height="40"/><text class="diag-label" x="230" y="54" style="font-size:10px">GPU Worker</text></g>
+          <path class="diag-arrow-path" d="M120,42 L155,42" marker-end="url(#cgStreamArrow)"/>
+          <path class="diag-arrow-path" d="M300,50 L120,50" marker-end="url(#cgStreamArrow)"/>
+          <text class="diag-sublabel" x="210" y="38" style="font-size:8.5px;fill:var(--muted)">prompt sent</text>
+          <text class="diag-sublabel" x="210" y="66" style="font-size:8.5px;fill:var(--accent)">token 1 → &lt;1s (time-to-first-token)</text>
+
+          <circle class="diag-dot diag-flow-dot dot-read" r="3" style="offset-path: path('M300,90 L120,90')"></circle>
+          <text class="diag-sublabel" x="210" y="86" style="font-size:8.5px;fill:var(--accent)">token 2 → arrives moments later</text>
+          <circle class="diag-dot diag-flow-dot dot-read" r="3" style="offset-path: path('M300,108 L120,108')"></circle>
+          <text class="diag-sublabel" x="210" y="104" style="font-size:8.5px;fill:var(--accent)">token 3, 4, 5... → each rendered as it lands</text>
+          <text class="diag-sublabel" x="210" y="126" style="font-size:9px;fill:var(--muted)">user is reading tokens 1-3 while token 8 is still being generated</text>
+
+          <text class="diag-sublabel" x="150" y="160" style="font-size:10px;fill:var(--amber)">BAD — wait for the full response first</text>
+          <g data-tip="Client sends the prompt and gets nothing back until generation fully completes"><rect class="diag-box role-client" x="10" y="176" width="110" height="40"/><text class="diag-label" x="65" y="200" style="font-size:10px">Client</text></g>
+          <g data-tip="Buffers the entire response, several seconds of generation, before sending anything"><rect class="diag-box" x="160" y="176" width="140" height="40"/><text class="diag-label" x="230" y="196" style="font-size:10px">GPU Worker</text><text class="diag-sublabel" x="230" y="210" style="font-size:8.5px">buffers full response</text></g>
+          <path class="diag-arrow-path" d="M120,188 L155,188" marker-end="url(#cgStreamArrow)"/>
+          <path class="diag-arrow-path" d="M300,222 L120,222" marker-end="url(#cgStreamArrow)" stroke-dasharray="3 3"/>
+          <text class="diag-sublabel" x="210" y="236" style="font-size:8.5px;fill:var(--amber)">full response → several seconds later, all at once</text>
+          <text class="diag-sublabel" x="230" y="256" style="font-size:9px;fill:var(--muted)">user stares at a blank/loading screen for the entire generation time</text>
+        </svg>
+      </div>
+      <ol class="flow-steps-list">
+        <li><span>Client sends the prompt and opens a streaming connection</span> — SSE or WebSocket, held open for the duration of generation</li>
+        <li><span>GPU worker emits each token the instant it's produced</span> — it does not wait to accumulate a full sentence or the full response</li>
+        <li><span>Stream router forwards every token with no added buffering</span> — its only job is to not introduce latency between worker and client</li>
+        <li><span>Client renders tokens as they arrive</span> — the user perceives the response as "already happening," not "loading"</li>
+        <li><span>A final event signals completion</span> — carries metadata like token usage so the client can close the stream cleanly</li>
+      </ol>
+      <div class="callout warn">Time-to-first-token and total generation time are different metrics that get solved differently: TTFT is mostly about queue/batch wait time at the scheduler, while total time is bounded by tokens/sec throughput per request — optimizing one doesn't automatically fix the other.</div>
+    </section>
+
+    <section id="step6-deepdive-context">
+      <h2>Deep dive: conversation context management</h2>
+      <p style="font-size:13px;color:#999;margin-bottom:0.75rem">Every new turn needs the prior conversation as context, but the model has a fixed context window — once a conversation grows past it, something has to give.</p>
+
+      <div class="diagram-wrap">
+        <svg viewBox="0 0 760 260" xmlns="http://www.w3.org/2000/svg">
+          <defs><marker id="cgCtxArrow" markerWidth="8" markerHeight="8" refX="6" refY="3" orient="auto"><path d="M0,0 L6,3 L0,6 Z" fill="var(--border2)"/></marker></defs>
+
+          <text class="diag-sublabel" x="180" y="16" style="font-size:10px;fill:var(--muted)">EVERY TURN — retrieve history, assemble prompt</text>
+          <g data-tip="New user message arrives for an existing conversation"><rect class="diag-box role-client" x="10" y="30" width="120" height="40"/><text class="diag-label" x="70" y="54" style="font-size:10px">New Message</text></g>
+          <path class="diag-arrow-path" d="M130,50 L165,50" marker-end="url(#cgCtxArrow)"/>
+          <g data-tip="Fetches prior turns for this conversation_id, ordered by seq"><rect class="diag-box role-db" x="165" y="30" width="150" height="40"/><text class="diag-label" x="240" y="54" style="font-size:10px">Conversation DB</text></g>
+          <path class="diag-arrow-path" d="M315,50 L350,50" marker-end="url(#cgCtxArrow)"/>
+          <g data-tip="Packs retrieved turns plus the new message into the model's input"><rect class="diag-box" x="350" y="30" width="150" height="40"/><text class="diag-label" x="425" y="54" style="font-size:10px">Context Assembler</text></g>
+          <path class="diag-arrow-path" d="M500,50 L535,50" marker-end="url(#cgCtxArrow)"/>
+          <g data-tip="Checks whether assembled context fits the model's token budget"><rect class="diag-box role-async" x="535" y="30" width="180" height="40"/><text class="diag-label" x="625" y="48" style="font-size:10px">Fits context window?</text><text class="diag-sublabel" x="625" y="62" style="font-size:8.5px">token budget check</text></g>
+
+          <path class="diag-arrow-path" d="M625,70 L625,100" marker-end="url(#cgCtxArrow)"/>
+          <text class="diag-sublabel" x="700" y="95" style="font-size:8.5px;fill:var(--accent)">yes → send as-is</text>
+          <text class="diag-sublabel" x="500" y="95" style="font-size:8.5px;fill:var(--amber)">no → apply a strategy</text>
+
+          <g data-tip="Drop the oldest turns entirely to make room for the newest ones"><rect class="diag-box role-async" x="30" y="120" width="200" height="50"/><text class="diag-label" x="130" y="140" style="font-size:10px">Truncation</text><text class="diag-sublabel" x="130" y="155" style="font-size:8.5px">drop oldest turns</text></g>
+          <g data-tip="Compress older turns into a short summary, keep recent turns verbatim"><rect class="diag-box role-async" x="280" y="120" width="200" height="50"/><text class="diag-label" x="380" y="140" style="font-size:10px">Summarization</text><text class="diag-sublabel" x="380" y="155" style="font-size:8.5px">compress older turns</text></g>
+          <g data-tip="Keep only the most recent K turns, always slide forward"><rect class="diag-box role-async" x="530" y="120" width="200" height="50"/><text class="diag-label" x="630" y="140" style="font-size:10px">Sliding Window</text><text class="diag-sublabel" x="630" y="155" style="font-size:8.5px">keep last K turns</text></g>
+
+          <path class="diag-arrow-path" d="M130,170 L130,200" marker-end="url(#cgCtxArrow)"/>
+          <path class="diag-arrow-path" d="M380,170 L380,200" marker-end="url(#cgCtxArrow)"/>
+          <path class="diag-arrow-path" d="M630,170 L630,200" marker-end="url(#cgCtxArrow)"/>
+          <text class="diag-sublabel" x="130" y="215" style="font-size:8.5px;fill:var(--amber)">loses early detail entirely</text>
+          <text class="diag-sublabel" x="380" y="215" style="font-size:8.5px;fill:var(--accent)">keeps gist, loses exact wording</text>
+          <text class="diag-sublabel" x="630" y="215" style="font-size:8.5px;fill:var(--amber)">simple, but abrupt cutoff</text>
+        </svg>
+      </div>
+      <ol class="flow-steps-list">
+        <li><span>New message arrives for an existing conversation</span> — the system needs prior turns to respond coherently</li>
+        <li><span>Prior turns are retrieved in order</span> — read from the Conversation DB by conversation_id</li>
+        <li><span>Context is assembled and checked against the token budget</span> — the model's context window is a hard limit, not a soft target</li>
+        <li><span>If it fits, the prompt is sent as-is</span> — the common case for most conversations</li>
+        <li><span>If it doesn't fit, a strategy kicks in</span> — truncation drops oldest turns, summarization compresses them, or a sliding window keeps only the most recent K turns — each trades detail for staying in budget</li>
+      </ol>
+      <div class="callout warn">Summarization has the best user experience — it approximates "the model still remembers" — but costs an extra inference call to produce the summary and risks compounding drift if summaries are repeatedly re-summarized across a very long conversation.</div>
+
+      <table class="grid-table" style="margin-top:1rem">
+        <thead><tr><th>Scenario</th><th>User impact</th><th>Detection signal</th><th>Mitigation</th></tr></thead>
+        <tbody>
+          <tr><td>GPU worker crashes mid-generation</td><td class="impact">Client sees a partial, cut-off response</td><td class="detect">Worker heartbeat loss; stream connection drops mid-token</td><td class="fix">Clean retry with the same prompt on a healthy worker — GPU/KV-cache state isn't easily recoverable, so resuming in-place isn't viable; a resumable protocol can replay already-streamed tokens if partial output is worth preserving</td></tr>
+          <tr><td>Inference queue backs up under a traffic spike</td><td class="impact">Requests wait far longer than the TTFT target</td><td class="detect">Queue depth / wait-time percentiles cross threshold</td><td class="fix">Show a visible queue position or wait estimate instead of a silent hang; shed load with a clear "try again shortly" error rather than an inexplicably slow response</td></tr>
+          <tr><td>Conversation exceeds the context window mid-session</td><td class="impact">Risk of abrupt, user-visible loss of earlier context</td><td class="detect">Assembled prompt token count crosses the model's limit</td><td class="fix">Trigger summarization/truncation automatically before the limit is hit, so the transition is invisible rather than a hard error on the next turn</td></tr>
+        </tbody>
+      </table>
+    </section>
+
+    <section id="interview-moves">
+      <h2>Interview moves</h2>
+      <ul class="moves-list">
+        <li><span class="move-num">01</span><div><strong>"The scarce resource here isn't storage or bandwidth, it's GPU inference capacity — every design decision downstream exists to use that capacity more efficiently"</strong> — states the core insight unprompted, reframes the whole problem correctly</div></li>
+        <li><span class="move-num">02</span><div><strong>"I wouldn't run one request per GPU call — I'd use continuous batching so new requests join an in-progress batch as others finish, keeping the GPU near-fully utilized"</strong> — names the single highest-leverage optimization</div></li>
+        <li><span class="move-num">03</span><div><strong>"Time-to-first-token and total generation time are different problems — streaming solves perceived latency without needing to generate any faster"</strong> — shows you're not conflating two separate metrics</div></li>
+        <li><span class="move-num">04</span><div><strong>"A GPU worker crash mid-generation can't be resumed cleanly since KV-cache state isn't easily recoverable — I'd retry the same prompt on a healthy worker rather than trying to patch the broken stream"</strong> — demonstrates you understand what's actually recoverable in this system</div></li>
+        <li><span class="move-num">05</span><div><strong>"As a conversation grows past the context window, I'd rather summarize or slide the window than throw a hard error — the user should never feel an abrupt context cliff"</strong> — surfaces a scale problem most candidates only discover when prompted</div></li>
+        <li><span class="move-num">06</span><div><strong>"Under a load spike, I'd rather show the user a queue position than let requests silently time out — a predictable wait beats an inexplicable one"</strong> — shows product sense about graceful degradation, not just system mechanics</div></li>
+      </ul>
+    </section>
+
+    <section id="follow-ups">
+      <h2>Follow-up questions</h2>
+      <div class="qa-block">
+        <div class="qa-q">Why not just give every request its own dedicated GPU?</div>
+        <div class="qa-a">GPUs are expensive and mostly idle during a single request's memory-bound decode step — continuous batching lets one GPU serve many concurrent requests for nearly the cost of one.</div>
+      </div>
+      <div class="qa-block">
+        <div class="qa-q">How do you keep time-to-first-token low when the queue is deep?</div>
+        <div class="qa-a">Prioritize scheduling so new requests slot into the next batch cycle quickly, and shed or queue-signal load rather than letting wait times grow unbounded.</div>
+      </div>
+      <div class="qa-block">
+        <div class="qa-q">What happens to in-flight generations if a GPU worker needs to be taken down for a deploy?</div>
+        <div class="qa-a">Drain the worker — stop admitting new requests to its batch, let in-flight ones finish, then take it offline; abrupt kills should be reserved for actual crashes.</div>
+      </div>
+      <div class="qa-block">
+        <div class="qa-q">How would you reduce moderation's added latency on the critical path?</div>
+        <div class="qa-a">Run it as a small, fast classifier co-located with the gateway rather than a full model call, and run input and output checks in parallel with generation where safe.</div>
+      </div>
+      <div class="qa-block">
+        <div class="qa-q">How do you decide between truncation, summarization, and a sliding window for context overflow?</div>
+        <div class="qa-a">Sliding window is simplest and cheapest but loses early detail abruptly; summarization preserves gist at the cost of an extra inference call — most production systems use summarization once a conversation crosses a length threshold.</div>
+      </div>
+      <div class="qa-block">
+        <div class="qa-q">How would you scale this to support much longer responses (e.g. long-form documents)?</div>
+        <div class="qa-a">The streaming and batching model doesn't change — you'd mainly need higher per-request token budgets, longer-lived connections, and schedulers tolerant of more variance in request length within a batch.</div>
+      </div>
+    </section>
+
+  </main>
+  <script src="../../assets/nav.js"></script>
+</body>
+</html>

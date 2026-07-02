@@ -1,0 +1,487 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Design an Ad Click Aggregator — SD Prep</title>
+  <link rel="stylesheet" href="../../assets/style.css">
+</head>
+<body>
+  <aside id="sidebar"></aside>
+  <main>
+
+    <header class="page-head">
+      <div class="pill">Questions</div>
+      <h1>Design an Ad Click Aggregator</h1>
+      <p class="sub">Tests whether you can build a real-time stream-aggregation pipeline with financial-grade exactly-once correctness at extreme write volume, not just a generic "count things with Kafka" answer.</p>
+      <div class="meta-row">
+        <span class="badge green">45-55 min interview</span>
+        <span class="badge blue">Hard</span>
+      </div>
+    </header>
+
+    <div class="flash-card">
+      <div class="flash-label">Say this in the first 2 minutes</div>
+      <ul>
+        <li>The core insight: this is a real-time stream-aggregation problem where correctness is a financial requirement, not an analytics nicety — advertisers are billed off these numbers, so double- or under-counting is a bug, not noise</li>
+        <li>Key scale number to anchor on: ~100B events/day is ~1.2M events/sec average, with peak traffic (evening, campaign launches) running several times higher — this rules out any single-node aggregation</li>
+        <li>Primary tradeoff being probed: real-time streaming aggregates are fast but approximate under failure/replay; you need a batch reconciliation path against the immutable raw log to guarantee exactness</li>
+        <li>Component most candidates forget: a dedup key (event_id) at ingestion — Kafka only guarantees at-least-once delivery, so without idempotent aggregation a retried producer double-counts a click</li>
+        <li>Failure mode most candidates skip: late-arriving events after a window has "closed" — watermarks and a grace period are required or you silently undercount every window boundary</li>
+      </ul>
+    </div>
+
+    <section id="step1-requirements">
+      <div class="step-pill">Step 1 of 6 — Requirements</div>
+      <h2>Requirements</h2>
+
+      <div class="goal-arc-wrap">
+        <div class="goal-arc-row functional">
+          <div class="goal-arc-seg">1</div><div class="goal-arc-seg">2</div><div class="goal-arc-seg">3</div><div class="goal-arc-seg">4</div><div class="goal-arc-seg">5</div><div class="goal-arc-seg inactive">6</div>
+        </div>
+        <div class="goal-arc-label"><span>Arc 1 (steps 1-5) — <strong>Satisfy Functional Requirements</strong></span></div>
+        <div class="goal-arc-row nonfunctional" style="margin-top:8px">
+          <div class="goal-arc-seg">1</div><div class="goal-arc-seg">2</div><div class="goal-arc-seg">3</div><div class="goal-arc-seg">4</div><div class="goal-arc-seg">5</div><div class="goal-arc-seg">6</div>
+        </div>
+        <div class="goal-arc-label"><span>Arc 2 (all 6 steps) — <strong>Satisfy Non-Functional Requirements</strong></span></div>
+      </div>
+
+      <div class="compare-grid">
+        <div class="compare-card good">
+          <div class="compare-label">Functional</div>
+          <ul>
+            <li>Ingest click and impression events from ad servers at massive scale</li>
+            <li>Aggregate counts and spend per ad and per campaign over time windows</li>
+            <li>Serve near-real-time stats to an advertiser-facing dashboard</li>
+            <li>Reconcile streaming aggregates against ground truth periodically</li>
+          </ul>
+        </div>
+        <div class="compare-card bad">
+          <div class="compare-label">Non-Functional</div>
+          <ul>
+            <li>~100B events/day, ~1.2M events/sec average, multi-x at peak</li>
+            <li>Dashboard numbers fresh within seconds to low minutes</li>
+            <li>Financial-grade correctness — no double-counting on retry or replay</li>
+            <li>Raw events durable and replayable for audits and reconciliation</li>
+          </ul>
+        </div>
+      </div>
+
+      <div class="callout warn"><strong>What NOT to build:</strong> ad-targeting or bidding logic, a fraud-detection ML pipeline (worth a one-line mention as a separate system), or the billing/invoicing system itself. This is event ingestion, aggregation, and correctness — not deciding which ad to show or how an advertiser gets charged.</div>
+
+      <div class="stat-grid">
+        <div class="stat-card"><div class="stat-val">100B/day</div><div class="stat-label">click + impression events/day</div></div>
+        <div class="stat-card"><div class="stat-val">~1.2M/s</div><div class="stat-label">average events/sec ingested</div></div>
+        <div class="stat-card"><div class="stat-val">&lt;1 min</div><div class="stat-label">aggregation freshness target</div></div>
+        <div class="stat-card"><div class="stat-val">0 dupes</div><div class="stat-label">correctness requirement on replay</div></div>
+      </div>
+    </section>
+
+    <section id="step2-entities">
+      <div class="step-pill">Step 2 of 6 — Core Entities</div>
+      <h2>Core entities</h2>
+      <p style="font-size:13px;color:#999;margin-bottom:0.75rem">Raw events are an immutable append-only log — the source of truth. Aggregates are derived, rebuildable state that can always be recomputed from the log.</p>
+
+      <div class="entity-grid">
+        <div class="entity-box">
+          <div class="entity-head"><span class="entity-name">ClickEvent</span><span class="entity-store redis">Kafka</span></div>
+          <div class="entity-fields">
+            <div class="entity-field"><span class="fname pk">event_id</span><span class="ftype">UUID — dedup key</span></div>
+            <div class="entity-field"><span class="fname idx">ad_id</span><span class="ftype">BIGINT, partition key</span></div>
+            <div class="entity-field"><span class="fname">campaign_id</span><span class="ftype">BIGINT</span></div>
+            <div class="entity-field"><span class="fname">event_type</span><span class="ftype">TEXT — click | impression</span></div>
+            <div class="entity-field"><span class="fname">event_ts</span><span class="ftype">TIMESTAMP — origin time</span></div>
+            <div class="entity-field"><span class="fname">bid_amount</span><span class="ftype">DECIMAL — spend basis</span></div>
+          </div>
+          <div class="entity-why">Because a Kafka topic partitioned by ad_id gives ordered, replayable delivery with the parallelism aggregation needs — event_id is what makes every downstream consumer idempotent on redelivery. Tradeoff: at-least-once delivery means dedup logic is mandatory, not optional.</div>
+        </div>
+
+        <div class="entity-box">
+          <div class="entity-head"><span class="entity-name">AdAggregate</span><span class="entity-store cass">Wide-column</span></div>
+          <div class="entity-fields">
+            <div class="entity-field"><span class="fname pk">ad_id + window_start</span><span class="ftype">composite PK</span></div>
+            <div class="entity-field"><span class="fname">campaign_id</span><span class="ftype">BIGINT</span></div>
+            <div class="entity-field"><span class="fname">click_count</span><span class="ftype">BIGINT — upserted</span></div>
+            <div class="entity-field"><span class="fname">impression_count</span><span class="ftype">BIGINT — upserted</span></div>
+            <div class="entity-field"><span class="fname">spend_total</span><span class="ftype">DECIMAL — upserted</span></div>
+            <div class="entity-field"><span class="fname">reconciled</span><span class="ftype">BOOL — batch-confirmed</span></div>
+          </div>
+          <div class="entity-why">Because dashboards need fast per-ad/per-window rollups, not raw events — a wide-column store keyed by (ad_id, window_start) gives O(1) writes and fast range scans for time-series queries. Tradeoff: it's a derived view, so it must be safely rebuildable, never treated as ground truth.</div>
+        </div>
+
+        <div class="entity-box">
+          <div class="entity-head"><span class="entity-name">RawEventLog</span><span class="entity-store s3">S3 / cold</span></div>
+          <div class="entity-fields">
+            <div class="entity-field"><span class="fname pk">event_id</span><span class="ftype">UUID</span></div>
+            <div class="entity-field"><span class="fname idx">event_date, hour</span><span class="ftype">partition columns</span></div>
+            <div class="entity-field"><span class="fname">full event payload</span><span class="ftype">Parquet, append-only</span></div>
+          </div>
+          <div class="entity-why">Because this is the single source of truth advertisers can be billed against — an immutable, infinitely-replayable log lets the batch job recompute exact aggregates independent of any streaming-layer bug. Tradeoff: cheap and durable, but query-hostile — never serves live traffic directly.</div>
+        </div>
+      </div>
+
+      <div class="callout info">Primary key: <code>ClickEvent.event_id</code>, generated at the ad server (not the client) to survive retries. Critical index: <code>AdAggregate</code>'s composite key on <code>(ad_id, window_start)</code> — this is what makes windowed upserts idempotent and range-scannable for a campaign's time series.</div>
+    </section>
+
+    <section id="step3-api">
+      <div class="step-pill">Step 3 of 6 — API / Interface</div>
+      <h2>API design</h2>
+      <p style="font-size:13px;color:#999;margin-bottom:0.75rem">Event ingestion is a Kafka produce call, not REST — it's a fire-and-forget high-frequency write. Stats queries are REST; live dashboard updates use a WebSocket push.</p>
+
+      <div class="api-card">
+        <div class="api-line"><span class="api-method post">PRODUCE</span><span class="api-path">kafka: topic=ad-events, key=ad_id</span><span class="api-auth">Auth: signed ad-server client</span></div>
+        <div class="api-io">
+          <div class="api-io-block"><div class="api-io-label">Message</div><div class="api-io-body">{ event_id, ad_id, campaign_id, event_type, event_ts, bid_amount }</div></div>
+          <div class="api-io-block"><div class="api-io-label">Ack</div><div class="api-io-body">producer acks=all; retried on timeout (event_id makes retry safe)</div></div>
+        </div>
+      </div>
+
+      <div class="api-card">
+        <div class="api-line"><span class="api-method get">GET</span><span class="api-path">/api/v1/campaigns/{id}/stats?window=1m</span><span class="api-auth">Auth: required (advertiser)</span></div>
+        <div class="api-io">
+          <div class="api-io-block"><div class="api-io-label">Response</div><div class="api-io-body">{ clicks, impressions, spend, as_of, approximate: true }</div></div>
+          <div class="api-io-block"><div class="api-io-label">Source</div><div class="api-io-body">streaming aggregate store — fast, not yet reconciled</div></div>
+        </div>
+      </div>
+
+      <div class="api-card">
+        <div class="api-line"><span class="api-method get">GET</span><span class="api-path">/api/v1/campaigns/{id}/stats?window=1d&reconciled=true</span><span class="api-auth">Auth: required (advertiser)</span></div>
+        <div class="api-io">
+          <div class="api-io-block"><div class="api-io-label">Response</div><div class="api-io-body">{ clicks, impressions, spend, as_of, approximate: false }</div></div>
+          <div class="api-io-block"><div class="api-io-label">Source</div><div class="api-io-body">batch-recomputed from RawEventLog — exact, used for billing</div></div>
+        </div>
+      </div>
+
+      <div class="api-card">
+        <div class="api-line"><span class="api-method ws">WEBSOCKET</span><span class="api-path">/ws/campaigns/{id}/live</span><span class="api-auth">Auth: required (advertiser)</span></div>
+        <div class="api-io">
+          <div class="api-io-block"><div class="api-io-label">Message out</div><div class="api-io-body">{ window_start, clicks, impressions, spend }</div></div>
+          <div class="api-io-block"><div class="api-io-label">Cadence</div><div class="api-io-body">pushed once per closed window (~1 min)</div></div>
+        </div>
+      </div>
+
+      <div class="callout good">Two stats endpoints, same shape, different truth: the <code>1m</code> window is the streaming aggregate — fast but labeled <code>approximate</code>. The <code>reconciled=true</code> query only serves windows the batch job has already corrected — this is the number billing systems should read, never the raw streaming aggregate.</div>
+    </section>
+
+    <section id="step4-dataflow">
+      <div class="step-pill">Step 4 of 6 — Data Flow</div>
+      <h2>Data flow</h2>
+      <p style="font-size:13px;color:#999;margin-bottom:0.75rem">Ingestion (amber, async) and dashboard reads (mint) share the aggregate store but are otherwise independent — one writes continuously, the other reads on demand.</p>
+
+      <div class="diagram-wrap" data-paths='{"ingest":{"boxes":["i-adserver","i-kafka","i-flink","i-store"],"arrows":["i1","i2","i3"]},"read":{"boxes":["r-dash","r-query","i-store"],"arrows":["r1","r2"]}}'>
+        <svg viewBox="0 0 760 230" xmlns="http://www.w3.org/2000/svg">
+          <defs>
+            <marker id="acdW" markerWidth="8" markerHeight="8" refX="6" refY="3" orient="auto"><path d="M0,0 L6,3 L0,6 Z" fill="var(--amber)"/></marker>
+            <marker id="acdR" markerWidth="8" markerHeight="8" refX="6" refY="3" orient="auto"><path d="M0,0 L6,3 L0,6 Z" fill="var(--accent)"/></marker>
+          </defs>
+
+          <text class="diag-sublabel" x="180" y="14" style="font-size:10px;fill:var(--amber)">INGESTION PATH — ~1.2M events/sec average</text>
+          <g data-target="step6-deepdive-exactlyonce" data-id="i-adserver" data-tip="Emits a click/impression event with a unique event_id per view"><rect class="diag-box role-client" x="10" y="24" width="130" height="46"/><text class="diag-label" x="75" y="47" style="font-size:11px">Ad Server</text></g>
+          <path class="diag-arrow-path" data-id="i1" d="M140,47 L175,47" marker-end="url(#acdW)"/>
+          <circle class="diag-dot diag-flow-dot" data-flow="async" r="3.5" style="offset-path: path('M140,47 L175,47 L175,47 L340,47 L340,47 L400,47 L400,47 L565,47')"></circle>
+          <g data-target="step6-deepdive-exactlyonce" data-id="i-kafka" data-tip="Partitioned by ad_id, at-least-once delivery"><rect class="diag-box role-async" x="175" y="24" width="130" height="46"/><text class="diag-label" x="240" y="47" style="font-size:11px">Kafka</text></g>
+          <path class="diag-arrow-path" data-id="i2" d="M305,47 L340,47" marker-end="url(#acdW)"/>
+          <g data-target="step6-deepdive-windowing" data-id="i-flink" data-tip="Windowed aggregation, dedup by event_id, checkpointed"><rect class="diag-box role-async" x="340" y="24" width="140" height="46"/><text class="diag-label" x="410" y="47" style="font-size:11px">Stream Processor</text></g>
+          <path class="diag-arrow-path" data-id="i3" d="M480,47 L515,47" marker-end="url(#acdW)"/>
+          <g data-target="step2-entities" data-id="i-store" data-tip="Per-ad, per-window rollups — written by ingestion, read by the dashboard"><rect class="diag-box role-db" x="515" y="24" width="140" height="46"/><text class="diag-label" x="585" y="47" style="font-size:11px">Aggregate Store</text></g>
+
+          <text class="diag-sublabel" x="180" y="120" style="font-size:10px;fill:var(--accent)">DASHBOARD READ PATH</text>
+          <g data-target="step3-api" data-id="r-dash" data-tip="Advertiser dashboard, polls or subscribes via WebSocket"><rect class="diag-box role-client" x="10" y="130" width="130" height="46"/><text class="diag-label" x="75" y="158" style="font-size:11px">Dashboard</text></g>
+          <path class="diag-arrow-path" data-id="r1" d="M140,153 L175,153" marker-end="url(#acdR)"/>
+          <circle class="diag-dot diag-flow-dot" data-flow="read" r="3.5" style="offset-path: path('M140,153 L175,153 L175,153 L340,153 L340,153 L585,153 L585,153 L585,70')"></circle>
+          <g data-target="step3-api" data-id="r-query" data-tip="Serves 1m and reconciled 1d windows"><rect class="diag-box" x="175" y="130" width="165" height="46"/><text class="diag-label" x="257" y="158" style="font-size:11px">Query Service</text></g>
+          <path class="diag-arrow-path" data-id="r2" d="M340,153 L585,153 L585,70" marker-end="url(#acdR)" stroke-dasharray="3 3"/>
+        </svg>
+        <div class="diag-legend">
+          <div class="diag-legend-item"><span class="diag-legend-dot role-client"></span>Ad server + dashboard — entry points</div>
+          <div class="diag-legend-item"><span class="diag-legend-dot role-async"></span>Kafka + stream processor — continuous async write path</div>
+          <div class="diag-legend-item"><span class="diag-legend-dot role-db"></span>Aggregate store — shared, written by ingestion, read by dashboard</div>
+        </div>
+      </div>
+
+      <ol class="flow-steps-list">
+        <li><span>Ad server emits an event</span> — every click/impression gets a unique event_id generated server-side</li>
+        <li><span>Event lands on Kafka</span> — partitioned by ad_id so all events for one ad are processed in order by one consumer</li>
+        <li><span>Stream processor aggregates</span> — dedups by event_id, folds the event into its 1-minute window's running counts</li>
+        <li><span>Aggregate store is upserted</span> — per-(ad_id, window_start) row updated in place, idempotent on replay</li>
+        <li><span>Dashboard reads the aggregate</span> — query service serves the latest window, labeled approximate until reconciled</li>
+      </ol>
+    </section>
+
+    <section id="step5-hld">
+      <div class="step-pill">Step 5 of 6 — High-Level Design</div>
+      <h2>High-level design</h2>
+      <p style="font-size:13px;color:#999;margin-bottom:0.75rem">Streaming gives fast approximate numbers; a batch job reads the immutable raw log and overwrites each window with the exact, reconciled value.</p>
+
+      <div class="diagram-wrap">
+        <svg viewBox="0 0 800 320" xmlns="http://www.w3.org/2000/svg">
+          <defs><marker id="acHldArrow" markerWidth="8" markerHeight="8" refX="6" refY="3" orient="auto"><path d="M0,0 L6,3 L0,6 Z" fill="var(--border2)"/></marker></defs>
+
+          <g data-tip="Serves ads, emits click/impression events with a unique event_id"><rect class="diag-box role-client" x="10" y="30" width="130" height="50"/><text class="diag-label" x="75" y="52" style="font-size:11px">Ad Server</text><text class="diag-sublabel" x="75" y="68" style="font-size:8.5px">fleet, stateless</text></g>
+          <path class="diag-arrow-path" d="M140,55 L175,55" marker-end="url(#acHldArrow)"/>
+          <g data-tip="Partitioned by ad_id or campaign_id for ordered, parallel consumption"><rect class="diag-box role-async" x="175" y="30" width="130" height="50"/><text class="diag-label" x="240" y="52" style="font-size:11px">Kafka</text><text class="diag-sublabel" x="240" y="68" style="font-size:8.5px">event ingestion</text></g>
+          <path class="diag-arrow-path" d="M305,55 L340,55" marker-end="url(#acHldArrow)"/>
+          <g data-tip="Flink-style: windowed aggregation, checkpointing, idempotent sink"><rect class="diag-box role-async" x="340" y="30" width="150" height="50"/><text class="diag-label" x="415" y="52" style="font-size:11px">Stream Processor</text><text class="diag-sublabel" x="415" y="68" style="font-size:8.5px">windowed agg + dedup</text></g>
+          <path class="diag-arrow-path" d="M490,55 L525,55" marker-end="url(#acHldArrow)"/>
+          <g data-tip="Per-ad/per-campaign rollups, upserted by window"><rect class="diag-box role-db" x="525" y="30" width="150" height="50"/><text class="diag-label" x="600" y="52" style="font-size:11px">Aggregate Store</text><text class="diag-sublabel" x="600" y="68" style="font-size:8.5px">wide-column / time-series</text></g>
+          <path class="diag-arrow-path" d="M675,55 L710,55" marker-end="url(#acHldArrow)"/>
+          <g data-tip="Advertiser-facing dashboard, near-real-time"><rect class="diag-box role-client" x="710" y="30" width="80" height="50"/><text class="diag-label" x="750" y="52" style="font-size:10px">Dashboard</text><text class="diag-sublabel" x="750" y="68" style="font-size:8.5px">via query svc</text></g>
+
+          <path class="diag-arrow-path" d="M240,80 L240,130" marker-end="url(#acHldArrow)" stroke-dasharray="3 3"/>
+          <g data-tip="Every raw event is also archived here, immutable and append-only"><rect class="diag-box role-db" x="165" y="130" width="150" height="50"/><text class="diag-label" x="240" y="152" style="font-size:11px">Raw Event Log</text><text class="diag-sublabel" x="240" y="168" style="font-size:8.5px">S3 / cold storage</text></g>
+
+          <path class="diag-arrow-path" d="M315,155 L350,155" marker-end="url(#acHldArrow)"/>
+          <g data-tip="Nightly/hourly job — recomputes exact aggregates directly from the log"><rect class="diag-box role-async" x="350" y="130" width="160" height="50"/><text class="diag-label" x="430" y="152" style="font-size:11px">Batch Reconciler</text><text class="diag-sublabel" x="430" y="168" style="font-size:8.5px">exact recompute</text></g>
+
+          <path class="diag-arrow-path" d="M430,130 L430,90 L600,90 L600,80" marker-end="url(#acHldArrow)" stroke-dasharray="3 3"/>
+          <text class="diag-sublabel" x="515" y="102" style="font-size:8.5px;fill:var(--accent)">overwrites/corrects streaming numbers</text>
+
+          <g data-tip="Serves both the fast streaming window and the reconciled window, labeled accordingly"><rect class="diag-box" x="600" y="200" width="150" height="50"/><text class="diag-label" x="675" y="222" style="font-size:11px">Query Service</text><text class="diag-sublabel" x="675" y="238" style="font-size:8.5px">stats API + WS</text></g>
+          <path class="diag-arrow-path" d="M600,225 L525,80" marker-end="url(#acHldArrow)"/>
+          <path class="diag-arrow-path" d="M675,200 L750,80" marker-end="url(#acHldArrow)"/>
+        </svg>
+        <div class="diag-legend">
+          <div class="diag-legend-item"><span class="diag-legend-dot role-client"></span>Ad server + dashboard — entry/exit points</div>
+          <div class="diag-legend-item"><span class="diag-legend-dot role-async"></span>Kafka, stream processor, batch reconciler — async/continuous work</div>
+          <div class="diag-legend-item"><span class="diag-legend-dot role-db"></span>Aggregate store + raw event log — durable, one derived, one source of truth</div>
+        </div>
+      </div>
+
+      <table class="def-table">
+        <thead><tr><th>Component</th><th>Role</th><th>Tech + why</th></tr></thead>
+        <tbody>
+          <tr><td>Kafka</td><td>Durable, ordered event ingestion</td><td>Partitioned by ad_id — because ordering per ad matters for windowed aggregation, and partitions give horizontal write scaling; tradeoff is at-least-once delivery, pushing dedup downstream.</td></tr>
+          <tr><td>Stream Processor</td><td>Windowed aggregation, dedup</td><td>Flink-style with checkpointing — because exactly-once semantics need periodic durable state snapshots; tradeoff is added operational complexity vs a naive stateless consumer.</td></tr>
+          <tr><td>Aggregate Store</td><td>Per-ad/campaign rollups</td><td>Wide-column store (e.g. Cassandra/Bigtable-style) — because writes are keyed upserts at huge volume and reads are range scans by time; tradeoff is eventual consistency across replicas.</td></tr>
+          <tr><td>Raw Event Log</td><td>Immutable source of truth</td><td>Append-only object storage (e.g. S3, Parquet) — because it must outlive and out-verify the streaming layer; tradeoff is high query latency, never used for live serving.</td></tr>
+          <tr><td>Batch Reconciler</td><td>Recomputes exact aggregates</td><td>Scheduled batch job (e.g. Spark) over the raw log — because it's the only component that recomputes from first principles, catching any streaming-layer drift; tradeoff is hours of latency, acceptable since it's correction, not the live path.</td></tr>
+        </tbody>
+      </table>
+
+      <h3 style="font-size:13px;color:var(--text);margin:1.25rem 0 0.6rem;font-weight:600">Scaling levers — cheapest to most complex</h3>
+      <ol class="levers-list">
+        <li><strong>Add Kafka partitions and stream-processor parallelism</strong><span class="cost">low complexity</span></li>
+        <li><strong>Batch small event writes at the ad server before producing</strong><span class="cost">low complexity</span></li>
+        <li><strong>Pre-aggregate at the edge (ad server) for coarse counts</strong><span class="cost">medium complexity</span></li>
+        <li><strong>Shard the aggregate store by ad_id hash range</strong><span class="cost">medium complexity</span></li>
+        <li><strong>Tiered windows — 1m live, 1h and 1d materialized incrementally</strong><span class="cost">high complexity — last resort</span></li>
+      </ol>
+
+      <table class="grid-table">
+        <thead><tr><th>Bottleneck</th><th>Triggers at</th><th>Exact fix</th></tr></thead>
+        <tbody>
+          <tr><td>Stream processor CPU/state</td><td>Peak load several times average (&gt;5-6M events/sec)</td><td class="fix">Scale processor parallelism horizontally by Kafka partition count</td></tr>
+          <tr><td>Aggregate store write hot-spot</td><td>A viral ad/campaign concentrates writes on one key</td><td class="fix">Salt the partition key or pre-aggregate at the stream layer before the final upsert</td></tr>
+          <tr><td>Batch reconciliation runtime</td><td>Raw log grows faster than the job's throughput</td><td class="fix">Partition the batch job by date/hour shard, run incrementally instead of full-table</td></tr>
+        </tbody>
+      </table>
+
+      <div class="dial-wrap">
+        <div class="dial-title">Aggregation freshness: real-time streaming vs reconciled batch</div>
+        <div class="dial-track"><div class="dial-marker" style="left:78%"></div></div>
+        <div class="dial-labels"><span class="end-left">Real-time streaming</span><span class="end-right">Reconciled batch</span></div>
+      </div>
+      <div class="dial-wrap">
+        <div class="dial-title">Correctness approach: exactly-once complexity vs at-least-once + idempotent dedup</div>
+        <div class="dial-track"><div class="dial-marker" style="left:30%"></div></div>
+        <div class="dial-labels"><span class="end-left">Exactly-once pipeline</span><span class="end-right">At-least-once + dedup</span></div>
+      </div>
+    </section>
+
+    <section id="step6-deepdive-exactlyonce">
+      <div class="step-pill">Step 6 of 6 — Deep Dives</div>
+      <h2>Deep dive: exactly-once stream aggregation</h2>
+      <p style="font-size:13px;color:#999;margin-bottom:0.75rem">Kafka only guarantees at-least-once delivery — a producer retry or consumer rebalance can redeliver the same event. Correctness comes from making the aggregation idempotent, not from eliminating redelivery.</p>
+
+      <div class="diagram-wrap">
+        <svg viewBox="0 0 720 230" xmlns="http://www.w3.org/2000/svg">
+          <defs><marker id="eoArrow" markerWidth="8" markerHeight="8" refX="6" refY="3" orient="auto"><path d="M0,0 L6,3 L0,6 Z" fill="var(--accent)"/></marker><marker id="eoArrowAmber" markerWidth="8" markerHeight="8" refX="6" refY="3" orient="auto"><path d="M0,0 L6,3 L0,6 Z" fill="var(--amber)"/></marker></defs>
+
+          <g data-tip="Same event_id redelivered after a producer timeout or consumer rebalance"><rect class="diag-box role-async" x="10" y="30" width="150" height="46"/><text class="diag-label" x="85" y="53" style="font-size:11px">Kafka (redelivers)</text></g>
+          <path class="diag-arrow-path" d="M160,53 L195,53" marker-end="url(#eoArrowAmber)"/>
+          <text class="diag-sublabel" x="90" y="18" style="font-size:9px;fill:var(--amber)">at-least-once delivery — duplicates possible</text>
+
+          <g data-tip="Checks event_id against a bounded recently-seen set before folding into the window"><rect class="diag-box role-cache" x="195" y="30" width="160" height="46"/><text class="diag-label" x="275" y="47" style="font-size:11px">Dedup Check</text><text class="diag-sublabel" x="275" y="63" style="font-size:8.5px">event_id seen before?</text></g>
+
+          <path class="diag-arrow-path" d="M355,45 L390,30" marker-end="url(#eoArrow)"/>
+          <text class="diag-sublabel" x="400" y="24" style="font-size:8.5px;fill:var(--accent)">new</text>
+          <g data-tip="Applies the event to the running window count exactly once"><rect class="diag-box role-cache" x="390" y="10" width="160" height="40"/><text class="diag-label" x="470" y="34" style="font-size:10.5px">Apply to Window</text></g>
+
+          <path class="diag-arrow-path" d="M355,60 L390,80" marker-end="url(#eoArrowAmber)"/>
+          <text class="diag-sublabel" x="400" y="95" style="font-size:8.5px;fill:var(--amber)">duplicate</text>
+          <g data-tip="Event is silently dropped — already counted, no-op"><rect class="diag-box" x="390" y="65" width="160" height="40"/><text class="diag-label" x="470" y="89" style="font-size:10.5px">Drop (no-op)</text></g>
+
+          <path class="diag-arrow-path" d="M550,30 L585,30" marker-end="url(#eoArrow)"/>
+          <g data-tip="Snapshotted periodically so state survives a processor crash"><rect class="diag-box role-db" x="585" y="10" width="120" height="40"/><text class="diag-label" x="645" y="34" style="font-size:10.5px">Checkpoint</text></g>
+
+          <path class="diag-arrow-path" d="M275,76 L275,140" marker-end="url(#eoArrow)"/>
+          <g data-tip="Upsert keyed by (ad_id, window_start) — replaying the same event_id twice is a no-op by construction"><rect class="diag-box role-db" x="195" y="140" width="270" height="50"/><text class="diag-label" x="330" y="162" style="font-size:11px">Idempotent Upsert Sink</text><text class="diag-sublabel" x="330" y="178" style="font-size:8.5px">keyed on event_id, naturally replay-safe</text></g>
+
+          <path class="diag-arrow-path" d="M645,50 L645,165 L465,165" marker-end="url(#eoArrow)" stroke-dasharray="3 3"/>
+          <text class="diag-sublabel" x="580" y="120" style="font-size:8.5px;fill:var(--muted)">on failure: restore from checkpoint, replay since</text>
+        </svg>
+        <div class="diag-legend">
+          <div class="diag-legend-item"><span class="diag-legend-dot role-async"></span>Kafka — source of at-least-once redelivery</div>
+          <div class="diag-legend-item"><span class="diag-legend-dot role-cache"></span>Dedup check + window state — hot-path processing</div>
+          <div class="diag-legend-item"><span class="diag-legend-dot role-db"></span>Checkpoint + upsert sink — durable, idempotent by key</div>
+        </div>
+      </div>
+      <ol class="flow-steps-list">
+        <li><span>Event arrives, possibly a redelivery</span> — Kafka's at-least-once guarantee means this is expected, not exceptional</li>
+        <li><span>Dedup check against event_id</span> — a bounded window of recently-seen ids (backed by the checkpointed state) catches duplicates</li>
+        <li><span>New events apply to the window</span> — folded into the running count for that (ad_id, window_start)</li>
+        <li><span>State is checkpointed periodically</span> — on a crash, the processor restores from the last checkpoint and replays only what's since it</li>
+        <li><span>The sink itself is upsert-based</span> — even if a duplicate slips past dedup, writing the same (key, value) twice is a no-op, not a double-count</li>
+      </ol>
+      <div class="callout good">Two independent layers of defense: dedup at the processing stage catches most duplicates cheaply, and an idempotent upsert sink keyed by window makes the rare slip-through harmless — correctness doesn't depend on either one being perfect alone.</div>
+    </section>
+
+    <section id="step6-deepdive-windowing">
+      <h2>Deep dive: windowed aggregation and watermarks</h2>
+      <p style="font-size:13px;color:#999;margin-bottom:0.75rem">Events are grouped into fixed 1-minute tumbling windows. A watermark tracks how far event-time has progressed, and a grace period decides how long a window stays open for stragglers before it's considered final.</p>
+
+      <div class="diagram-wrap">
+        <svg viewBox="0 0 740 230" xmlns="http://www.w3.org/2000/svg">
+          <defs><marker id="winArrow" markerWidth="8" markerHeight="8" refX="6" refY="3" orient="auto"><path d="M0,0 L6,3 L0,6 Z" fill="var(--border2)"/></marker></defs>
+
+          <text class="diag-sublabel" x="370" y="16" style="font-size:10px;fill:var(--muted)">EVENT-TIME TIMELINE</text>
+          <line x1="20" y1="40" x2="720" y2="40" stroke="var(--border2)" stroke-width="1.5"/>
+          <path class="diag-arrow-path" d="M700,40 L720,40" marker-end="url(#winArrow)"/>
+
+          <rect class="diag-box role-cache" x="60" y="60" width="180" height="40" rx="4"/>
+          <text class="diag-label" x="150" y="84" style="font-size:10.5px">Window [12:00–12:01)</text>
+
+          <rect class="diag-box role-cache" x="260" y="60" width="180" height="40" rx="4"/>
+          <text class="diag-label" x="350" y="84" style="font-size:10.5px">Window [12:01–12:02)</text>
+
+          <rect class="diag-box" x="460" y="60" width="180" height="40" rx="4"/>
+          <text class="diag-label" x="550" y="84" style="font-size:10.5px">Window [12:02–12:03)</text>
+
+          <circle cx="150" cy="40" r="4" fill="var(--accent)"/>
+          <circle cx="220" cy="40" r="4" fill="var(--accent)"/>
+          <circle cx="300" cy="40" r="4" fill="var(--amber)"/>
+          <text class="diag-sublabel" x="300" y="122" style="font-size:8px;fill:var(--amber)">late event, timestamped 12:00:58</text>
+          <path class="diag-arrow-path" d="M300,44 L165,60" marker-end="url(#winArrow)" stroke="var(--amber)" stroke-dasharray="3 3"/>
+          <text class="diag-sublabel" x="230" y="55" style="font-size:7.5px;fill:var(--amber)">arrives late, routed to origin window</text>
+
+          <path class="diag-arrow-path" d="M420,40 L420,20" marker-end="url(#winArrow)"/>
+          <text class="diag-label" x="420" y="14" style="font-size:9.5px;fill:var(--blue)">Watermark: 12:02:00</text>
+
+          <rect x="140" y="110" width="220" height="30" rx="4" fill="none" stroke="var(--amber)" stroke-dasharray="2 2"/>
+          <text class="diag-sublabel" x="250" y="129" style="font-size:8.5px;fill:var(--amber)">grace period: 30s past window close</text>
+
+          <text class="diag-sublabel" x="150" y="170" style="font-size:8.5px;fill:var(--muted)">closed + finalized</text>
+          <text class="diag-sublabel" x="350" y="170" style="font-size:8.5px;fill:var(--muted)">in grace period</text>
+          <text class="diag-sublabel" x="550" y="170" style="font-size:8.5px;fill:var(--muted)">actively accumulating</text>
+        </svg>
+        <div class="diag-legend">
+          <div class="diag-legend-item"><span class="diag-legend-dot role-cache"></span>Tumbling 1-minute windows — non-overlapping, fixed size</div>
+        </div>
+      </div>
+      <ol class="flow-steps-list">
+        <li><span>Events are bucketed by event-time</span> — the timestamp the ad server assigned, not when the processor receives it</li>
+        <li><span>Watermark tracks progress</span> — an estimate of "no more events earlier than this will arrive," derived from observed event-time lag</li>
+        <li><span>A window closes when the watermark passes its end</span> — triggering emission of that window's aggregate</li>
+        <li><span>A grace period keeps it updatable briefly after</span> — late events within the grace window still get folded in via the idempotent upsert</li>
+        <li><span>Events later than the grace period are dropped or routed to reconciliation</span> — the batch job is what ultimately catches these instead</li>
+      </ol>
+      <div class="callout warn">Grace period is a direct latency-vs-completeness knob: a longer grace period catches more late/network-delayed events but delays when a window is considered "final" for the dashboard — a 0s grace period is fastest but systematically undercounts every window by its straggler rate.</div>
+    </section>
+
+    <section id="step6-deepdive-reconciliation">
+      <h2>Deep dive: streaming vs batch reconciliation</h2>
+      <p style="font-size:13px;color:#999;margin-bottom:0.75rem">Two paths compute the same numbers on different timelines: streaming is fast but can drift under replay, rebalance, or a dedup edge case; batch is slow but reads the immutable log directly, so it's always exact.</p>
+
+      <div class="diagram-wrap">
+        <svg viewBox="0 0 760 240" xmlns="http://www.w3.org/2000/svg">
+          <defs><marker id="recArrow" markerWidth="8" markerHeight="8" refX="6" refY="3" orient="auto"><path d="M0,0 L6,3 L0,6 Z" fill="var(--border2)"/></marker><marker id="recArrowAmber" markerWidth="8" markerHeight="8" refX="6" refY="3" orient="auto"><path d="M0,0 L6,3 L0,6 Z" fill="var(--amber)"/></marker></defs>
+
+          <text class="diag-sublabel" x="140" y="16" style="font-size:10px;fill:var(--amber)">STREAMING PATH — seconds, approximate</text>
+          <g data-tip="Same source as ingestion"><rect class="diag-box role-async" x="10" y="30" width="120" height="44"/><text class="diag-label" x="70" y="52" style="font-size:10.5px">Kafka</text></g>
+          <path class="diag-arrow-path" d="M130,52 L165,52" marker-end="url(#recArrowAmber)"/>
+          <g data-tip="Windowed, checkpointed, idempotent — but can drift under a rare replay edge case"><rect class="diag-box role-async" x="165" y="30" width="150" height="44"/><text class="diag-label" x="240" y="52" style="font-size:10.5px">Stream Processor</text></g>
+          <path class="diag-arrow-path" d="M315,52 L350,52" marker-end="url(#recArrowAmber)"/>
+          <g data-tip="Holds the fast, live-but-approximate numbers"><rect class="diag-box role-db" x="350" y="30" width="160" height="44"/><text class="diag-label" x="430" y="52" style="font-size:10.5px">Aggregate Store</text><text class="diag-sublabel" x="430" y="66" style="font-size:8px">approximate: true</text></g>
+          <path class="diag-arrow-path" d="M510,52 L545,52" marker-end="url(#recArrowAmber)"/>
+          <g data-tip="Reads the fast numbers for live charts"><rect class="diag-box role-client" x="545" y="30" width="150" height="44"/><text class="diag-label" x="620" y="52" style="font-size:10.5px">Dashboard (live)</text></g>
+
+          <text class="diag-sublabel" x="140" y="115" style="font-size:10px;fill:var(--accent)">BATCH PATH — hours later, exact</text>
+          <g data-tip="Immutable, append-only, the one true record of every event"><rect class="diag-box role-db" x="10" y="130" width="140" height="46"/><text class="diag-label" x="80" y="153" style="font-size:10.5px">Raw Event Log</text><text class="diag-sublabel" x="80" y="167" style="font-size:8px">S3, immutable</text></g>
+          <path class="diag-arrow-path" d="M150,153 L185,153" marker-end="url(#recArrow)"/>
+          <g data-tip="Nightly/hourly Spark job — recomputes counts and spend directly from raw events"><rect class="diag-box role-async" x="185" y="130" width="160" height="46"/><text class="diag-label" x="265" y="153" style="font-size:10.5px">Batch Reconciler</text></g>
+          <path class="diag-arrow-path" d="M345,153 L380,153" marker-end="url(#recArrow)"/>
+          <g data-tip="Overwrites the streaming numbers for each window with the exact recomputed value"><rect class="diag-box role-db" x="380" y="130" width="180" height="46"/><text class="diag-label" x="470" y="153" style="font-size:10.5px">Aggregate Store</text><text class="diag-sublabel" x="470" y="167" style="font-size:8px">approximate: false</text></g>
+          <path class="diag-arrow-path" d="M560,153 L595,153" marker-end="url(#recArrow)"/>
+          <g data-tip="Billing always reads reconciled, never streaming"><rect class="diag-box role-client" x="595" y="130" width="150" height="46"/><text class="diag-label" x="670" y="153" style="font-size:10.5px">Billing System</text></g>
+
+          <path class="diag-arrow-path" d="M430,74 L430,130" marker-end="url(#recArrow)" stroke-dasharray="3 3"/>
+          <text class="diag-sublabel" x="430" y="120" style="font-size:8px;fill:var(--muted)">same store, streaming rows overwritten in place</text>
+        </svg>
+        <div class="diag-legend">
+          <div class="diag-legend-item"><span class="diag-legend-dot role-async"></span>Streaming: Kafka + processor — fast, continuous, approximate</div>
+          <div class="diag-legend-item"><span class="diag-legend-dot role-db"></span>Batch: raw log + reconciler — slow, exact, overwrites in place</div>
+        </div>
+      </div>
+      <ol class="flow-steps-list">
+        <li><span>Streaming produces a live number within seconds</span> — good enough for a dashboard graph, labeled approximate</li>
+        <li><span>Every raw event is also durably archived</span> — the same event that feeds Kafka lands in the immutable raw log</li>
+        <li><span>A batch job runs on a schedule</span> — hourly or nightly, reading directly from the raw log, independent of any streaming state</li>
+        <li><span>It recomputes the exact aggregate per window</span> — no dedup ambiguity, no checkpoint edge cases, just a full deterministic recompute</li>
+        <li><span>The reconciled value overwrites the streaming value</span> — same store, same key, marked <code>approximate: false</code>; billing only ever reads this value</li>
+      </ol>
+      <div class="callout danger">Why not just pick one: streaming alone can silently drift — a rare checkpoint-recovery edge case or a dedup-window eviction under extreme skew can under- or over-count a window, and you'd never know without an independent check. Batch alone is correct but hours stale, useless for a live dashboard. You need both: streaming for speed, batch as the financial-grade backstop.</div>
+
+      <table class="grid-table" style="margin-top:1rem">
+        <thead><tr><th>Failure mode</th><th>User impact</th><th>Detection signal</th><th>Mitigation</th></tr></thead>
+        <tbody>
+          <tr><td>Stream processor node fails mid-window</td><td class="impact">Brief gap in live dashboard updates</td><td class="detect">Consumer lag spike, checkpoint age alert</td><td class="fix">Checkpoint-based recovery resumes from last snapshot — no data loss, only brief reprocessing</td></tr>
+          <tr><td>Burst of duplicate events (buggy ad server or bot traffic)</td><td class="impact">Inflated click counts if undetected</td><td class="detect">event_id dedup-hit rate spikes; anomalous click-to-impression ratio</td><td class="fix">Dedup by event_id at ingestion; route suspected bot traffic to a separate fraud pipeline, out of scope for core counting</td></tr>
+          <tr><td>Aggregate store falls behind under peak load</td><td class="impact">Dashboard numbers lag further behind real time</td><td class="detect">Kafka consumer lag growing, backpressure signal from sink</td><td class="fix">Backpressure throttles ingestion acceptance; stream layer scales horizontally by adding partitions/consumers</td></tr>
+        </tbody>
+      </table>
+    </section>
+
+    <section id="interview-moves">
+      <h2>Interview moves</h2>
+      <ul class="moves-list">
+        <li><span class="move-num">01</span><div><strong>"These numbers are what advertisers get billed on, so correctness isn't a nice-to-have — a double-counted click is a financial bug, not an analytics rounding error"</strong> — frames the entire problem correctly in one sentence</div></li>
+        <li><span class="move-num">02</span><div><strong>"Kafka only gives me at-least-once delivery, so I need every event to carry a unique event_id and make the aggregation idempotent on redelivery"</strong> — shows you know exactly where duplicates come from and how to neutralize them</div></li>
+        <li><span class="move-num">03</span><div><strong>"I'd use tumbling 1-minute windows with a watermark and a short grace period — that's a direct latency-vs-completeness tradeoff I can tune"</strong> — names the specific mechanism instead of hand-waving "windowing"</div></li>
+        <li><span class="move-num">04</span><div><strong>"Streaming alone can drift under replay or a checkpoint edge case, so I'd run a batch job against the immutable raw log to reconcile the exact numbers on a schedule"</strong> — proactively introduces the dual-path architecture before being asked</div></li>
+        <li><span class="move-num">05</span><div><strong>"The raw event log in cold storage is the actual source of truth — the aggregate store is just a fast, rebuildable derived view"</strong> — demonstrates clear separation between ground truth and cache-like derived state</div></li>
+        <li><span class="move-num">06</span><div><strong>"Fraud and bot-click detection is a related but separate system — I'd keep it out of the core counting pipeline and mention it as a follow-on concern"</strong> — scopes the problem correctly instead of overbuilding</div></li>
+      </ul>
+    </section>
+
+    <section id="follow-ups">
+      <h2>Follow-up questions</h2>
+      <div class="qa-block">
+        <div class="qa-q">How do you handle a stream processor crashing mid-window?</div>
+        <div class="qa-a">Checkpointed state is restored from the last durable snapshot; the processor replays events since that checkpoint, and idempotent upserts make any reprocessed events a no-op.</div>
+      </div>
+      <div class="qa-block">
+        <div class="qa-q">What if the same event_id somehow gets two different aggregate values applied?</div>
+        <div class="qa-a">It shouldn't under correct upsert semantics — the sink is keyed by window, not by event, so applying the same event twice recomputes the same delta, not an additional one.</div>
+      </div>
+      <div class="qa-block">
+        <div class="qa-q">How do you choose the grace period length?</div>
+        <div class="qa-a">Measure observed event-time lag (p99 network/ad-server delay) and set the grace period just past that — too short undercounts stragglers, too long delays dashboard finality.</div>
+      </div>
+      <div class="qa-block">
+        <div class="qa-q">Why not just make the batch job the only source of truth and skip streaming?</div>
+        <div class="qa-a">Advertisers expect near-real-time spend visibility to manage budgets live; a batch-only system with hours of lag fails that requirement even though it's simpler.</div>
+      </div>
+      <div class="qa-block">
+        <div class="qa-q">How would you detect bot or fraudulent click traffic?</div>
+        <div class="qa-a">A separate fraud-detection pipeline scores events on signals like click velocity per IP/device and click-through anomalies, then flags or excludes them before billing — decoupled from core counting.</div>
+      </div>
+      <div class="qa-block">
+        <div class="qa-q">How does this scale if event volume grows 10x?</div>
+        <div class="qa-a">Add Kafka partitions and stream-processor parallelism first (cheap, linear), then shard the aggregate store by ad_id range before considering edge pre-aggregation.</div>
+      </div>
+    </section>
+
+  </main>
+  <script src="../../assets/nav.js"></script>
+</body>
+</html>

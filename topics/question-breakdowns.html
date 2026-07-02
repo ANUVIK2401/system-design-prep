@@ -13,9 +13,9 @@
     <header class="page-head">
       <div class="pill">Questions</div>
       <h1>Question Breakdowns</h1>
-      <p class="sub">23 canonical system design questions, each walked through the same 6-step Hello Interview framework end to end.</p>
+      <p class="sub">30 canonical system design questions, each walked through the same 6-step Hello Interview framework end to end.</p>
       <div class="meta-row">
-        <span class="badge green">23 questions</span>
+        <span class="badge green">30 questions</span>
         <span class="badge blue">All interview-ready</span>
       </div>
     </header>
@@ -272,6 +272,76 @@
           <div class="card-cat">Collaboration</div>
           <h3>Design Google Docs</h3>
           <p>Real-time collaborative editing is an Operational Transformation problem — last-write-wins doesn't converge</p>
+          <div class="card-meta">
+            <span class="badge green">40-50 min</span>
+            <span class="badge amber">Hard</span>
+          </div>
+        </a>
+        <a class="topic-card" href="questions/distributed-cache.html" style="--card-i:13">
+          <div class="card-num">24</div>
+          <div class="card-cat">Infrastructure</div>
+          <h3>Design a Distributed Cache</h3>
+          <p>Consistent hashing and replication are the real problem — not "store key/value," but remap the fewest keys when nodes change</p>
+          <div class="card-meta">
+            <span class="badge green">40-50 min</span>
+            <span class="badge amber">Hard</span>
+          </div>
+        </a>
+        <a class="topic-card" href="questions/job-scheduler.html" style="--card-i:14">
+          <div class="card-num">25</div>
+          <div class="card-cat">Coordination</div>
+          <h3>Design a Distributed Job Scheduler</h3>
+          <p>Leader election and exactly-once dispatch — cron on one box is a SPOF, cron on every box double-fires</p>
+          <div class="card-meta">
+            <span class="badge green">40-50 min</span>
+            <span class="badge amber">Hard</span>
+          </div>
+        </a>
+        <a class="topic-card" href="questions/web-crawler.html" style="--card-i:15">
+          <div class="card-num">26</div>
+          <div class="card-cat">Crawling</div>
+          <h3>Design a Web Crawler</h3>
+          <p>URL frontier and dedup at billions-of-URLs scale — politeness constraints, not HTTP fetching, are the hard part</p>
+          <div class="card-meta">
+            <span class="badge green">40-50 min</span>
+            <span class="badge amber">Hard</span>
+          </div>
+        </a>
+        <a class="topic-card" href="questions/ad-click-aggregator.html" style="--card-i:16">
+          <div class="card-num">27</div>
+          <div class="card-cat">Streaming</div>
+          <h3>Design an Ad Click Aggregator</h3>
+          <p>Real-time exactly-once counting at billions of events/day — advertisers are billed on these numbers</p>
+          <div class="card-meta">
+            <span class="badge green">40-50 min</span>
+            <span class="badge amber">Hard</span>
+          </div>
+        </a>
+        <a class="topic-card" href="questions/payment-system.html" style="--card-i:17">
+          <div class="card-num">28</div>
+          <div class="card-cat">Consistency</div>
+          <h3>Design a Payment System</h3>
+          <p>Multi-party ledger settlement plus idempotent charges — coordinating state with an async external processor</p>
+          <div class="card-meta">
+            <span class="badge green">40-50 min</span>
+            <span class="badge amber">Hard</span>
+          </div>
+        </a>
+        <a class="topic-card" href="questions/metrics-monitoring.html" style="--card-i:18">
+          <div class="card-num">29</div>
+          <div class="card-cat">Observability</div>
+          <h3>Design a Metrics Monitoring System</h3>
+          <p>Time-series writes at extreme scale vs. flexible queries — plus a low-latency path just for alerting</p>
+          <div class="card-meta">
+            <span class="badge green">40-50 min</span>
+            <span class="badge amber">Hard</span>
+          </div>
+        </a>
+        <a class="topic-card" href="questions/chatgpt.html" style="--card-i:19">
+          <div class="card-num">30</div>
+          <div class="card-cat">ML Infra</div>
+          <h3>Design ChatGPT</h3>
+          <p>GPU inference capacity is the scarce resource — continuous batching, token streaming, and context-window limits</p>
           <div class="card-meta">
             <span class="badge green">40-50 min</span>
             <span class="badge amber">Hard</span>

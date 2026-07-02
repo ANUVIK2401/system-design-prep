@@ -54,6 +54,13 @@
     { slug: 'uber',               name: 'Uber',                cat: 'Questions', dir: 'questions/' },
     { slug: 'robinhood',          name: 'Robinhood',           cat: 'Questions', dir: 'questions/' },
     { slug: 'google-docs',        name: 'Google Docs',         cat: 'Questions', dir: 'questions/' },
+    { slug: 'distributed-cache',  name: 'Distributed Cache',   cat: 'Questions', dir: 'questions/' },
+    { slug: 'job-scheduler',      name: 'Job Scheduler',       cat: 'Questions', dir: 'questions/' },
+    { slug: 'web-crawler',        name: 'Web Crawler',         cat: 'Questions', dir: 'questions/' },
+    { slug: 'ad-click-aggregator',name: 'Ad Click Aggregator', cat: 'Questions', dir: 'questions/' },
+    { slug: 'payment-system',     name: 'Payment System',      cat: 'Questions', dir: 'questions/' },
+    { slug: 'metrics-monitoring', name: 'Metrics Monitoring',  cat: 'Questions', dir: 'questions/' },
+    { slug: 'chatgpt',            name: 'Design ChatGPT',      cat: 'Questions', dir: 'questions/' },
   ];
 
   const sidebar  = document.getElementById('sidebar');
