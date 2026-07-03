@@ -272,9 +272,9 @@
       <table class="grid-table">
         <thead><tr><th>Bottleneck</th><th>Triggers at</th><th>Exact fix</th></tr></thead>
         <tbody>
-          <tr><td>Single TSDB shard overload</td><td>One metric's label combinations concentrate writes on one shard</td><td class="fix">Cardinality guardrails at ingestion reject the offending series before they land</td></tr>
-          <tr><td>Query latency on long ranges</td><td>Dashboard queries months of raw data directly</td><td class="fix">Query service auto-selects the rollup tier instead of scanning raw points</td></tr>
-          <tr><td>Alert evaluation lag</td><td>Alerting engine falls behind the ingestion stream</td><td class="fix">Backpressure monitoring on the alerting pipeline itself, independent scaling from the TSDB write path</td></tr>
+          <tr data-severity="high"><td>Single TSDB shard overload</td><td><span class="triggers-chip">TRIGGERS AT</span><br>One metric's label combinations concentrate writes on one shard</td><td class="fix">Cardinality guardrails at ingestion reject the offending series before they land</td></tr>
+          <tr data-severity="medium"><td>Query latency on long ranges</td><td><span class="triggers-chip">TRIGGERS AT</span><br>Dashboard queries months of raw data directly</td><td class="fix">Query service auto-selects the rollup tier instead of scanning raw points</td></tr>
+          <tr data-severity="medium"><td>Alert evaluation lag</td><td><span class="triggers-chip">TRIGGERS AT</span><br>Alerting engine falls behind the ingestion stream</td><td class="fix">Backpressure monitoring on the alerting pipeline itself, independent scaling from the TSDB write path</td></tr>
         </tbody>
       </table>
 
@@ -387,7 +387,7 @@
       </ol>
       <div class="callout warn">Polling-based alerting has two independent failure modes: the poll interval itself adds latency that can blow past a &lt;1 minute target, and an expensive ad-hoc dashboard query can starve the same query path an alert poll is waiting on — exactly when an incident is generating more dashboard traffic too.</div>
 
-      <table class="grid-table" style="margin-top:1rem">
+      <table class="grid-table failure-table" style="margin-top:1rem">
         <thead><tr><th>Scenario</th><th>User impact</th><th>Detection signal</th><th>Mitigation</th></tr></thead>
         <tbody>
           <tr><td>High-cardinality metric overwhelms a TSDB shard</td><td class="impact">Query latency spikes for every metric on that shard, not just the offender</td><td class="detect">Per-metric series count crosses a cardinality limit</td><td class="fix">Ingestion rejects/drops the offending series past the limit and alerts the emitting team</td></tr>

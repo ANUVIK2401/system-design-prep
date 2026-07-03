@@ -286,9 +286,9 @@
       <table class="grid-table">
         <thead><tr><th>Bottleneck</th><th>Triggers at</th><th>Exact fix</th></tr></thead>
         <tbody>
-          <tr><td>Frontier hot-shard on one domain</td><td>A single large domain (e.g. a huge e-commerce site) dominates one shard's queue</td><td class="fix">Sub-shard large domains by URL-path prefix while keeping one politeness clock per domain</td></tr>
-          <tr><td>Bloom filter false-positive creep</td><td>Filter fill ratio grows past its sized capacity</td><td class="fix">Periodic resize or rotate to a scalable variant (counting Bloom filter / cuckoo filter)</td></tr>
-          <tr><td>DNS resolution latency</td><td>Fetcher pool stalls waiting on cold lookups</td><td class="fix">Pre-resolve domains ahead of the claim queue, cache aggressively within TTL bounds</td></tr>
+          <tr data-severity="high"><td>Frontier hot-shard on one domain</td><td><span class="triggers-chip">TRIGGERS AT</span><br>A single large domain (e.g. a huge e-commerce site) dominates one shard's queue</td><td class="fix">Sub-shard large domains by URL-path prefix while keeping one politeness clock per domain</td></tr>
+          <tr data-severity="medium"><td>Bloom filter false-positive creep</td><td><span class="triggers-chip">TRIGGERS AT</span><br>Filter fill ratio grows past its sized capacity</td><td class="fix">Periodic resize or rotate to a scalable variant (counting Bloom filter / cuckoo filter)</td></tr>
+          <tr data-severity="low"><td>DNS resolution latency</td><td><span class="triggers-chip">TRIGGERS AT</span><br>Fetcher pool stalls waiting on cold lookups</td><td class="fix">Pre-resolve domains ahead of the claim queue, cache aggressively within TTL bounds</td></tr>
         </tbody>
       </table>
 
@@ -426,7 +426,7 @@
       </ol>
       <div class="callout good">Recrawl and first-discovery share one frontier and one fetch budget on purpose — treating them as separate systems would let an aggressive recrawl policy starve discovery of brand-new pages, or vice versa.</div>
 
-      <table class="grid-table" style="margin-top:1rem">
+      <table class="grid-table failure-table" style="margin-top:1rem">
         <thead><tr><th>Failure mode</th><th>User impact</th><th>Detection signal</th><th>Mitigation</th></tr></thead>
         <tbody>
           <tr><td>Crawler trap (infinite URL generation)</td><td class="impact">One malicious/misconfigured site consumes the entire fetch budget</td><td class="detect">URL count for a single domain grows far past historical norms</td><td class="fix">URL normalization (strip session/tracking params) plus a hard max-depth and max-URLs-per-domain cap</td></tr>

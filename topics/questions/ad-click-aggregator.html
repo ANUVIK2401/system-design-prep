@@ -270,9 +270,9 @@
       <table class="grid-table">
         <thead><tr><th>Bottleneck</th><th>Triggers at</th><th>Exact fix</th></tr></thead>
         <tbody>
-          <tr><td>Stream processor CPU/state</td><td>Peak load several times average (&gt;5-6M events/sec)</td><td class="fix">Scale processor parallelism horizontally by Kafka partition count</td></tr>
-          <tr><td>Aggregate store write hot-spot</td><td>A viral ad/campaign concentrates writes on one key</td><td class="fix">Salt the partition key or pre-aggregate at the stream layer before the final upsert</td></tr>
-          <tr><td>Batch reconciliation runtime</td><td>Raw log grows faster than the job's throughput</td><td class="fix">Partition the batch job by date/hour shard, run incrementally instead of full-table</td></tr>
+          <tr data-severity="high"><td>Stream processor CPU/state</td><td><span class="triggers-chip">TRIGGERS AT</span><br>Peak load several times average (&gt;5-6M events/sec)</td><td class="fix">Scale processor parallelism horizontally by Kafka partition count</td></tr>
+          <tr data-severity="medium"><td>Aggregate store write hot-spot</td><td><span class="triggers-chip">TRIGGERS AT</span><br>A viral ad/campaign concentrates writes on one key</td><td class="fix">Salt the partition key or pre-aggregate at the stream layer before the final upsert</td></tr>
+          <tr data-severity="low"><td>Batch reconciliation runtime</td><td><span class="triggers-chip">TRIGGERS AT</span><br>Raw log grows faster than the job's throughput</td><td class="fix">Partition the batch job by date/hour shard, run incrementally instead of full-table</td></tr>
         </tbody>
       </table>
 
@@ -431,7 +431,7 @@
       </ol>
       <div class="callout danger">Why not just pick one: streaming alone can silently drift — a rare checkpoint-recovery edge case or a dedup-window eviction under extreme skew can under- or over-count a window, and you'd never know without an independent check. Batch alone is correct but hours stale, useless for a live dashboard. You need both: streaming for speed, batch as the financial-grade backstop.</div>
 
-      <table class="grid-table" style="margin-top:1rem">
+      <table class="grid-table failure-table" style="margin-top:1rem">
         <thead><tr><th>Failure mode</th><th>User impact</th><th>Detection signal</th><th>Mitigation</th></tr></thead>
         <tbody>
           <tr><td>Stream processor node fails mid-window</td><td class="impact">Brief gap in live dashboard updates</td><td class="detect">Consumer lag spike, checkpoint age alert</td><td class="fix">Checkpoint-based recovery resumes from last snapshot — no data loss, only brief reprocessing</td></tr>

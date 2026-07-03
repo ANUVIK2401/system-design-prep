@@ -35,17 +35,6 @@
       <div class="step-pill">Step 1 of 6 — Requirements</div>
       <h2>Requirements</h2>
 
-      <div class="goal-arc-wrap">
-        <div class="goal-arc-row functional">
-          <div class="goal-arc-seg">1</div><div class="goal-arc-seg">2</div><div class="goal-arc-seg">3</div><div class="goal-arc-seg">4</div><div class="goal-arc-seg">5</div><div class="goal-arc-seg inactive">6</div>
-        </div>
-        <div class="goal-arc-label"><span>Arc 1 (steps 1-5) — <strong>Satisfy Functional Requirements</strong></span></div>
-        <div class="goal-arc-row nonfunctional" style="margin-top:8px">
-          <div class="goal-arc-seg">1</div><div class="goal-arc-seg">2</div><div class="goal-arc-seg">3</div><div class="goal-arc-seg">4</div><div class="goal-arc-seg">5</div><div class="goal-arc-seg">6</div>
-        </div>
-        <div class="goal-arc-label"><span>Arc 2 (all 6 steps) — <strong>Satisfy Non-Functional Requirements</strong></span></div>
-      </div>
-
       <div class="compare-grid">
         <div class="compare-card good">
           <div class="compare-label">Functional</div>
@@ -80,7 +69,6 @@
     <section id="step2-entities">
       <div class="step-pill">Step 2 of 6 — Core Entities</div>
       <h2>Core entities</h2>
-      <p style="font-size:13px;color:#999;margin-bottom:0.75rem">Metadata and blocks are separate systems from the start — different access patterns, different stores.</p>
 
       <div class="entity-grid">
         <div class="entity-box">
@@ -122,7 +110,6 @@
     <section id="step3-api">
       <div class="step-pill">Step 3 of 6 — API / Interface</div>
       <h2>API design</h2>
-      <p style="font-size:13px;color:#999;margin-bottom:0.75rem">Upload/download are REST; sync uses long-poll — a persistent connection would over-provision for an event that fires rarely per device.</p>
 
       <div class="api-card">
         <div class="api-line"><span class="api-method post">POST</span><span class="api-path">/api/v1/blocks/exists</span><span class="api-auth">Auth: required</span></div>
@@ -162,7 +149,6 @@
     <section id="step4-dataflow">
       <div class="step-pill">Step 4 of 6 — Data Flow</div>
       <h2>Data flow</h2>
-      <p style="font-size:13px;color:#999;margin-bottom:0.75rem">Upload (blue) and download (mint) as the two primary flows; sync notification is covered as its own path in Step 5.</p>
 
       <div class="diagram-wrap" data-paths='{"upload":{"boxes":["u-client","u-block","u-s3","u-meta","u-pg"],"arrows":["u1","u2","u3","u4"]},"download":{"boxes":["d-client","d-meta","d-cdn"],"arrows":["d1","d2"]}}'>
         <svg viewBox="0 0 740 220" xmlns="http://www.w3.org/2000/svg">
@@ -209,30 +195,29 @@
     <section id="step5-hld">
       <div class="step-pill">Step 5 of 6 — High-Level Design</div>
       <h2>High-level design</h2>
-      <p style="font-size:13px;color:#999;margin-bottom:0.75rem">Full system including the sync notification path, shown here as its own flow between two clients.</p>
 
       <div class="diagram-wrap">
         <svg viewBox="0 0 760 260" xmlns="http://www.w3.org/2000/svg">
           <defs><marker id="dbHldArrow" markerWidth="8" markerHeight="8" refX="6" refY="3" orient="auto"><path d="M0,0 L6,3 L0,6 Z" fill="var(--border2)"/></marker></defs>
 
-          <g data-tip="Splits, hashes, and reassembles files locally"><rect class="diag-box role-client" x="10" y="20" width="110" height="46"/><text class="diag-label" x="65" y="47" style="font-size:11px">Clients</text></g>
+          <g data-tip="Splits, hashes, and reassembles files locally" data-detail-name="Clients" data-detail-role="Client" data-detail-tech="Desktop/mobile/web sync client" data-detail-why="Splits files into chunks and hashes them locally so only new content ever needs to cross the network." data-detail-latency="~0ms — local compute only"><rect class="diag-box role-client" x="10" y="20" width="110" height="46"/><text class="diag-label" x="65" y="47" style="font-size:11px">Clients</text></g>
           <path class="diag-arrow-path" d="M120,43 L155,43" marker-end="url(#dbHldArrow)"/>
-          <g data-tip="Auth, routing to block/metadata/sync services"><rect class="diag-box role-client" x="155" y="20" width="120" height="46"/><text class="diag-label" x="215" y="43" style="font-size:11px">API Gateway</text></g>
+          <g data-tip="Auth, routing to block/metadata/sync services" data-detail-name="API Gateway" data-detail-role="Service" data-detail-tech="Stateless pods" data-detail-why="Single entry point for auth and routing to block, metadata, and notification services." data-detail-latency="~5-10ms"><rect class="diag-box role-client" x="155" y="20" width="120" height="46"/><text class="diag-label" x="215" y="43" style="font-size:11px">API Gateway</text></g>
 
           <path class="diag-arrow-path" d="M215,66 L215,100" marker-end="url(#dbHldArrow)"/>
-          <g data-tip="Hash existence checks, chunk upload/download"><rect class="diag-box" x="150" y="100" width="130" height="46"/><text class="diag-label" x="215" y="123" style="font-size:11px">Block Service</text></g>
+          <g data-tip="Hash existence checks, chunk upload/download" data-detail-name="Block Service" data-detail-role="Service" data-detail-tech="Stateless pods — because chunk operations are independent and horizontally scale" data-detail-why="Chunk operations are independent and horizontally scale; tradeoff is none, this is the easy side." data-detail-latency="~10-30ms per batch check"><rect class="diag-box" x="150" y="100" width="130" height="46"/><text class="diag-label" x="215" y="123" style="font-size:11px">Block Service</text></g>
           <path class="diag-arrow-path" d="M215,146 L215,180" marker-end="url(#dbHldArrow)"/>
-          <g data-tip="Content-addressed object storage"><rect class="diag-box role-db" x="150" y="180" width="130" height="46"/><text class="diag-label" x="215" y="203" style="font-size:11px">S3</text></g>
+          <g data-tip="Content-addressed object storage" data-detail-name="S3" data-detail-role="Database" data-detail-tech="Object storage — because blocks are immutable and accessed by hash" data-detail-why="Blocks are immutable and accessed by hash; tradeoff is eventual consistency on some read-after-write edge cases." data-detail-latency="~20-80ms per chunk read/write"><rect class="diag-box role-db" x="150" y="180" width="130" height="46"/><text class="diag-label" x="215" y="203" style="font-size:11px">S3</text></g>
 
           <path class="diag-arrow-path" d="M275,66 L400,66 L400,100" marker-end="url(#dbHldArrow)"/>
-          <g data-tip="File tree, versions, permissions"><rect class="diag-box" x="335" y="100" width="130" height="46"/><text class="diag-label" x="400" y="123" style="font-size:11px">Metadata Svc</text></g>
+          <g data-tip="File tree, versions, permissions" data-detail-name="Metadata Svc" data-detail-role="Service" data-detail-tech="Postgres-backed — because ACID guarantees matter for a version commit" data-detail-why="ACID guarantees matter for a version commit; tradeoff is sharding needed for hot shared folders." data-detail-latency="~10-20ms per commit"><rect class="diag-box" x="335" y="100" width="130" height="46"/><text class="diag-label" x="400" y="123" style="font-size:11px">Metadata Svc</text></g>
           <path class="diag-arrow-path" d="M400,146 L400,180" marker-end="url(#dbHldArrow)"/>
-          <g data-tip="Structured file tree and version rows"><rect class="diag-box role-db" x="335" y="180" width="130" height="46"/><text class="diag-label" x="400" y="203" style="font-size:11px">PostgreSQL</text></g>
+          <g data-tip="Structured file tree and version rows" data-detail-name="PostgreSQL" data-detail-role="Database" data-detail-tech="Relational, ACID-compliant store" data-detail-why="File tree and version rows need relational structure and strong consistency, not eventual consistency." data-detail-latency="~1-5ms per query"><rect class="diag-box role-db" x="335" y="180" width="130" height="46"/><text class="diag-label" x="400" y="203" style="font-size:11px">PostgreSQL</text></g>
 
           <path class="diag-arrow-path" d="M400,100 L590,100 L590,66" marker-end="url(#dbHldArrow)" stroke-dasharray="3 3"/>
-          <g data-tip="Holds long-poll connections, fans out change signals"><rect class="diag-box role-async" x="525" y="100" width="150" height="46"/><text class="diag-label" x="600" y="123" style="font-size:11px">Notification Svc</text></g>
+          <g data-tip="Holds long-poll connections, fans out change signals" data-detail-name="Notification Svc" data-detail-role="Queue" data-detail-tech="Long-poll — because sync events are infrequent per device" data-detail-why="Sync events are infrequent per device; tradeoff is stateful connection-holding infra." data-detail-latency="<5s to notify from change"><rect class="diag-box role-async" x="525" y="100" width="150" height="46"/><text class="diag-label" x="600" y="123" style="font-size:11px">Notification Svc</text></g>
 
-          <g data-tip="Edge-caches popular blocks for download"><rect class="diag-box role-cdn" x="525" y="180" width="150" height="46"/><text class="diag-label" x="600" y="203" style="font-size:11px">CDN</text></g>
+          <g data-tip="Edge-caches popular blocks for download" data-detail-name="CDN" data-detail-role="CDN" data-detail-tech="Edge cache in front of S3" data-detail-why="Accelerates popular block downloads by serving from the edge instead of hitting S3 directly every time." data-detail-latency="~5-20ms on cache hit"><rect class="diag-box role-cdn" x="525" y="180" width="150" height="46"/><text class="diag-label" x="600" y="203" style="font-size:11px">CDN</text></g>
           <path class="diag-arrow-path" d="M280,203 L525,203" marker-end="url(#dbHldArrow)" stroke-dasharray="3 3"/>
         </svg>
         <div class="diag-legend">
@@ -265,9 +250,9 @@
       <table class="grid-table">
         <thead><tr><th>Bottleneck</th><th>Triggers at</th><th>Exact fix</th></tr></thead>
         <tbody>
-          <tr><td>Hash existence check latency</td><td>Large files with thousands of chunks</td><td class="fix">Batch checks with a Bloom filter pre-check to skip obvious misses</td></tr>
-          <tr><td>Metadata DB hot rows</td><td>Popular shared folder edited by many users</td><td class="fix">Shard by owner_id/folder_id; cache file-tree reads</td></tr>
-          <tr><td>Notification fan-out storms</td><td>A folder with 10k+ collaborators changes</td><td class="fix">Batch delivery, debounce rapid successive edits into one signal</td></tr>
+          <tr data-severity="high"><td>Hash existence check latency</td><td><span class="triggers-chip">TRIGGERS AT</span><br>Large files with thousands of chunks</td><td class="fix">Batch checks with a Bloom filter pre-check to skip obvious misses</td></tr>
+          <tr data-severity="medium"><td>Metadata DB hot rows</td><td><span class="triggers-chip">TRIGGERS AT</span><br>Popular shared folder edited by many users</td><td class="fix">Shard by owner_id/folder_id; cache file-tree reads</td></tr>
+          <tr data-severity="low"><td>Notification fan-out storms</td><td><span class="triggers-chip">TRIGGERS AT</span><br>A folder with 10k+ collaborators changes</td><td class="fix">Batch delivery, debounce rapid successive edits into one signal</td></tr>
         </tbody>
       </table>
 
@@ -286,7 +271,6 @@
     <section id="step6-deepdive-upload">
       <div class="step-pill">Step 6 of 6 — Deep Dives</div>
       <h2>Deep dive: chunked upload sequence</h2>
-      <p style="font-size:13px;color:#999;margin-bottom:0.75rem">Watch the sequence: split, hash, check existence, upload only what's new, then commit.</p>
       <div class="diagram-wrap">
         <svg viewBox="0 0 720 220" xmlns="http://www.w3.org/2000/svg">
           <defs><marker id="dbUpArrow" markerWidth="8" markerHeight="8" refX="6" refY="3" orient="auto"><path d="M0,0 L6,3 L0,6 Z" fill="var(--border2)"/></marker></defs>
@@ -318,7 +302,6 @@
 
     <section id="step6-deepdive-conflict">
       <h2>Deep dive: conflict resolution</h2>
-      <p style="font-size:13px;color:#999;margin-bottom:0.75rem">Two devices edit the same file offline. Version vectors detect the conflict; the resolution keeps both.</p>
       <ol class="flow-steps-list">
         <li><span>Both clients edit offline</span> — each queues its own new version locally, tagged with its device_id</li>
         <li><span>Both reconnect and attempt to commit</span> — the second commit's parent version no longer matches the current latest_version_id</li>
@@ -327,7 +310,7 @@
         <li><span>User resolves manually</span> — both versions remain fully recoverable, no silent data loss</li>
       </ol>
 
-      <table class="grid-table">
+      <table class="grid-table failure-table">
         <thead><tr><th>Scenario</th><th>User impact</th><th>Detection signal</th><th>Mitigation</th></tr></thead>
         <tbody>
           <tr><td>Chunk upload interrupted mid-transfer</td><td class="impact">Partial chunk never confirmed</td><td class="detect">Client-side timeout, no server ack</td><td class="fix">Idempotent per-chunk retry — safe to resend since it's content-addressed</td></tr>

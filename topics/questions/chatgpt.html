@@ -267,9 +267,9 @@
       <table class="grid-table">
         <thead><tr><th>Bottleneck</th><th>Triggers at</th><th>Exact fix</th></tr></thead>
         <tbody>
-          <tr><td>GPU inference capacity</td><td>Concurrent request count exceeds what the fleet can batch and serve within latency targets</td><td class="fix">Add GPU capacity; prioritize shorter/simpler requests; quantize the model for higher throughput per GPU</td></tr>
-          <tr><td>Context assembly latency</td><td>Long conversations require reading and re-encoding large history on every turn</td><td class="fix">Cache the KV-state across turns where possible; apply the summarization/truncation strategy from Step 6</td></tr>
-          <tr><td>Stream fan-out under load</td><td>Very high concurrent open-connection count</td><td class="fix">Horizontally scale the stream router layer; connections are lightweight compared to GPU work</td></tr>
+          <tr data-severity="high"><td>GPU inference capacity</td><td><span class="triggers-chip">TRIGGERS AT</span><br>Concurrent request count exceeds what the fleet can batch and serve within latency targets</td><td class="fix">Add GPU capacity; prioritize shorter/simpler requests; quantize the model for higher throughput per GPU</td></tr>
+          <tr data-severity="medium"><td>Context assembly latency</td><td><span class="triggers-chip">TRIGGERS AT</span><br>Long conversations require reading and re-encoding large history on every turn</td><td class="fix">Cache the KV-state across turns where possible; apply the summarization/truncation strategy from Step 6</td></tr>
+          <tr data-severity="low"><td>Stream fan-out under load</td><td><span class="triggers-chip">TRIGGERS AT</span><br>Very high concurrent open-connection count</td><td class="fix">Horizontally scale the stream router layer; connections are lightweight compared to GPU work</td></tr>
         </tbody>
       </table>
 
@@ -411,7 +411,7 @@
       </ol>
       <div class="callout warn">Summarization has the best user experience — it approximates "the model still remembers" — but costs an extra inference call to produce the summary and risks compounding drift if summaries are repeatedly re-summarized across a very long conversation.</div>
 
-      <table class="grid-table" style="margin-top:1rem">
+      <table class="grid-table failure-table" style="margin-top:1rem">
         <thead><tr><th>Scenario</th><th>User impact</th><th>Detection signal</th><th>Mitigation</th></tr></thead>
         <tbody>
           <tr><td>GPU worker crashes mid-generation</td><td class="impact">Client sees a partial, cut-off response</td><td class="detect">Worker heartbeat loss; stream connection drops mid-token</td><td class="fix">Clean retry with the same prompt on a healthy worker — GPU/KV-cache state isn't easily recoverable, so resuming in-place isn't viable; a resumable protocol can replay already-streamed tokens if partial output is worth preserving</td></tr>

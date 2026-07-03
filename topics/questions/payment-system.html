@@ -35,17 +35,6 @@
       <div class="step-pill">Step 1 of 6 — Requirements</div>
       <h2>Requirements</h2>
 
-      <div class="goal-arc-wrap">
-        <div class="goal-arc-row functional">
-          <div class="goal-arc-seg">1</div><div class="goal-arc-seg">2</div><div class="goal-arc-seg">3</div><div class="goal-arc-seg">4</div><div class="goal-arc-seg">5</div><div class="goal-arc-seg inactive">6</div>
-        </div>
-        <div class="goal-arc-label"><span>Arc 1 (steps 1-5) — <strong>Satisfy Functional Requirements</strong></span></div>
-        <div class="goal-arc-row nonfunctional" style="margin-top:8px">
-          <div class="goal-arc-seg">1</div><div class="goal-arc-seg">2</div><div class="goal-arc-seg">3</div><div class="goal-arc-seg">4</div><div class="goal-arc-seg">5</div><div class="goal-arc-seg">6</div>
-        </div>
-        <div class="goal-arc-label"><span>Arc 2 (all 6 steps) — <strong>Satisfy Non-Functional Requirements</strong></span></div>
-      </div>
-
       <div class="compare-grid">
         <div class="compare-card good">
           <div class="compare-label">Functional</div>
@@ -82,7 +71,6 @@
     <section id="step2-entities">
       <div class="step-pill">Step 2 of 6 — Core Entities</div>
       <h2>Core entities</h2>
-      <p style="font-size:13px;color:#999;margin-bottom:0.75rem">Every entity here exists to make multi-party correctness structural: a unique idempotency constraint, an append-only ledger, and a dedup table for external events — not "usually correct" behavior bolted on after the fact.</p>
 
       <div class="entity-grid">
         <div class="entity-box">
@@ -129,7 +117,6 @@
     <section id="step3-api">
       <div class="step-pill">Step 3 of 6 — API / Interface</div>
       <h2>API design</h2>
-      <p style="font-size:13px;color:#999;margin-bottom:0.75rem">Charge creation carries a mandatory client-generated idempotency key; the processor calls back inbound via webhook rather than us polling it, since polling would add latency without adding correctness.</p>
 
       <div class="api-card">
         <div class="api-line"><span class="api-method post">POST</span><span class="api-path">/api/v1/charges</span><span class="api-auth">Auth: required · Header: Idempotency-Key</span></div>
@@ -169,7 +156,6 @@
     <section id="step4-dataflow">
       <div class="step-pill">Step 4 of 6 — Data Flow</div>
       <h2>Data flow</h2>
-      <p style="font-size:13px;color:#999;margin-bottom:0.75rem">The charge write path (blue) creates a pending transaction and calls the external processor; the webhook/confirmation path (amber) arrives asynchronously and moves the transaction to its final state; balance reads (mint) hit a materialized view, never the raw ledger.</p>
 
       <div class="diagram-wrap" data-paths='{"write":{"boxes":["c-client","c-orch","c-proc"],"arrows":["c1","c2"]},"async":{"boxes":["a-proc","a-webhook","a-ledger"],"arrows":["a1","a2"]},"read":{"boxes":["r-client","r-balance","r-ledger"],"arrows":["r1","r2"]}}'>
         <svg viewBox="0 0 740 300" xmlns="http://www.w3.org/2000/svg">
@@ -223,37 +209,36 @@
     <section id="step5-hld">
       <div class="step-pill">Step 5 of 6 — High-Level Design</div>
       <h2>High-level design</h2>
-      <p style="font-size:13px;color:#999;margin-bottom:0.75rem">Charge intake, external settlement, and reconciliation are three loosely coupled pipelines that only meet at the ledger.</p>
 
       <div class="diagram-wrap">
         <svg viewBox="0 0 800 340" xmlns="http://www.w3.org/2000/svg">
           <defs><marker id="psHldArrow" markerWidth="8" markerHeight="8" refX="6" refY="3" orient="auto"><path d="M0,0 L6,3 L0,6 Z" fill="var(--border2)"/></marker></defs>
 
-          <g data-tip="Initiates charges, views transaction and balance state"><rect class="diag-box role-client" x="10" y="130" width="120" height="50"/><text class="diag-label" x="70" y="152" style="font-size:11px">Client/Merchant</text><text class="diag-sublabel" x="70" y="168" style="font-size:8.5px">idempotency key</text></g>
+          <g data-tip="Initiates charges, views transaction and balance state" data-detail-name="Client/Merchant" data-detail-role="Client" data-detail-tech="Web / mobile / server-to-server" data-detail-why="Mints one idempotency key per charge attempt, reused verbatim on every retry." data-detail-latency="0ms (origin of request)"><rect class="diag-box role-client" x="10" y="130" width="120" height="50"/><text class="diag-label" x="70" y="152" style="font-size:11px">Client/Merchant</text><text class="diag-sublabel" x="70" y="168" style="font-size:8.5px">idempotency key</text></g>
 
           <path class="diag-arrow-path" d="M130,145 L165,145" marker-end="url(#psHldArrow)"/>
-          <g data-tip="Idempotency check on every request before touching state"><rect class="diag-box" x="165" y="120" width="140" height="50"/><text class="diag-label" x="235" y="142" style="font-size:11px">Payment API</text><text class="diag-sublabel" x="235" y="158" style="font-size:8.5px">Idempotency-Key required</text></g>
+          <g data-tip="Idempotency check on every request before touching state" data-detail-name="Payment API" data-detail-role="Service" data-detail-tech="Stateless API layer" data-detail-why="Checks Idempotency-Key before any state changes — the first line of double-charge defense." data-detail-latency="~5-10ms (idempotency lookup)"><rect class="diag-box" x="165" y="120" width="140" height="50"/><text class="diag-label" x="235" y="142" style="font-size:11px">Payment API</text><text class="diag-sublabel" x="235" y="158" style="font-size:8.5px">Idempotency-Key required</text></g>
 
           <path class="diag-arrow-path" d="M305,145 L340,145" marker-end="url(#psHldArrow)"/>
-          <g data-tip="Owns the transaction state machine end to end"><rect class="diag-box" x="340" y="120" width="150" height="50"/><text class="diag-label" x="415" y="142" style="font-size:11px">Payment Orchestration</text><text class="diag-sublabel" x="415" y="158" style="font-size:8.5px">pending → completed</text></g>
+          <g data-tip="Owns the transaction state machine end to end" data-detail-name="Payment Orchestration" data-detail-role="Service" data-detail-tech="Stateless, owns transaction state machine" data-detail-why="Single owner of pending → completed transitions — avoids split-brain state ownership." data-detail-latency="~5-10ms (transaction insert)"><rect class="diag-box" x="340" y="120" width="150" height="50"/><text class="diag-label" x="415" y="142" style="font-size:11px">Payment Orchestration</text><text class="diag-sublabel" x="415" y="158" style="font-size:8.5px">pending → completed</text></g>
 
           <path class="diag-arrow-path" d="M490,145 L525,145" marker-end="url(#psHldArrow)"/>
-          <g data-tip="External card network / bank rail, confirms async via webhook"><rect class="diag-box role-db" x="525" y="120" width="130" height="50"/><text class="diag-label" x="590" y="142" style="font-size:11px">External Processor</text><text class="diag-sublabel" x="590" y="158" style="font-size:8.5px">card / bank rail</text></g>
+          <g data-tip="External card network / bank rail, confirms async via webhook" data-detail-name="External Processor" data-detail-role="Database" data-detail-tech="Card network / bank rail (Stripe-like)" data-detail-why="Confirms asynchronously via webhook — latency ranges 200ms to 30+ seconds depending on rail." data-detail-latency="200ms-30s+ (async confirmation)"><rect class="diag-box role-db" x="525" y="120" width="130" height="50"/><text class="diag-label" x="590" y="142" style="font-size:11px">External Processor</text><text class="diag-sublabel" x="590" y="158" style="font-size:8.5px">card / bank rail</text></g>
 
           <path class="diag-arrow-path" d="M590,170 L590,200 L490,200" marker-end="url(#psHldArrow)"/>
-          <g data-tip="Verifies HMAC signature, dedups by processor_event_id"><rect class="diag-box role-async" x="340" y="180" width="150" height="46"/><text class="diag-label" x="415" y="203" style="font-size:11px">Webhook Ingestion</text><text class="diag-sublabel" x="415" y="217" style="font-size:8.5px">verify + dedup + enqueue</text></g>
+          <g data-tip="Verifies HMAC signature, dedups by processor_event_id" data-detail-name="Webhook Ingestion" data-detail-role="Queue" data-detail-tech="Signature-verified inbound handler" data-detail-why="Dedups by processor_event_id — a re-delivered webhook becomes a safe no-op." data-detail-latency="~1-2ms (dedup check)"><rect class="diag-box role-async" x="340" y="180" width="150" height="46"/><text class="diag-label" x="415" y="203" style="font-size:11px">Webhook Ingestion</text><text class="diag-sublabel" x="415" y="217" style="font-size:8.5px">verify + dedup + enqueue</text></g>
 
           <path class="diag-arrow-path" d="M340,203 L305,203" marker-end="url(#psHldArrow)"/>
-          <g data-tip="Updates transaction state once a webhook is confirmed"><rect class="diag-box" x="165" y="180" width="140" height="46"/><text class="diag-label" x="235" y="203" style="font-size:11px">Payment Orchestration</text><text class="diag-sublabel" x="235" y="217" style="font-size:8.5px">applies confirmed state</text></g>
+          <g data-tip="Updates transaction state once a webhook is confirmed" data-detail-name="Payment Orchestration (confirm)" data-detail-role="Service" data-detail-tech="Same orchestration service, confirm-path" data-detail-why="Applies confirmed state only after a deduped, verified webhook — never optimistically." data-detail-latency="~5-10ms (state update)"><rect class="diag-box" x="165" y="180" width="140" height="46"/><text class="diag-label" x="235" y="203" style="font-size:11px">Payment Orchestration</text><text class="diag-sublabel" x="235" y="217" style="font-size:8.5px">applies confirmed state</text></g>
 
           <path class="diag-arrow-path" d="M165,203 L130,203" marker-end="url(#psHldArrow)"/>
-          <g data-tip="Double-entry, append-only — buyer debit, merchant credit, fee credit"><rect class="diag-box role-db" x="10" y="180" width="120" height="46"/><text class="diag-label" x="70" y="203" style="font-size:11px">Ledger Service</text><text class="diag-sublabel" x="70" y="217" style="font-size:8.5px">Postgres, append-only</text></g>
+          <g data-tip="Double-entry, append-only — buyer debit, merchant credit, fee credit" data-detail-name="Ledger Service" data-detail-role="Database" data-detail-tech="Postgres, append-only rows" data-detail-why="Append-only debit/credit rows net to zero per transaction — no mutable balance field to race on." data-detail-latency="~5-10ms (multi-row insert)"><rect class="diag-box role-db" x="10" y="180" width="120" height="46"/><text class="diag-label" x="70" y="203" style="font-size:11px">Ledger Service</text><text class="diag-sublabel" x="70" y="217" style="font-size:8.5px">Postgres, append-only</text></g>
 
           <path class="diag-arrow-path" d="M70,226 L70,250 L130,250" marker-end="url(#psHldArrow)" stroke-dasharray="3 3"/>
-          <g data-tip="Materialized per-account balance, refreshed on ledger writes"><rect class="diag-box role-cache" x="130" y="250" width="130" height="46"/><text class="diag-label" x="195" y="273" style="font-size:11px">Balance View</text><text class="diag-sublabel" x="195" y="287" style="font-size:8.5px">derived, refreshed on write</text></g>
+          <g data-tip="Materialized per-account balance, refreshed on ledger writes" data-detail-name="Balance View" data-detail-role="Cache" data-detail-tech="Materialized view, refreshed on write" data-detail-why="Balance reads hit this view, never the raw ledger — keeps SUM(delta) off the hot read path." data-detail-latency="~1-3ms (materialized read)"><rect class="diag-box role-cache" x="130" y="250" width="130" height="46"/><text class="diag-label" x="195" y="273" style="font-size:11px">Balance View</text><text class="diag-sublabel" x="195" y="287" style="font-size:8.5px">derived, refreshed on write</text></g>
 
           <path class="diag-arrow-path" d="M70,226 L70,300 L590,300 L590,170" marker-end="url(#psHldArrow)" stroke-dasharray="2 4"/>
-          <g data-tip="Nightly job pulls processor statement, cross-checks internal ledger"><rect class="diag-box role-async" x="525" y="250" width="150" height="46"/><text class="diag-label" x="600" y="273" style="font-size:11px">Reconciliation Job</text><text class="diag-sublabel" x="600" y="287" style="font-size:8.5px">nightly, pulls statement API</text></g>
+          <g data-tip="Nightly job pulls processor statement, cross-checks internal ledger" data-detail-name="Reconciliation Job" data-detail-role="Queue" data-detail-tech="Nightly batch job" data-detail-why="Backstop the webhook stream alone can't provide — catches missed, late, or duplicated webhook drift." data-detail-latency="24h max detection window"><rect class="diag-box role-async" x="525" y="250" width="150" height="46"/><text class="diag-label" x="600" y="273" style="font-size:11px">Reconciliation Job</text><text class="diag-sublabel" x="600" y="287" style="font-size:8.5px">nightly, pulls statement API</text></g>
 
           <path class="diag-arrow-path" d="M655,250 L655,145" marker-end="url(#psHldArrow)" stroke-dasharray="2 4"/>
         </svg>
@@ -289,9 +274,9 @@
       <table class="grid-table">
         <thead><tr><th>Bottleneck</th><th>Triggers at</th><th>Exact fix</th></tr></thead>
         <tbody>
-          <tr><td>Idempotency key lookup contention</td><td>High concurrent retry volume on the same key during a processor slowdown</td><td class="fix">Fast unique-index lookup path, short-circuit to cached response before any processor call</td></tr>
-          <tr><td>Webhook ingestion burst</td><td>Processor replays a large batch after its own outage recovers</td><td class="fix">Queue-backed ingestion with a dedicated consumer group, dedup before any downstream write</td></tr>
-          <tr><td>Ledger write contention on a high-volume merchant</td><td>Many concurrent transactions crediting the same merchant account</td><td class="fix">Shard by merchant_id; append-only inserts avoid row-level lock contention that a mutable balance would hit</td></tr>
+          <tr data-severity="high"><td>Idempotency key lookup contention</td><td><span class="triggers-chip">TRIGGERS AT</span><br>High concurrent retry volume on the same key during a processor slowdown</td><td class="fix">Fast unique-index lookup path, short-circuit to cached response before any processor call</td></tr>
+          <tr data-severity="medium"><td>Webhook ingestion burst</td><td><span class="triggers-chip">TRIGGERS AT</span><br>Processor replays a large batch after its own outage recovers</td><td class="fix">Queue-backed ingestion with a dedicated consumer group, dedup before any downstream write</td></tr>
+          <tr data-severity="medium"><td>Ledger write contention on a high-volume merchant</td><td><span class="triggers-chip">TRIGGERS AT</span><br>Many concurrent transactions crediting the same merchant account</td><td class="fix">Shard by merchant_id; append-only inserts avoid row-level lock contention that a mutable balance would hit</td></tr>
         </tbody>
       </table>
 
@@ -310,7 +295,6 @@
     <section id="step6-deepdive-idempotent">
       <div class="step-pill">Step 6 of 6 — Deep Dives</div>
       <h2>Deep dive: idempotent charge flow with external processor</h2>
-      <p style="font-size:13px;color:#999;margin-bottom:0.75rem">The transaction sits in "pending" the moment it's created — long before the processor confirms anything. The webhook, itself deduped by processor event ID, is what moves it to "completed."</p>
 
       <div class="diagram-wrap">
         <svg viewBox="0 0 760 320" xmlns="http://www.w3.org/2000/svg">
@@ -374,7 +358,6 @@
 
     <section id="step6-deepdive-ledger">
       <h2>Deep dive: double-entry ledger for multi-party settlement</h2>
-      <p style="font-size:13px;color:#999;margin-bottom:0.75rem">A single payment creates multiple ledger rows that must always net to zero — a naive per-account "balance" column has no way to express a 3+ party split atomically.</p>
 
       <div class="diagram-wrap">
         <svg viewBox="0 0 740 300" xmlns="http://www.w3.org/2000/svg">
@@ -414,7 +397,6 @@
 
     <section id="step6-deepdive-webhooks">
       <h2>Deep dive: webhook reliability and reconciliation</h2>
-      <p style="font-size:13px;color:#999;margin-bottom:0.75rem">Webhook delivery can fail entirely, arrive very late, or arrive duplicated — so a nightly reconciliation job pulls the processor's own statement and cross-checks it against internal transaction state as a backstop the webhook stream alone can't provide.</p>
 
       <div class="diagram-wrap">
         <svg viewBox="0 0 740 280" xmlns="http://www.w3.org/2000/svg">
@@ -453,7 +435,7 @@
       </ol>
       <div class="callout warn">Trusting the webhook stream alone means trusting that delivery is guaranteed, in-order, and exactly-once — none of which any processor actually promises. Reconciliation exists precisely because the webhook path is a convenience for latency, not a durability guarantee.</div>
 
-      <table class="grid-table" style="margin-top:1rem">
+      <table class="grid-table failure-table" style="margin-top:1rem">
         <thead><tr><th>Failure mode</th><th>User impact</th><th>Detection signal</th><th>Mitigation</th></tr></thead>
         <tbody>
           <tr><td>Duplicate charge attempt from client retry</td><td class="impact">Buyer charged twice for one logical purchase</td><td class="detect">Two requests, same intent, different or missing idempotency keys</td><td class="fix">Mandatory Idempotency-Key header with a UNIQUE DB constraint; client reuses the same key across all retries of one attempt</td></tr>

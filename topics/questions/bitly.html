@@ -35,17 +35,6 @@
       <div class="step-pill">Step 1 of 6 — Requirements</div>
       <h2>Requirements</h2>
 
-      <div class="goal-arc-wrap">
-        <div class="goal-arc-row functional">
-          <div class="goal-arc-seg">1</div><div class="goal-arc-seg">2</div><div class="goal-arc-seg">3</div><div class="goal-arc-seg">4</div><div class="goal-arc-seg">5</div><div class="goal-arc-seg inactive">6</div>
-        </div>
-        <div class="goal-arc-label"><span>Arc 1 (steps 1-5) — <strong>Satisfy Functional Requirements</strong></span></div>
-        <div class="goal-arc-row nonfunctional" style="margin-top:8px">
-          <div class="goal-arc-seg">1</div><div class="goal-arc-seg">2</div><div class="goal-arc-seg">3</div><div class="goal-arc-seg">4</div><div class="goal-arc-seg">5</div><div class="goal-arc-seg">6</div>
-        </div>
-        <div class="goal-arc-label"><span>Arc 2 (all 6 steps) — <strong>Satisfy Non-Functional Requirements</strong></span></div>
-      </div>
-
       <div class="compare-grid">
         <div class="compare-card good">
           <div class="compare-label">Functional</div>
@@ -80,7 +69,6 @@
     <section id="step2-entities">
       <div class="step-pill">Step 2 of 6 — Core Entities</div>
       <h2>Core entities</h2>
-      <p style="font-size:13px;color:#999;margin-bottom:0.75rem">Three entities across two stores, split by access pattern before any API is designed.</p>
 
       <div class="entity-grid">
         <div class="entity-box">
@@ -122,7 +110,6 @@
     <section id="step3-api">
       <div class="step-pill">Step 3 of 6 — API / Interface</div>
       <h2>API design</h2>
-      <p style="font-size:13px;color:#999;margin-bottom:0.75rem">Four endpoints — shorten, redirect, delete, and stats. All request-response, no persistent connections needed.</p>
 
       <div class="api-card">
         <div class="api-line"><span class="api-method post">POST</span><span class="api-path">/api/v1/shorten</span><span class="api-auth">Auth: optional</span></div>
@@ -160,7 +147,6 @@
     <section id="step4-dataflow">
       <div class="step-pill">Step 4 of 6 — Data Flow</div>
       <h2>Data flow</h2>
-      <p style="font-size:13px;color:#999;margin-bottom:0.75rem">Write path (blue) and read path (mint) as before — plus a third async analytics path that never touches either.</p>
 
       <div class="diagram-wrap" data-paths='{"read":{"boxes":["r-client","r-cdn","r-svc","r-cache","r-db"],"arrows":["r1","r2","r3","r4"]},"write":{"boxes":["w-client","w-svc","w-idgen","w-db"],"arrows":["w1","w2","w3"]}}'>
         <svg viewBox="0 0 740 220" xmlns="http://www.w3.org/2000/svg">
@@ -213,32 +199,31 @@
     <section id="step5-hld">
       <div class="step-pill">Step 5 of 6 — High-Level Design</div>
       <h2>High-level design</h2>
-      <p style="font-size:13px;color:#999;margin-bottom:0.75rem">Full system: read, write, and analytics paths together with every supporting component.</p>
 
       <div class="diagram-wrap">
         <svg viewBox="0 0 780 300" xmlns="http://www.w3.org/2000/svg">
           <defs><marker id="bxHldArrow" markerWidth="8" markerHeight="8" refX="6" refY="3" orient="auto"><path d="M0,0 L6,3 L0,6 Z" fill="var(--border2)"/></marker></defs>
-          <g data-tip="Both shorten and redirect requests originate here"><rect class="diag-box role-client" x="10" y="20" width="110" height="50"/><text class="diag-label" x="65" y="50" style="font-size:11px">Clients</text></g>
+          <g data-tip="Both shorten and redirect requests originate here" data-detail-name="Clients" data-detail-role="Client" data-detail-tech="Browser / app" data-detail-why="Origin of both shorten and redirect requests." data-detail-latency="0ms — request origin"><rect class="diag-box role-client" x="10" y="20" width="110" height="50"/><text class="diag-label" x="65" y="50" style="font-size:11px">Clients</text></g>
           <path class="diag-arrow-path" d="M120,45 L155,45" marker-end="url(#bxHldArrow)"/>
-          <g data-tip="Edge cache for redirect responses"><rect class="diag-box role-cdn" x="155" y="20" width="100" height="50"/><text class="diag-label" x="205" y="50" style="font-size:11px">CDN</text></g>
+          <g data-tip="Edge cache for redirect responses" data-detail-name="CDN" data-detail-role="CDN" data-detail-tech="Edge cache for 302 responses" data-detail-why="Caches redirect responses at the edge so most traffic never reaches origin infrastructure." data-detail-latency="~1-5ms, edge-local"><rect class="diag-box role-cdn" x="155" y="20" width="100" height="50"/><text class="diag-label" x="205" y="50" style="font-size:11px">CDN</text></g>
           <path class="diag-arrow-path" d="M255,45 L290,45" marker-end="url(#bxHldArrow)"/>
-          <g data-tip="Auth, rate limiting, routing"><rect class="diag-box role-client" x="290" y="20" width="120" height="50"/><text class="diag-label" x="350" y="50" style="font-size:11px">API Gateway</text></g>
+          <g data-tip="Auth, rate limiting, routing" data-detail-name="API Gateway" data-detail-role="Service" data-detail-tech="Auth, rate limiting, routing" data-detail-why="Single entry point for auth and rate limiting before requests reach internal services." data-detail-latency="~1-2ms overhead"><rect class="diag-box role-client" x="290" y="20" width="120" height="50"/><text class="diag-label" x="350" y="50" style="font-size:11px">API Gateway</text></g>
 
           <path class="diag-arrow-path" d="M350,70 L350,105" marker-end="url(#bxHldArrow)"/>
-          <g data-tip="Stateless"><rect class="diag-box" x="220" y="105" width="130" height="46"/><text class="diag-label" x="285" y="128" style="font-size:11px">Redirect Svc</text><text class="diag-sublabel" x="285" y="143" style="font-size:8.5px">stateless</text></g>
-          <g data-tip="Stateless"><rect class="diag-box" x="360" y="105" width="130" height="46"/><text class="diag-label" x="425" y="128" style="font-size:11px">Shorten Svc</text><text class="diag-sublabel" x="425" y="143" style="font-size:8.5px">stateless</text></g>
+          <g data-tip="Stateless" data-detail-name="Redirect Svc" data-detail-role="Service" data-detail-tech="Go, stateless pods" data-detail-why="Go — because low per-request overhead matters on the hottest path in the system; tradeoff is a smaller library ecosystem." data-detail-latency="~1-3ms on cache hit"><rect class="diag-box" x="220" y="105" width="130" height="46"/><text class="diag-label" x="285" y="128" style="font-size:11px">Redirect Svc</text><text class="diag-sublabel" x="285" y="143" style="font-size:8.5px">stateless</text></g>
+          <g data-tip="Stateless" data-detail-name="Shorten Svc" data-detail-role="Service" data-detail-tech="Stateless pods" data-detail-why="Validates the URL and checks the custom alias namespace before persisting." data-detail-latency="~10-20ms, write path"><rect class="diag-box" x="360" y="105" width="130" height="46"/><text class="diag-label" x="425" y="128" style="font-size:11px">Shorten Svc</text><text class="diag-sublabel" x="425" y="143" style="font-size:8.5px">stateless</text></g>
 
           <path class="diag-arrow-path" d="M285,151 L285,185" marker-end="url(#bxHldArrow)"/>
-          <g data-tip="Hot mappings, LRU eviction"><rect class="diag-box role-cache" x="200" y="185" width="130" height="46"/><text class="diag-label" x="265" y="208" style="font-size:11px">Redis</text></g>
+          <g data-tip="Hot mappings, LRU eviction" data-detail-name="Redis" data-detail-role="Cache" data-detail-tech="In-memory cache, LRU eviction" data-detail-why="Hot mapping cache in front of Postgres, resolves the redirect lookup in ~1-3ms." data-detail-latency="~1-3ms"><rect class="diag-box role-cache" x="200" y="185" width="130" height="46"/><text class="diag-label" x="265" y="208" style="font-size:11px">Redis</text></g>
           <path class="diag-arrow-path" d="M425,151 L425,185" marker-end="url(#bxHldArrow)"/>
-          <g data-tip="Source of truth, primary + replicas"><rect class="diag-box role-db" x="360" y="185" width="130" height="46"/><text class="diag-label" x="425" y="208" style="font-size:11px">Postgres</text></g>
+          <g data-tip="Source of truth, primary + replicas" data-detail-name="Postgres" data-detail-role="Database" data-detail-tech="Relational, primary + read replicas" data-detail-why="Writes need a strong uniqueness constraint and volume is low relative to reads — a relational store fits; tradeoff is a single-writer ceiling without sharding." data-detail-latency="~15-30ms on cache miss"><rect class="diag-box role-db" x="360" y="185" width="130" height="46"/><text class="diag-label" x="425" y="208" style="font-size:11px">Postgres</text></g>
           <path class="diag-arrow-path" d="M330,208 L360,208" marker-end="url(#bxHldArrow)" stroke-dasharray="3 3"/>
 
           <path class="diag-arrow-path" d="M350,151 L620,151 L620,185" marker-end="url(#bxHldArrow)" stroke-dasharray="3 3"/>
-          <g data-tip="Node ID + timestamp + sequence bit-packed"><rect class="diag-box role-async" x="555" y="105" width="130" height="46"/><text class="diag-label" x="620" y="128" style="font-size:11px">Snowflake</text><text class="diag-sublabel" x="620" y="143" style="font-size:8.5px">ID gen</text></g>
-          <g data-tip="Buffers click event bursts"><rect class="diag-box role-async" x="555" y="185" width="130" height="46"/><text class="diag-label" x="620" y="208" style="font-size:11px">Kafka</text></g>
+          <g data-tip="Node ID + timestamp + sequence bit-packed" data-detail-name="Snowflake" data-detail-role="Service" data-detail-tech="Bit-packed ID generator" data-detail-why="Mints unique 64-bit IDs with zero DB round-trip at 12k writes/sec; tradeoff is provisioning a node ID per instance." data-detail-latency="&lt;1ms, no network call"><rect class="diag-box role-async" x="555" y="105" width="130" height="46"/><text class="diag-label" x="620" y="128" style="font-size:11px">Snowflake</text><text class="diag-sublabel" x="620" y="143" style="font-size:8.5px">ID gen</text></g>
+          <g data-tip="Buffers click event bursts" data-detail-name="Kafka" data-detail-role="Queue" data-detail-tech="Log-based queue" data-detail-why="Absorbs bursty viral-link click traffic without adding backpressure on the redirect; tradeoff is added infra to operate." data-detail-latency="async, no redirect-path latency"><rect class="diag-box role-async" x="555" y="185" width="130" height="46"/><text class="diag-label" x="620" y="208" style="font-size:11px">Kafka</text></g>
           <path class="diag-arrow-path" d="M685,208 L720,208" marker-end="url(#bxHldArrow)"/>
-          <g data-tip="Column store for click aggregation"><rect class="diag-box role-db" x="555" y="240" width="160" height="46"/><text class="diag-label" x="635" y="263" style="font-size:11px">ClickHouse</text></g>
+          <g data-tip="Column store for click aggregation" data-detail-name="ClickHouse" data-detail-role="Database" data-detail-tech="Column store" data-detail-why="Query pattern is group-by-and-count over billions of rows; tradeoff is a poor fit for point lookups." data-detail-latency="batched inserts every 1-5s"><rect class="diag-box role-db" x="555" y="240" width="160" height="46"/><text class="diag-label" x="635" y="263" style="font-size:11px">ClickHouse</text></g>
           <path class="diag-arrow-path" d="M620,231 L620,240" marker-end="url(#bxHldArrow)"/>
         </svg>
         <div class="diag-legend">
@@ -272,9 +257,9 @@
       <table class="grid-table">
         <thead><tr><th>Bottleneck</th><th>Triggers at</th><th>Exact fix</th></tr></thead>
         <tbody>
-          <tr><td>Redis overload</td><td>Cache hit rate &lt;90%</td><td class="fix">Shard Redis by short_code hash; raise maxmemory with tuned LRU</td></tr>
-          <tr><td>Single viral link hotspot</td><td>One code gets 1M+ RPS</td><td class="fix">CDN caches the 302 at edge; Redis local replica per region</td></tr>
-          <tr><td>Kafka consumer lag</td><td>Click event backlog grows unbounded</td><td class="fix">Scale out consumer partitions; batch ClickHouse inserts larger</td></tr>
+          <tr data-severity="high"><td>Redis overload</td><td><span class="triggers-chip">TRIGGERS AT</span><br>Cache hit rate &lt;90%</td><td class="fix">Shard Redis by short_code hash; raise maxmemory with tuned LRU</td></tr>
+          <tr data-severity="medium"><td>Single viral link hotspot</td><td><span class="triggers-chip">TRIGGERS AT</span><br>One code gets 1M+ RPS</td><td class="fix">CDN caches the 302 at edge; Redis local replica per region</td></tr>
+          <tr data-severity="low"><td>Kafka consumer lag</td><td><span class="triggers-chip">TRIGGERS AT</span><br>Click event backlog grows unbounded</td><td class="fix">Scale out consumer partitions; batch ClickHouse inserts larger</td></tr>
         </tbody>
       </table>
 
@@ -293,7 +278,6 @@
     <section id="step6-deepdive-idgen">
       <div class="step-pill">Step 6 of 6 — Deep Dives</div>
       <h2>Deep dive: Snowflake ID generation</h2>
-      <p style="font-size:13px;color:#999;margin-bottom:0.75rem">A 64-bit integer split into fields so IDs are unique across every generator node without a central counter.</p>
       <div class="bitfield">
         <div class="bitfield-seg sign"><span class="bits">1</span><span class="lbl">sign</span></div>
         <div class="bitfield-seg time"><span class="bits">41</span><span class="lbl">timestamp (ms)</span></div>
@@ -318,7 +302,6 @@
 
     <section id="step6-deepdive-cache">
       <h2>Deep dive: cache hit vs miss</h2>
-      <p style="font-size:13px;color:#999;margin-bottom:0.75rem">The &lt;10ms p99 target depends on the vast majority of redirects resolving in the top branch.</p>
       <div class="flow-cmp-grid">
         <div class="flow-cmp-col hit">
           <div class="flow-cmp-title">✓ Cache hit — ~1-3ms</div>
@@ -394,7 +377,6 @@
 
     <section id="step6-deepdive-analytics">
       <h2>Deep dive: analytics pipeline never blocks the redirect</h2>
-      <p style="font-size:13px;color:#999;margin-bottom:0.75rem">Counting a billion clicks a day without ever touching the redirect's response time.</p>
       <ol class="flow-steps-list">
         <li><span>Fire-and-forget emit</span> — the redirect service publishes a click event after already sending the 302, non-blocking</li>
         <li><span>Kafka buffers the burst</span> — a viral link spiking to 100k clicks/sec just queues, doesn't overwhelm consumers</li>
@@ -402,7 +384,7 @@
         <li><span>ClickHouse aggregates on read</span> — dashboards query grouped counts, exactly what a column store is built for</li>
       </ol>
 
-      <table class="grid-table">
+      <table class="grid-table failure-table">
         <thead><tr><th>Scenario</th><th>User impact</th><th>Detection signal</th><th>Mitigation</th></tr></thead>
         <tbody>
           <tr><td>Redis cluster down</td><td class="impact">Redirect latency spikes 10-30x</td><td class="detect">Cache miss rate alert &gt;50%</td><td class="fix">Circuit breaker falls back to Postgres; auto-scale replicas</td></tr>

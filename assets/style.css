@@ -108,6 +108,36 @@ body {
   transition: width 0.4s cubic-bezier(0.16, 1, 0.3, 1);
 }
 
+/* ── Sidebar: "On this page" mini-TOC — current page's sections, active one tracked via IntersectionObserver ── */
+.sb-ontoc-wrap { padding: 0.2rem 0 0.6rem; border-bottom: 1px solid var(--border); margin-bottom: 0.4rem; }
+.sb-ontoc-label {
+  font-size: 10px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.1em;
+  color: var(--faint);
+  padding: 0.5rem 1.25rem 0.5rem;
+}
+.sb-ontoc-link {
+  display: block;
+  padding: 4px 1.25rem 4px 1.05rem;
+  font-size: 12px;
+  color: var(--muted);
+  text-decoration: none;
+  border-left: 2px solid transparent;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  transition: color 0.15s ease, border-color 0.15s ease, background 0.15s ease;
+}
+.sb-ontoc-link:hover { color: var(--text); }
+.sb-ontoc-link.ontoc-active {
+  color: var(--accent);
+  border-left-color: var(--accent);
+  background: #0d1f17;
+  font-weight: 500;
+}
+
 /* ── Sidebar: site map — collapsible category accordion ── */
 .sb-sitemap { padding-top: 0.2rem; }
 .sb-cat { border-bottom: 1px solid var(--border); }
@@ -204,11 +234,13 @@ body {
 }
 #sidebar a.sb-topic-link.active .sb-step-mark {
   border-color: var(--accent);
-  color: var(--accent);
-  background: #0d1f17;
+  background: var(--accent);
+  color: #08120c;
+  font-weight: 700;
 }
 #sidebar a.sb-topic-link.active {
   font-weight: 700;
+  color: var(--accent);
   background: #0d1f17;
   border-left-color: var(--accent);
   border-left-width: 3px;
@@ -294,10 +326,11 @@ section {
   scroll-margin-top: 1.5rem;
 }
 section h2 {
+  position: relative;
   font-size: 11px;
   font-weight: 600;
   text-transform: uppercase;
-  letter-spacing: 0.1em;
+  letter-spacing: 0.12em;
   color: var(--faint);
   border-bottom: 1px solid var(--border);
   padding-bottom: 8px;
@@ -308,12 +341,27 @@ section h2 {
   cursor: pointer;
   user-select: none;
 }
+section h2::after {
+  content: "";
+  position: absolute;
+  left: 50%;
+  bottom: -1px;
+  width: 0%;
+  height: 2px;
+  background: var(--accent);
+  transform: translateX(-50%);
+  transition: width 0.25s ease;
+}
+section h2:hover::after,
+section h2.h2-active::after {
+  width: 60%;
+}
 section h2 .sec-icon { flex-shrink: 0; opacity: 0.55; }
 section h2 .sec-chevron {
   margin-left: auto;
   flex-shrink: 0;
   color: var(--faint);
-  transition: transform 0.18s ease;
+  transition: transform 0.2s ease;
   display: flex;
 }
 section.collapsed h2 .sec-chevron { transform: rotate(-90deg); }
@@ -321,7 +369,7 @@ section .sec-body {
   overflow: hidden;
   max-height: 4000px;
   opacity: 1;
-  transition: max-height 0.32s ease, opacity 0.22s ease, margin-top 0.32s ease;
+  transition: max-height 0.22s ease-out, opacity 0.18s ease-out, margin-top 0.22s ease-out;
 }
 section.collapsed .sec-body {
   max-height: 0;
@@ -414,9 +462,11 @@ section.collapsed .sec-body {
   stroke-width: 1.5;
   rx: 7;
   cursor: pointer;
-  transition: fill 0.15s ease, stroke 0.15s ease;
+  transition: fill 0.15s ease, stroke 0.15s ease, opacity 0.15s ease, transform 0.15s ease;
+  transform-box: fill-box;
+  transform-origin: center;
 }
-.diag-box:hover, .diag-box.active { stroke: var(--text); }
+.diag-box:hover, .diag-box.active { stroke: var(--text); transform: scale(1.02); }
 .diag-box.role-client { stroke: var(--blue); }
 .diag-box.role-client:hover, .diag-box.role-client.active { fill: #0d1a2d; }
 .diag-box.role-cache  { stroke: var(--accent); }
@@ -427,6 +477,22 @@ section.collapsed .sec-body {
 .diag-box.role-async:hover, .diag-box.role-async.active { fill: #1a1400; }
 .diag-box.role-cdn    { stroke: var(--purple); }
 .diag-box.role-cdn:hover, .diag-box.role-cdn.active { fill: #1c1730; }
+/* Additive component-type roles (Data Flow / Architecture diagrams) — additional palette on top of role-* above */
+.diag-box.role-service { stroke: #e2e8f0; }
+.diag-box.role-service:hover, .diag-box.role-service.active { fill: #1a1a1a; }
+.diag-box.role-queue   { stroke: #c084fc; }
+.diag-box.role-queue:hover, .diag-box.role-queue.active { fill: #1c1730; }
+.diag-legend-dot.role-service { background: #e2e8f0; }
+.diag-legend-dot.role-queue   { background: #c084fc; }
+
+/* Arrow label text (Data Flow diagrams) — centered on the arrow path */
+.diag-arrow-label {
+  fill: var(--muted);
+  font-family: 'Inter', system-ui, sans-serif;
+  font-size: 10px;
+  text-anchor: middle;
+  pointer-events: none;
+}
 .diag-label {
   fill: var(--text);
   font-family: 'Inter', system-ui, sans-serif;
@@ -453,8 +519,14 @@ section.collapsed .sec-body {
 }
 .diagram-wrap.path-active .diag-arrow-path { stroke: var(--border); opacity: 0.4; }
 .diagram-wrap.path-active .diag-arrow-path.path-on { stroke: var(--accent); stroke-width: 2; opacity: 1; }
-.diagram-wrap.path-active .diag-box { opacity: 0.35; }
+.diagram-wrap.path-active .diag-box { opacity: 0.3; }
 .diagram-wrap.path-active .diag-box.path-on { opacity: 1; }
+/* Persistent bright state for the clicked component (distinct from the one-shot pulse below) */
+.diagram-wrap.path-active .diag-box.box-clicked {
+  stroke: var(--accent) !important;
+  stroke-width: 2.5;
+  filter: drop-shadow(0 0 5px rgba(110,231,183,0.6));
+}
 .diag-dot {
   fill: var(--accent);
   filter: drop-shadow(0 0 3px rgba(110,231,183,0.7));
@@ -562,8 +634,31 @@ section.collapsed .sec-body {
   padding: 0 6px;
   user-select: none;
 }
-.flow-steps-list { padding-left: 1.2rem; margin-top: 0.75rem; }
-.flow-steps-list li { font-size: 13px; color: #bbb; margin-bottom: 4px; }
+.flow-steps-list { padding-left: 0; margin-top: 0.75rem; list-style: none; counter-reset: hop; }
+.flow-steps-list li {
+  font-size: 13px;
+  color: #bbb;
+  margin-bottom: 8px;
+  display: flex;
+  gap: 10px;
+  align-items: flex-start;
+  counter-increment: hop;
+}
+.flow-steps-list li::before {
+  content: counter(hop);
+  flex-shrink: 0;
+  width: 22px;
+  height: 22px;
+  border-radius: 50%;
+  background: var(--accent);
+  color: #08120c;
+  font-size: 11px;
+  font-weight: 700;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  margin-top: 1px;
+}
 .flow-steps-list li span { color: var(--accent); font-weight: 500; }
 
 /* ── Compare grid ── */
@@ -628,6 +723,7 @@ section.collapsed .sec-body {
   display: flex;
   gap: 10px;
   align-items: flex-start;
+  position: relative;
 }
 .move-num {
   font-size: 11px;
@@ -637,6 +733,29 @@ section.collapsed .sec-body {
   margin-top: 1px;
 }
 .moves-list li strong { color: var(--accent); font-weight: 500; }
+
+/* Clipboard copy button — top-right of each interview move card */
+.moves-list li { padding-right: 40px; }
+.move-copy-btn {
+  position: absolute;
+  top: 8px;
+  right: 8px;
+  width: 26px;
+  height: 26px;
+  border-radius: 5px;
+  border: 1px solid var(--border2);
+  background: var(--surface2);
+  color: var(--muted);
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: border-color 0.15s, color 0.15s, background 0.15s;
+  flex-shrink: 0;
+}
+.move-copy-btn:hover { border-color: var(--accent); color: var(--accent); }
+.move-copy-btn.copied { border-color: var(--accent); color: var(--accent); background: #0d1f17; }
+.move-copy-btn svg { width: 13px; height: 13px; pointer-events: none; }
 
 /* ── Q&A blocks ── */
 .qa-block {
@@ -683,7 +802,7 @@ code {
   font-family: 'SF Mono', 'Fira Code', monospace;
   font-size: 12px;
   background: #161616;
-  color: #e2e8f0;
+  color: var(--accent);
   padding: 1px 5px;
   border-radius: 3px;
   border: 1px solid var(--border2);
@@ -826,6 +945,15 @@ code {
   .sb-progress-fill { transition: none !important; }
   .qa-a { transition: none !important; }
   * { scroll-behavior: auto !important; }
+  .diag-detail-panel { transition: none !important; }
+  section h2::after { transition: none !important; }
+  .move-copy-btn { transition: none !important; }
+  .diag-box:hover, .diag-box.active { transform: none !important; }
+  section .sec-body { transition: none !important; }
+  section h2 .sec-chevron { transition: none !important; }
+  .sb-cat-chevron { transition: none !important; }
+  .sb-cat-body { transition: none !important; }
+  .step-tracker-item { transition: none !important; }
 }
 
 /* ── Flash card: breathing glow (alive, not distracting) ── */
@@ -870,7 +998,46 @@ code {
   transition: opacity 0.12s ease, transform 0.12s ease;
 }
 .diag-tip.show { opacity: 1; transform: translate(-50%, -10px); }
-.diagram-wrap { position: relative; }
+.diagram-wrap { position: relative; overflow: hidden; }
+
+/* ── Slide-in component detail panel (click a diagram box) ── */
+.diag-detail-panel {
+  position: absolute;
+  top: 0;
+  right: 0;
+  bottom: 0;
+  width: min(280px, 82%);
+  background: #0d0d0d;
+  border-left: 1px solid var(--border2);
+  padding: 16px 16px 14px;
+  transform: translateX(100%);
+  transition: transform 0.22s cubic-bezier(0.16, 1, 0.3, 1);
+  z-index: 60;
+  overflow-y: auto;
+  box-shadow: -8px 0 24px -8px rgba(0,0,0,0.5);
+}
+.diag-detail-panel.open { transform: translateX(0); }
+.diag-detail-close {
+  position: absolute;
+  top: 10px;
+  right: 10px;
+  width: 22px;
+  height: 22px;
+  border-radius: 5px;
+  border: 1px solid var(--border2);
+  background: var(--surface2);
+  color: var(--muted);
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.diag-detail-close:hover { color: var(--text); border-color: var(--faint); }
+.diag-detail-name { font-size: 14px; font-weight: 700; color: var(--accent); margin: 2px 26px 10px 0; }
+.diag-detail-row { margin-bottom: 10px; }
+.diag-detail-label { font-size: 9.5px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.07em; color: var(--faint); margin-bottom: 3px; }
+.diag-detail-val { font-size: 12px; color: #ccc; line-height: 1.55; }
+.diag-detail-val.latency { color: var(--blue); font-family: 'SF Mono', monospace; font-size: 12.5px; }
 
 /* ── CAP theorem interactive detail panel ── */
 .cap-node { cursor: pointer; }
@@ -1023,6 +1190,51 @@ code {
 .grid-table td.fix { color: var(--accent); }
 .grid-table td.detect { color: var(--blue); }
 
+/* Severity-coded bottleneck rows: left border red/amber/green by severity */
+.grid-table tr[data-severity] td:first-child { border-left: 3px solid transparent; padding-left: 9px; }
+.grid-table tr[data-severity="high"] td:first-child   { border-left-color: var(--red); }
+.grid-table tr[data-severity="medium"] td:first-child  { border-left-color: var(--amber); }
+.grid-table tr[data-severity="low"] td:first-child     { border-left-color: var(--accent); }
+
+/* "TRIGGERS AT" chip — second column of bottleneck rows */
+.triggers-chip {
+  display: inline-block;
+  font-size: 9px;
+  font-weight: 700;
+  letter-spacing: 0.05em;
+  color: var(--amber);
+  background: #1a1400;
+  border: 1px solid #4a3a1e;
+  border-radius: 3px;
+  padding: 1px 6px;
+  margin-bottom: 4px;
+}
+
+/* Failure rows (Q&A-adjacent failure lists): small red dot prefix */
+.failure-row { display: flex; gap: 8px; align-items: flex-start; font-size: 13px; color: #bbb; margin-bottom: 8px; }
+.failure-row::before {
+  content: "";
+  flex-shrink: 0;
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--red);
+  margin-top: 5px;
+}
+.failure-row strong { color: var(--text); font-weight: 500; }
+
+/* Failure-mode table variant: red dot prefix on the first cell of each row */
+.grid-table.failure-table td:first-child { display: flex; align-items: flex-start; gap: 8px; }
+.grid-table.failure-table td:first-child::before {
+  content: "";
+  flex-shrink: 0;
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--red);
+  margin-top: 5px;
+}
+
 /* ── Bit-field diagram (Snowflake ID layout) ── */
 .bitfield { display: flex; width: 100%; border-radius: 6px; overflow: hidden; margin-bottom: 10px; border: 1px solid var(--border2); }
 .bitfield-seg { padding: 14px 4px; text-align: center; font-size: 11px; font-weight: 600; color: #08120c; position: relative; }
@@ -1045,7 +1257,8 @@ code {
 .state-arrow { fill: none; stroke: var(--border2); stroke-width: 1.5; }
 .state-arrow.irreversible { stroke: var(--amber); stroke-dasharray: 4 3; }
 
-/* ── Step pill (6-step framework spine) ── */
+/* ── Legacy per-section step pill: superseded by the global .step-tracker (JS-injected) ── */
+/* Kept only so unconverted pages don't lose the label entirely; hidden wherever the tracker exists. */
 .step-pill {
   display: inline-flex;
   align-items: center;
@@ -1060,43 +1273,78 @@ code {
   border-radius: 20px;
   padding: 4px 12px;
   margin-bottom: 10px;
-  transition: transform 0.2s ease;
 }
-.step-pill.pill-active { transform: scale(1.05); }
+.step-tracker ~ * .step-pill,
+main:has(.step-tracker) .step-pill { display: none; }
 
-/* Sticky step pill: pins to top of viewport while scrolling through its section */
-section .step-pill {
+/* ── Legacy goal-arc banner: replaced by .step-tracker, hidden if still present in markup ── */
+.goal-arc-wrap { display: none; }
+
+/* ── Global sticky step tracker (replaces goal-arc + per-section step-pill) ── */
+.step-tracker {
   position: sticky;
   top: 0;
-  z-index: 10;
-  background: var(--bg);
-  padding: 8px 12px;
-}
-
-/* ── Goal arc banner — Hello Interview functional/non-functional spans ── */
-.goal-arc-wrap { margin: 1.25rem 0 1.75rem; }
-.goal-arc-row { display: grid; grid-template-columns: repeat(6, 1fr); gap: 4px; margin-bottom: 6px; }
-.goal-arc-seg {
-  height: 22px;
-  border-radius: 4px;
+  z-index: 50;
   display: flex;
   align-items: center;
-  justify-content: center;
-  font-size: 9px;
-  font-weight: 600;
-  color: var(--bg);
+  gap: 4px;
+  flex-wrap: nowrap;
+  overflow-x: auto;
+  background: var(--bg);
+  border-bottom: 1px solid var(--border);
+  padding: 10px 0;
+  margin-bottom: 1.75rem;
+  scrollbar-width: none;
 }
-.goal-arc-row.functional .goal-arc-seg { background: var(--blue); }
-.goal-arc-row.functional .goal-arc-seg.inactive { background: var(--surface2); color: var(--faint); }
-.goal-arc-row.nonfunctional .goal-arc-seg { background: var(--accent); }
-.goal-arc-label { font-size: 10.5px; color: var(--muted); display: flex; justify-content: space-between; }
-.goal-arc-label strong { color: var(--text); font-weight: 500; }
+.step-tracker::-webkit-scrollbar { display: none; }
+.step-tracker-item {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  color: var(--faint);
+  background: transparent;
+  border: 1px solid var(--border2);
+  border-radius: 20px;
+  padding: 4px 10px 4px 8px;
+  white-space: nowrap;
+  cursor: pointer;
+  text-decoration: none;
+  transition: color 0.15s ease, border-color 0.15s ease, background 0.15s ease;
+  flex-shrink: 0;
+}
+.step-tracker-num {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  font-size: 9px;
+  font-weight: 700;
+  background: var(--surface2);
+  color: var(--faint);
+  flex-shrink: 0;
+}
+.step-tracker-item:hover { color: var(--text); border-color: var(--faint); }
+.step-tracker-item.done { color: #7dd3ac; border-color: #1e4a38; }
+.step-tracker-item.done .step-tracker-num { background: #0d1f17; color: var(--accent); }
+.step-tracker-item.tracker-active { color: var(--bg); background: var(--accent); border-color: var(--accent); font-weight: 700; }
+.step-tracker-item.tracker-active .step-tracker-num { background: rgba(10,10,10,0.25); color: var(--bg); }
+.step-tracker-arrow { color: var(--faint); font-size: 11px; flex-shrink: 0; }
+@media (max-width: 600px) {
+  .step-tracker-item span.step-tracker-label { display: none; }
+  .step-tracker-item { padding: 4px 8px; }
+}
 
 /* ── Core entity schema box (Step 2) ── */
 .entity-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 14px; margin-bottom: 1rem; }
 .entity-box { background: var(--surface); border: 1px solid var(--border2); border-radius: 8px; overflow: hidden; }
 .entity-head { display: flex; align-items: center; justify-content: space-between; padding: 10px 12px; border-bottom: 1px solid var(--border); background: var(--surface2); }
-.entity-name { font-size: 13px; font-weight: 600; color: var(--text); }
+.entity-name { font-size: 13px; font-weight: 700; color: var(--accent); }
 .entity-store {
   font-size: 9.5px;
   font-weight: 700;
@@ -1112,7 +1360,7 @@ section .step-pill {
 .entity-fields { padding: 8px 12px; }
 .entity-field { display: flex; justify-content: space-between; font-size: 11.5px; padding: 3px 0; border-bottom: 1px dashed #1a1a1a; }
 .entity-field:last-child { border-bottom: none; }
-.entity-field .fname { color: var(--text); }
+.entity-field .fname { color: var(--muted); }
 .entity-field .fname.pk::before { content: "PK "; color: var(--accent); font-weight: 700; font-size: 9px; }
 .entity-field .fname.idx::before { content: "IDX "; color: var(--blue); font-weight: 700; font-size: 9px; }
 .entity-field .ftype { color: var(--muted); font-family: 'SF Mono', monospace; font-size: 10.5px; }

@@ -106,6 +106,14 @@
     <div class="sb-progress-track"><div class="sb-progress-fill" style="width:${(doneCount / TOPICS.length) * 100}%"></div></div>
   </div>`;
 
+  // ── "On this page" mini-TOC — current page's own h2 sections, active one tracked below ──
+  if (sections.length) {
+    html += `<div class="sb-ontoc-wrap">
+      <div class="sb-ontoc-label">On this page</div>
+      ${sections.map(s => `<a class="sb-ontoc-link" data-ontoc="${s.id}" href="#${s.id}">${s.label}</a>`).join('')}
+    </div>`;
+  }
+
   // ── Site map — collapsible category accordion ──
   html += `<div class="sb-sitemap">`;
   const cats = [...new Set(TOPICS.map(t => t.cat))];
@@ -192,7 +200,12 @@
   };
   const CHEVRON = '<svg class="sec-chevron" viewBox="0 0 16 16" width="11" height="11"><path d="M4 6l4 4 4-4" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg>';
 
-  document.querySelectorAll('main > section[id]').forEach(sec => {
+  // Collapse defaults: MacBook (>900px) → everything expanded (chevron still works).
+  // iPad/mobile (<=900px) → only the first section starts open; rest collapsed, user opens as they study.
+  const isNarrow = window.matchMedia('(max-width: 900px)').matches;
+  const allSections = Array.from(document.querySelectorAll('main > section[id]'));
+
+  allSections.forEach((sec, i) => {
     const h2 = sec.querySelector(':scope > h2');
     if (!h2) return;
 
@@ -216,6 +229,8 @@
       h2.prepend(span);
     }
     h2.insertAdjacentHTML('beforeend', CHEVRON);
+
+    if (isNarrow && i !== 0) sec.classList.add('collapsed');
 
     h2.addEventListener('click', () => sec.classList.toggle('collapsed'));
   });
@@ -254,6 +269,84 @@
       target.style.boxShadow = '0 0 0 2px var(--accent)';
       target.style.borderRadius = '8px';
       setTimeout(() => { target.style.boxShadow = 'none'; }, 1400);
+    });
+  });
+
+  // ── Diagram box click → slide-in detail panel (role/tech/why/latency) + full path isolation, no page scroll ──
+  // Doubles as the Architecture (Step 5) diagram's click-to-isolate: dims unrelated boxes/arrows,
+  // brightens the clicked box + its connected arrows, and resets on a click outside any box.
+  document.querySelectorAll('.diagram-wrap').forEach(wrap => {
+    const nodes = wrap.querySelectorAll('[data-detail-name]');
+    if (!nodes.length) return;
+    const panel = document.createElement('div');
+    panel.className = 'diag-detail-panel';
+    panel.innerHTML = `
+      <button type="button" class="diag-detail-close" aria-label="Close">
+        <svg viewBox="0 0 16 16" width="12" height="12"><path d="M3 3l10 10M13 3L3 13" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></svg>
+      </button>
+      <div class="diag-detail-name"></div>
+      <div class="diag-detail-row"><div class="diag-detail-label">Type</div><div class="diag-detail-val" data-field="role"></div></div>
+      <div class="diag-detail-row"><div class="diag-detail-label">Tech choice</div><div class="diag-detail-val" data-field="tech"></div></div>
+      <div class="diag-detail-row"><div class="diag-detail-label">Why</div><div class="diag-detail-val" data-field="why"></div></div>
+      <div class="diag-detail-row"><div class="diag-detail-label">Failure impact</div><div class="diag-detail-val latency" data-field="latency"></div></div>
+    `;
+    wrap.appendChild(panel);
+
+    let paths = null;
+    if (wrap.dataset.paths) { try { paths = JSON.parse(wrap.dataset.paths); } catch (e) { paths = null; } }
+
+    const resetIsolation = () => {
+      wrap.classList.remove('path-active');
+      wrap.querySelectorAll('.path-on').forEach(el => el.classList.remove('path-on'));
+      wrap.querySelectorAll('.diag-box.box-clicked').forEach(el => el.classList.remove('box-clicked'));
+    };
+    const closePanel = () => { panel.classList.remove('open'); resetIsolation(); };
+    panel.querySelector('.diag-detail-close').addEventListener('click', closePanel);
+
+    nodes.forEach(node => {
+      node.style.cursor = 'pointer';
+      node.addEventListener('click', (e) => {
+        e.stopPropagation();
+        panel.querySelector('.diag-detail-name').textContent = node.dataset.detailName || '';
+        panel.querySelector('[data-field="role"]').textContent = node.dataset.detailRole || '—';
+        panel.querySelector('[data-field="tech"]').textContent = node.dataset.detailTech || '—';
+        panel.querySelector('[data-field="why"]').textContent = node.dataset.detailWhy || '—';
+        panel.querySelector('[data-field="latency"]').textContent = node.dataset.detailLatency || '—';
+        panel.classList.add('open');
+
+        resetIsolation();
+        const diagBox = node.querySelector('.diag-box');
+        if (diagBox) diagBox.classList.add('box-clicked');
+
+        // Isolate this node's path if the diagram declares one; otherwise just isolate the clicked box itself.
+        const id = node.dataset.id;
+        const route = (paths && id) ? paths[id] : null;
+        wrap.classList.add('path-active');
+        if (route) {
+          route.boxes.forEach(b => wrap.querySelector(`.diag-box[data-id="${b}"]`)?.classList.add('path-on'));
+          route.arrows.forEach(a => wrap.querySelector(`.diag-arrow-path[data-id="${a}"]`)?.classList.add('path-on'));
+        } else if (diagBox) {
+          diagBox.classList.add('path-on');
+        }
+      });
+    });
+
+    // Click anywhere outside a component box (but inside the diagram) resets isolation + closes the panel.
+    wrap.addEventListener('click', (e) => {
+      if (e.target.closest('[data-detail-name]') || e.target.closest('.diag-detail-panel')) return;
+      closePanel();
+    });
+  });
+  // Click outside the diagram entirely also resets any open panel.
+  document.addEventListener('click', (e) => {
+    if (e.target.closest('.diagram-wrap')) return;
+    document.querySelectorAll('.diag-detail-panel.open').forEach(panel => {
+      panel.classList.remove('open');
+      const wrap = panel.closest('.diagram-wrap');
+      if (!wrap) return;
+      wrap.classList.remove('path-active');
+      wrap.querySelectorAll('.path-on').forEach(el => el.classList.remove('path-on'));
+      wrap.querySelectorAll('.diag-box.box-clicked').forEach(el => el.classList.remove('box-clicked'));
     });
   });
 
@@ -403,6 +496,94 @@
       el.addEventListener('mouseleave', () => tip.classList.remove('show'));
     });
   });
+
+  // ── Interview moves: clipboard copy button — copies the verbatim bold phrase ──
+  document.querySelectorAll('.moves-list li').forEach(li => {
+    const strong = li.querySelector('strong');
+    if (!strong) return;
+    const btn = document.createElement('button');
+    btn.type = 'button';
+    btn.className = 'move-copy-btn';
+    btn.setAttribute('aria-label', 'Copy phrase to clipboard');
+    btn.innerHTML = '<svg viewBox="0 0 16 16"><rect x="5" y="5" width="9" height="9" rx="1.5" fill="none" stroke="currentColor" stroke-width="1.3"/><path d="M3.5 10.5V3a1 1 0 0 1 1-1H11" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round"/></svg>';
+    btn.addEventListener('click', () => {
+      const text = strong.textContent.replace(/^"|"$/g, '');
+      navigator.clipboard?.writeText(text).then(() => {
+        btn.classList.add('copied');
+        btn.innerHTML = '<svg viewBox="0 0 16 16"><path d="M3 8.5l3 3 7-7" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg>';
+        setTimeout(() => {
+          btn.classList.remove('copied');
+          btn.innerHTML = '<svg viewBox="0 0 16 16"><rect x="5" y="5" width="9" height="9" rx="1.5" fill="none" stroke="currentColor" stroke-width="1.3"/><path d="M3.5 10.5V3a1 1 0 0 1 1-1H11" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round"/></svg>';
+        }, 1400);
+      }).catch(() => {});
+    });
+    li.appendChild(btn);
+  });
+
+  // ── Section h2: mark active while scrolled within its section (drives underline + sidebar TOC + step tracker) ──
+  document.querySelectorAll('main > section[id] > h2').forEach(h2 => {
+    const sec = h2.closest('section');
+    const ontocLink = sidebar.querySelector(`.sb-ontoc-link[data-ontoc="${sec.id}"]`);
+    const trackerItem = document.querySelector(`.step-tracker-item[data-tracker="${sec.id}"]`);
+    const h2Obs = new IntersectionObserver(entries => {
+      entries.forEach(e => {
+        h2.classList.toggle('h2-active', e.isIntersecting);
+        ontocLink?.classList.toggle('ontoc-active', e.isIntersecting);
+        trackerItem?.classList.toggle('tracker-active', e.isIntersecting);
+      });
+    }, { rootMargin: '-10% 0px -70% 0px' });
+    h2Obs.observe(sec);
+  });
+
+  // ── Global sticky step tracker: [1 REQ] → [2 ENTITIES] → ... → [6 DEEP DIVE], replaces goal-arc + per-section step-pill ──
+  (function buildStepTracker() {
+    const STEP_LABELS = {
+      'step1-requirements': ['1', 'Req'],
+      'step2-entities':     ['2', 'Entities'],
+      'step3-api':          ['3', 'API'],
+      'step4-dataflow':     ['4', 'Flow'],
+      'step5-hld':          ['5', 'Design'],
+    };
+    const stepSections = allSections.filter(sec => STEP_LABELS[sec.id] || sec.id.startsWith('step6-deepdive'));
+    if (!stepSections.length) return;
+
+    // Collapse all step6-deepdive-* sections into a single "6 Deep Dive" tracker entry (first one wins the anchor).
+    const seen = new Set();
+    const items = [];
+    stepSections.forEach(sec => {
+      if (sec.id.startsWith('step6-deepdive')) {
+        if (seen.has('step6')) return;
+        seen.add('step6');
+        items.push({ id: sec.id, num: '6', label: 'Deep Dive' });
+      } else {
+        const [num, label] = STEP_LABELS[sec.id];
+        items.push({ id: sec.id, num, label });
+      }
+    });
+    if (items.length < 2) return; // not a 6-step framework page, skip
+
+    const tracker = document.createElement('div');
+    tracker.className = 'step-tracker';
+    tracker.innerHTML = items.map((it, i) => `${i > 0 ? '<span class="step-tracker-arrow">→</span>' : ''}<a class="step-tracker-item" data-tracker="${it.id}" href="#${it.id}"><span class="step-tracker-num">${it.num}</span><span class="step-tracker-label">${it.label.toUpperCase()}</span></a>`).join('');
+    const main = document.querySelector('main');
+    const firstSection = main.querySelector('section[id]');
+    main.insertBefore(tracker, firstSection);
+
+    // Mark all step6-deepdive-* sections as "done" once scrolled past, since they share one tracker entry.
+    document.querySelectorAll('.step-tracker-item').forEach(item => {
+      const targetId = item.dataset.tracker;
+      const targetSec = document.getElementById(targetId);
+      if (!targetSec) return;
+      const doneObs = new IntersectionObserver(entries => {
+        entries.forEach(e => {
+          const rect = e.boundingClientRect;
+          if (rect.top < 0 && !e.isIntersecting) item.classList.add('done');
+          else if (!e.isIntersecting && rect.top > 0) item.classList.remove('done');
+        });
+      }, { threshold: 0 });
+      doneObs.observe(targetSec);
+    });
+  })();
 
   // ── CAP theorem interactive corners ──
   const capDetail = document.getElementById('cap-detail');

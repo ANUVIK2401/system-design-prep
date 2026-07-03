@@ -35,17 +35,6 @@
       <div class="step-pill">Step 1 of 6 — Requirements</div>
       <h2>Requirements</h2>
 
-      <div class="goal-arc-wrap">
-        <div class="goal-arc-row functional">
-          <div class="goal-arc-seg">1</div><div class="goal-arc-seg">2</div><div class="goal-arc-seg">3</div><div class="goal-arc-seg">4</div><div class="goal-arc-seg">5</div><div class="goal-arc-seg inactive">6</div>
-        </div>
-        <div class="goal-arc-label"><span>Arc 1 (steps 1-5) — <strong>Satisfy Functional Requirements</strong></span></div>
-        <div class="goal-arc-row nonfunctional" style="margin-top:8px">
-          <div class="goal-arc-seg">1</div><div class="goal-arc-seg">2</div><div class="goal-arc-seg">3</div><div class="goal-arc-seg">4</div><div class="goal-arc-seg">5</div><div class="goal-arc-seg">6</div>
-        </div>
-        <div class="goal-arc-label"><span>Arc 2 (all 6 steps) — <strong>Satisfy Non-Functional Requirements</strong></span></div>
-      </div>
-
       <div class="compare-grid">
         <div class="compare-card good">
           <div class="compare-label">Functional</div>
@@ -80,7 +69,6 @@
     <section id="step2-entities">
       <div class="step-pill">Step 2 of 6 — Core Entities</div>
       <h2>Core entities</h2>
-      <p style="font-size:13px;color:#999;margin-bottom:0.75rem">Three entities across two stores, split by access pattern — hot connection state never touches the durable message log.</p>
 
       <div class="entity-grid">
         <div class="entity-box">
@@ -123,7 +111,6 @@
     <section id="step3-api">
       <div class="step-pill">Step 3 of 6 — API / Interface</div>
       <h2>API design</h2>
-      <p style="font-size:13px;color:#999;margin-bottom:0.75rem">One persistent WebSocket channel carries the real-time traffic; two REST endpoints handle bootstrap and history backfill.</p>
 
       <div class="api-card">
         <div class="api-line"><span class="api-method ws">WS</span><span class="api-path">/v1/connect</span><span class="api-auth">Auth: required (token on handshake)</span></div>
@@ -161,7 +148,6 @@
     <section id="step4-dataflow">
       <div class="step-pill">Step 4 of 6 — Data Flow</div>
       <h2>Data flow</h2>
-      <p style="font-size:13px;color:#999;margin-bottom:0.75rem">Send path (blue) writes durably before acking; receive path (mint) fans out to whichever connection servers hold the recipient's live sockets.</p>
 
       <div class="diagram-wrap" data-paths='{"send":{"boxes":["s-client","s-conn","s-msgsvc","s-db"],"arrows":["s1","s2","s3"]},"receive":{"boxes":["r-msgsvc","r-route","r-conn","r-client"],"arrows":["r1","r2","r3"]}}'>
         <svg viewBox="0 0 740 220" xmlns="http://www.w3.org/2000/svg">
@@ -212,35 +198,34 @@
     <section id="step5-hld">
       <div class="step-pill">Step 5 of 6 — High-Level Design</div>
       <h2>High-level design</h2>
-      <p style="font-size:13px;color:#999;margin-bottom:0.75rem">Full system: send, receive, offline, and multi-device sync paths together with every supporting component.</p>
 
       <div class="diagram-wrap">
         <svg viewBox="0 0 780 300" xmlns="http://www.w3.org/2000/svg">
           <defs><marker id="waHldArrow" markerWidth="8" markerHeight="8" refX="6" refY="3" orient="auto"><path d="M0,0 L6,3 L0,6 Z" fill="var(--border2)"/></marker></defs>
-          <g data-tip="Sender and recipient devices, each holding one WebSocket per device"><rect class="diag-box role-client" x="10" y="20" width="120" height="50"/><text class="diag-label" x="70" y="50" style="font-size:11px">Client Devices</text></g>
+          <g data-tip="Sender and recipient devices, each holding one WebSocket per device" data-detail-name="Client Devices" data-detail-role="Client" data-detail-tech="Mobile/desktop apps, one persistent WebSocket per device" data-detail-why="Each device keeps its own socket and sync cursor so multi-device delivery and read state stay independent per device." data-detail-latency="~0ms — origin of the request, not a hop"><rect class="diag-box role-client" x="10" y="20" width="120" height="50"/><text class="diag-label" x="70" y="50" style="font-size:11px">Client Devices</text></g>
           <path class="diag-arrow-path" d="M130,45 L165,45" marker-end="url(#waHldArrow)"/>
-          <g data-tip="TLS termination, sticky routing to a connection server"><rect class="diag-box role-client" x="165" y="20" width="120" height="50"/><text class="diag-label" x="225" y="50" style="font-size:11px">Load Balancer</text></g>
+          <g data-tip="TLS termination, sticky routing to a connection server" data-detail-name="Load Balancer" data-detail-role="Service" data-detail-tech="L4/L7 LB with sticky routing" data-detail-why="Terminates TLS and routes each socket consistently to one connection server so the stateful tier behind it stays coherent." data-detail-latency="~1-3ms TLS + routing overhead"><rect class="diag-box role-client" x="165" y="20" width="120" height="50"/><text class="diag-label" x="225" y="50" style="font-size:11px">Load Balancer</text></g>
 
           <path class="diag-arrow-path" d="M225,70 L225,105" marker-end="url(#waHldArrow)"/>
-          <g data-tip="Holds long-lived sockets, ~50k connections per instance"><rect class="diag-box" x="160" y="105" width="150" height="46"/><text class="diag-label" x="235" y="128" style="font-size:11px">Connection Svc</text><text class="diag-sublabel" x="235" y="143" style="font-size:8.5px">stateful, in-memory</text></g>
+          <g data-tip="Holds long-lived sockets, ~50k connections per instance" data-detail-name="Connection Svc" data-detail-role="Service" data-detail-tech="Stateful service, cheap-concurrency runtime (e.g. Go/Erlang-style event loop)" data-detail-why="~50M concurrent sockets means per-connection memory overhead is the binding constraint; tradeoff is these instances are stateful and harder to deploy/scale than the rest of the fleet." data-detail-latency="~1-5ms frame forwarding"><rect class="diag-box" x="160" y="105" width="150" height="46"/><text class="diag-label" x="235" y="128" style="font-size:11px">Connection Svc</text><text class="diag-sublabel" x="235" y="143" style="font-size:8.5px">stateful, in-memory</text></g>
 
           <path class="diag-arrow-path" d="M310,128 L350,128" marker-end="url(#waHldArrow)"/>
-          <g data-tip="Assigns ordered message IDs, orchestrates fan-out"><rect class="diag-box" x="350" y="105" width="140" height="46"/><text class="diag-label" x="420" y="128" style="font-size:11px">Message Svc</text><text class="diag-sublabel" x="420" y="143" style="font-size:8.5px">stateless</text></g>
+          <g data-tip="Assigns ordered message IDs, orchestrates fan-out" data-detail-name="Message Svc" data-detail-role="Service" data-detail-tech="Stateless service" data-detail-why="Stateless so it scales trivially; assigns ordered message_id and orchestrates the fan-out to Cassandra, Redis, and Session Router." data-detail-latency="~2-5ms ID assignment + orchestration"><rect class="diag-box" x="350" y="105" width="140" height="46"/><text class="diag-label" x="420" y="128" style="font-size:11px">Message Svc</text><text class="diag-sublabel" x="420" y="143" style="font-size:8.5px">stateless</text></g>
 
           <path class="diag-arrow-path" d="M420,151 L420,185" marker-end="url(#waHldArrow)"/>
-          <g data-tip="Durable append-only message log, partitioned by conversation"><rect class="diag-box role-db" x="355" y="185" width="130" height="46"/><text class="diag-label" x="420" y="208" style="font-size:11px">Cassandra</text></g>
+          <g data-tip="Durable append-only message log, partitioned by conversation" data-detail-name="Cassandra" data-detail-role="Database" data-detail-tech="Wide-column store" data-detail-why="Writes are append-only at massive scale and reads are always range-scans within one partition; tradeoff is weaker support for ad-hoc cross-conversation queries." data-detail-latency="~5-15ms durable write commit"><rect class="diag-box role-db" x="355" y="185" width="130" height="46"/><text class="diag-label" x="420" y="208" style="font-size:11px">Cassandra</text></g>
 
           <path class="diag-arrow-path" d="M490,128 L525,128" marker-end="url(#waHldArrow)"/>
-          <g data-tip="Session routing table: user/device → connection server instance"><rect class="diag-box role-cache" x="525" y="105" width="140" height="46"/><text class="diag-label" x="595" y="128" style="font-size:11px">Redis</text><text class="diag-sublabel" x="595" y="143" style="font-size:8.5px">sessions + offline queue</text></g>
+          <g data-tip="Session routing table: user/device → connection server instance" data-detail-name="Redis" data-detail-role="Cache" data-detail-tech="In-memory key-value store" data-detail-why="Session lookup and queue push/pop must be sub-millisecond on the hot path; tradeoff is it's not the durable copy, so it's rebuildable from Cassandra, never authoritative." data-detail-latency="&lt;1ms session lookup / queue op"><rect class="diag-box role-cache" x="525" y="105" width="140" height="46"/><text class="diag-label" x="595" y="128" style="font-size:11px">Redis</text><text class="diag-sublabel" x="595" y="143" style="font-size:8.5px">sessions + offline queue</text></g>
 
           <path class="diag-arrow-path" d="M595,151 L595,185" marker-end="url(#waHldArrow)" stroke-dasharray="3 3"/>
-          <g data-tip="Wakes the OS app when a device is offline and a message is queued"><rect class="diag-box role-async" x="530" y="185" width="130" height="46"/><text class="diag-label" x="595" y="208" style="font-size:11px">Push Notif Svc</text></g>
+          <g data-tip="Wakes the OS app when a device is offline and a message is queued" data-detail-name="Push Notif Svc" data-detail-role="Queue" data-detail-tech="Thin fan-out layer over APNs/FCM" data-detail-why="The OS-level push channel is the only way to reach an app that isn't even running; tradeoff is push delivery itself is best-effort, so it's a wake-up nudge, not the guarantee." data-detail-latency="~100ms-1s best-effort wake-up"><rect class="diag-box role-async" x="530" y="185" width="130" height="46"/><text class="diag-label" x="595" y="208" style="font-size:11px">Push Notif Svc</text></g>
 
           <path class="diag-arrow-path" d="M160,128 L100,128 L100,185" marker-end="url(#waHldArrow)" stroke-dasharray="3 3"/>
-          <g data-tip="Tracks each user's device list and per-device read cursor"><rect class="diag-box role-db" x="30" y="185" width="140" height="46"/><text class="diag-label" x="100" y="208" style="font-size:11px">Postgres</text><text class="diag-sublabel" x="100" y="223" style="font-size:8.5px">devices + sync cursors</text></g>
+          <g data-tip="Tracks each user's device list and per-device read cursor" data-detail-name="Postgres" data-detail-role="Database" data-detail-tech="Relational store" data-detail-why="Multi-device sync needs a strongly consistent record of which connection server a device is attached to and how far it has read; low write volume fits a relational store, but this table is a hot lookup on every send so it must stay cache-backed." data-detail-latency="~2-8ms hot lookup"><rect class="diag-box role-db" x="30" y="185" width="140" height="46"/><text class="diag-label" x="100" y="208" style="font-size:11px">Postgres</text><text class="diag-sublabel" x="100" y="223" style="font-size:8.5px">devices + sync cursors</text></g>
 
           <path class="diag-arrow-path" d="M660,128 L700,128 L700,240" marker-end="url(#waHldArrow)"/>
-          <g data-tip="APNs / FCM — third-party push gateways"><rect class="diag-box role-async" x="620" y="240" width="140" height="46"/><text class="diag-label" x="690" y="263" style="font-size:11px">APNs / FCM</text></g>
+          <g data-tip="APNs / FCM — third-party push gateways" data-detail-name="APNs / FCM" data-detail-role="Queue" data-detail-tech="Third-party OS push gateways" data-detail-why="External push infrastructure is the only channel that can wake a fully-closed app process on iOS/Android." data-detail-latency="~100ms-several sec, provider-dependent"><rect class="diag-box role-async" x="620" y="240" width="140" height="46"/><text class="diag-label" x="690" y="263" style="font-size:11px">APNs / FCM</text></g>
         </svg>
         <div class="diag-legend">
           <div class="diag-legend-item"><span class="diag-legend-dot role-client"></span>Client / load balancer</div>
@@ -272,9 +257,9 @@
       <table class="grid-table">
         <thead><tr><th>Bottleneck</th><th>Triggers at</th><th>Exact fix</th></tr></thead>
         <tbody>
-          <tr><td>Connection Svc instance overload</td><td>&gt;50k sockets or CPU/memory saturation on one node</td><td class="fix">Load balancer stops routing new connects to it; existing sockets drain and reconnect elsewhere</td></tr>
-          <tr><td>Redis session table hot key</td><td>Single shard CPU pegged from routing lookups</td><td class="fix">Consistent-hash shard by user_id across more Redis nodes</td></tr>
-          <tr><td>Cassandra write hot partition</td><td>One conversation_id gets disproportionate write volume</td><td class="fix">Rare for 1:1 chat, but bound message size and rate-limit per conversation as a safety valve</td></tr>
+          <tr data-severity="high"><td>Connection Svc instance overload</td><td><span class="triggers-chip">TRIGGERS AT</span><br>&gt;50k sockets or CPU/memory saturation on one node</td><td class="fix">Load balancer stops routing new connects to it; existing sockets drain and reconnect elsewhere</td></tr>
+          <tr data-severity="medium"><td>Redis session table hot key</td><td><span class="triggers-chip">TRIGGERS AT</span><br>Single shard CPU pegged from routing lookups</td><td class="fix">Consistent-hash shard by user_id across more Redis nodes</td></tr>
+          <tr data-severity="low"><td>Cassandra write hot partition</td><td><span class="triggers-chip">TRIGGERS AT</span><br>One conversation_id gets disproportionate write volume</td><td class="fix">Rare for 1:1 chat, but bound message size and rate-limit per conversation as a safety valve</td></tr>
         </tbody>
       </table>
 
@@ -293,7 +278,6 @@
     <section id="step6-deepdive-receipts">
       <div class="step-pill">Step 6 of 6 — Deep Dives</div>
       <h2>Deep dive: delivery receipt state machine</h2>
-      <p style="font-size:13px;color:#999;margin-bottom:0.75rem">Every message moves through three states, driven by explicit client acknowledgments — never inferred silently by the server.</p>
       <div class="diagram-wrap">
         <svg viewBox="0 0 620 140" xmlns="http://www.w3.org/2000/svg">
           <defs>
@@ -331,7 +315,6 @@
 
     <section id="step6-deepdive-offline">
       <h2>Deep dive: offline message queue and reconnect flow</h2>
-      <p style="font-size:13px;color:#999;margin-bottom:0.75rem">A message sent to an offline user must be durably queued, not dropped — and delivered with receipts firing correctly once the recipient reconnects.</p>
 
       <div class="diagram-wrap">
         <svg viewBox="0 0 740 210" xmlns="http://www.w3.org/2000/svg">
@@ -366,7 +349,7 @@
 
       <div class="callout warn">TIMEUUID clustering keys make the drain order deterministic, but the client must still dedupe by message_id — a redelivery after a partial ACK (connection dropped mid-flush) is expected under at-least-once, not a bug.</div>
 
-      <table class="grid-table">
+      <table class="grid-table failure-table">
         <thead><tr><th>Scenario</th><th>User impact</th><th>Detection signal</th><th>Mitigation</th></tr></thead>
         <tbody>
           <tr><td>Connection Svc instance crashes with live sockets attached</td><td class="impact">Thousands of users appear offline instantly</td><td class="detect">Instance health check fails, socket count drops to zero</td><td class="fix">Clients auto-reconnect with backoff; Session Router evicts stale entries on TTL, messages queue normally in the meantime</td></tr>
