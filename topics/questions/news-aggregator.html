@@ -20,6 +20,23 @@
       </div>
     </header>
 
+    <section class="concept-map-section">
+      <button type="button" class="concept-map-head">
+        <span class="cm-title">Concept Map</span>
+        <span class="cm-hint">click to expand</span>
+        <svg class="cm-chevron" viewBox="0 0 16 16" width="11" height="11"><path d="M4 6l4 4 4-4" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg>
+      </button>
+      <div class="concept-map-body">
+        <div class="mindmap-wrap" data-mindmap='{"center":"News Aggregator","ring1":[
+          {"label":"URL Frontier","def":"Priority queue deciding what to crawl next per source","target":"step6-deepdive-frontier","ring2":[{"label":"Per-source cadence","def":"A wire feed crawls far more often than a blog"},{"label":"Priority scoring","def":"Freshness need vs crawl cost"}]},
+          {"label":"Crawler Fleet","def":"Fetches articles from thousands of registered sources","target":"step4-dataflow","ring2":[{"label":"Distributed workers","def":"Parallel fetch across sources"},{"label":"Politeness","def":"Respects per-domain rate limits"}]},
+          {"label":"Bloom Filter","def":"Cheap membership check before a full dedup lookup","target":"step6-deepdive-bloom","ring2":[{"label":"Memory win","def":"Fraction of a real set at same scale"},{"label":"False positives ok","def":"Tunable, rare, and cheap to accept"}]},
+          {"label":"Elasticsearch","def":"Indexes article text for search and clustering","target":"step5-hld","ring2":[{"label":"Full-text search","def":"Powers the reader-facing search"},{"label":"Feeds clustering","def":"Groups near-duplicate coverage"}]},
+          {"label":"Ranker","def":"Batch-scores stories for the personalized feed","target":"step6-deepdive-ranking","ring2":[{"label":"Runs periodically","def":"Not computed per-request"},{"label":"Redis (ranked)","def":"Serves the precomputed feed fast"}]}
+        ]}'></div>
+      </div>
+    </section>
+
     <div class="flash-card">
       <div class="flash-label">Say this in the first 2 minutes</div>
       <ul>
@@ -336,7 +353,8 @@
         <div class="stat-card"><div class="stat-val">0.1%</div><div class="stat-label">target false-positive rate (p)</div></div>
       </div>
 
-      <p style="font-size:13px;color:#ccc;margin:0.75rem 0">Sized from the standard formulas <code>m = -(n · ln p) / (ln 2)²</code> and <code>k = (m/n) · ln 2</code>. At n=2B and p=0.1%, that's <code>m ≈ 2.87×10¹⁰ bits ≈ 3.4GB</code> — versus roughly 128GB+ to store 2B full SHA-256 hashes (32 bytes each) in a real set. A ~40x memory reduction for a 1-in-1000 chance of wrongly treating a new article as a duplicate.</p>
+      <p style="font-size:13px;color:#ccc;margin-bottom:0.5rem">Sized from the standard formulas <code>m = -(n · ln p) / (ln 2)²</code> and <code>k = (m/n) · ln 2</code>. At n=2B and p=0.1%, that's <code>m ≈ 2.87×10¹⁰ bits ≈ 3.4GB</code>.</p>
+      <p style="font-size:13px;color:#ccc;margin:0 0 0.75rem">Versus roughly 128GB+ to store 2B full SHA-256 hashes (32 bytes each) in a real set — a ~40x memory reduction for a 1-in-1000 chance of a false duplicate.</p>
 
       <div class="callout warn">A false positive here is silent by design — the article just never gets crawled, with no error and no retry. Mitigate by rotating the filter on a 30-day TTL window (old URLs age out, keeping n and thus m bounded) and by treating the Bloom check as advisory-only for high-priority sources, backed by a real url_hash lookup in Postgres before a final drop.</div>
     </section>
@@ -478,5 +496,6 @@
 
   </main>
   <script src="../../assets/nav.js"></script>
+  <script src="../../assets/mindmap.js"></script>
 </body>
 </html>

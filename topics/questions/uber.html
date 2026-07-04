@@ -20,6 +20,23 @@
       </div>
     </header>
 
+    <section class="concept-map-section">
+      <button type="button" class="concept-map-head">
+        <span class="cm-title">Concept Map</span>
+        <span class="cm-hint">click to expand</span>
+        <svg class="cm-chevron" viewBox="0 0 16 16" width="11" height="11"><path d="M4 6l4 4 4-4" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg>
+      </button>
+      <div class="concept-map-body">
+        <div class="mindmap-wrap" data-mindmap='{"center":"Uber","ring1":[
+          {"label":"Location Svc","def":"Ingests a constant write-heavy stream of driver GPS pings","target":"step4-dataflow","ring2":[{"label":"Write-heavy","def":"Every driver pings every few seconds"},{"label":"Redis GEO","def":"In-memory geospatial index for fast lookups"}]},
+          {"label":"Matching Svc","def":"Finds nearby available drivers for a ride request","target":"step6-deepdive-geohash","ring2":[{"label":"Geohash grid","def":"Buckets drivers into searchable cells"},{"label":"Read-heavy","def":"A different scaling problem than location writes"}]},
+          {"label":"Trip Service","def":"Owns the ride lifecycle as an explicit state machine","target":"step6-deepdive-statemachine","ring2":[{"label":"State machine","def":"requested to matched to in-progress to completed"},{"label":"Postgres","def":"Durable source of truth for trip state"}]},
+          {"label":"ETA Svc","def":"Estimates arrival time from live traffic and route data","target":"step5-hld","ring2":[{"label":"Deep dive component","def":"Not an afterthought, a real subsystem"},{"label":"Feeds matching","def":"ETA informs which driver gets picked"}]},
+          {"label":"Surge Pricing","def":"Adjusts price in real time based on local supply and demand","target":"step6-deepdive-surge","ring2":[{"label":"Kafka","def":"Streams demand signals per geo cell"},{"label":"Per-region multiplier","def":"Computed continuously, not per-request"}]}
+        ]}'></div>
+      </div>
+    </section>
+
     <div class="flash-card">
       <div class="flash-label">Say this in the first 2 minutes</div>
       <ul>
@@ -530,5 +547,6 @@
 
   </main>
   <script src="../../assets/nav.js"></script>
+  <script src="../../assets/mindmap.js"></script>
 </body>
 </html>

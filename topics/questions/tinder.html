@@ -20,6 +20,24 @@
       </div>
     </header>
 
+    <section class="concept-map-section">
+      <button type="button" class="concept-map-head">
+        <span class="cm-title">Concept Map</span>
+        <span class="cm-hint">click to expand</span>
+        <svg class="cm-chevron" viewBox="0 0 16 16" width="11" height="11"><path d="M4 6l4 4 4-4" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg>
+      </button>
+      <div class="concept-map-body">
+        <div class="mindmap-wrap" data-mindmap='{"center":"Tinder","ring1":[
+          {"label":"Deck Svc","def":"Stateless service serving precomputed candidate batches to swipe on","target":"step4-dataflow","ring2":[{"label":"Cache-first","def":"Reads the daily candidate batch"},{"label":"Geo fallback","def":"Falls to live query on a miss"}]},
+          {"label":"Swipe Svc","def":"Records swipes and atomically checks for a mutual like","target":"step6-deepdive-statemachine","ring2":[{"label":"Idempotency key","def":"Prevents a retried swipe from double-counting"},{"label":"Inline match check","def":"Reads reverse pair in the same request"}]},
+          {"label":"Candidate Cache","def":"Redis store of each user daily precomputed candidate batch","target":"step6-deepdive-geohash","ring2":[{"label":"Nightly rebuild","def":"Batch job refreshes it once a day"},{"label":"Fast reads","def":"Low tens of ms per deck fetch"}]},
+          {"label":"Redis GEO","def":"In-memory geospatial index answering radius queries in milliseconds","target":"step6-deepdive-geohash","ring2":[{"label":"GEOADD","def":"Places a user by lat and lng"},{"label":"Ring expansion","def":"Widens search until enough candidates found"}]},
+          {"label":"Cassandra","def":"Append-only wide-column store for the massive swipe write volume","target":"step2-entities","ring2":[{"label":"Partition key","def":"swiper_id spreads writes evenly"},{"label":"130k writes per sec","def":"Peak swipe throughput target"}]},
+          {"label":"Match DB","def":"Postgres table enforcing exactly-once match creation on a sorted pair","target":"step6-deepdive-statemachine","ring2":[{"label":"Unique constraint","def":"Sorted user pair blocks duplicates"},{"label":"Race-safe","def":"Losing insert treated as a success"}]}
+        ]}'></div>
+      </div>
+    </section>
+
     <div class="flash-card">
       <div class="flash-label">Say this in the first 2 minutes</div>
       <ul>
@@ -199,7 +217,7 @@
           <path class="diag-arrow-path" data-id="w2" d="M275,138 L310,138" marker-end="url(#tdW)"/>
           <g data-target="step2-entities" data-id="w-cass" data-tip="Append-only swipe log, 130k writes/sec at peak"><rect class="diag-box role-db" x="310" y="115" width="120" height="46"/><text class="diag-label" x="370" y="143" style="font-size:11px">Cassandra</text></g>
           <path class="diag-arrow-path" data-id="w3" d="M275,150 L400,180 L400,161" marker-end="url(#tdW)" stroke-dasharray="3 3"/>
-          <g data-target="step6-deepdive-statemachine" data-id="w-match" data-tip="Only invoked when the reverse swipe already exists as a like"><rect class="diag-box role-async" x="340" y="180" width="140" height="30"/><text class="diag-label" x="410" y="200" style="font-size:10px">Match Svc → push</text></g>
+          <g data-target="step6-deepdive-statemachine" data-id="w-match" data-tip="Only invoked when the reverse swipe already exists as a like"><rect class="diag-box role-async" x="340" y="180" width="140" height="30"/><text class="diag-label" x="410" y="200" style="font-size:11px">Match Svc → push</text></g>
         </svg>
         <div class="diag-legend">
           <div class="diag-legend-item"><span class="diag-legend-dot role-cache"></span>Deck read — precomputed batch first, live geo fallback</div>
@@ -501,5 +519,6 @@
 
   </main>
   <script src="../../assets/nav.js"></script>
+  <script src="../../assets/mindmap.js"></script>
 </body>
 </html>

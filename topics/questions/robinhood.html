@@ -20,6 +20,23 @@
       </div>
     </header>
 
+    <section class="concept-map-section">
+      <button type="button" class="concept-map-head">
+        <span class="cm-title">Concept Map</span>
+        <span class="cm-hint">click to expand</span>
+        <svg class="cm-chevron" viewBox="0 0 16 16" width="11" height="11"><path d="M4 6l4 4 4-4" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg>
+      </button>
+      <div class="concept-map-body">
+        <div class="mindmap-wrap" data-mindmap='{"center":"Robinhood","ring1":[
+          {"label":"Order Service","def":"Validates and idempotency-checks every incoming order","target":"step6-deepdive-idempotency","ring2":[{"label":"Idempotency key","def":"A retry never double-executes a trade"},{"label":"Validation first","def":"Rejects bad orders before they reach an exchange"}]},
+          {"label":"Order Router","def":"Sends validated orders to the right exchange","target":"step5-hld","ring2":[{"label":"Exchange routing","def":"Picks the venue for execution"},{"label":"Exec confirmation","def":"Waits for the fill to come back"}]},
+          {"label":"Ledger DB","def":"Append-only record of every balance-changing event","target":"step6-deepdive-ledger","ring2":[{"label":"Append-only","def":"Never mutates a historical entry"},{"label":"Source of truth","def":"Portfolio state is derived from it"}]},
+          {"label":"Portfolio Service","def":"Computes current holdings and buying power","target":"step2-entities","ring2":[{"label":"Derived state","def":"Rebuildable from the ledger"},{"label":"Portfolio Cache","def":"Serves fast reads to the app"}]},
+          {"label":"Market Data Feed","def":"Streams live prices, the trigger for order bursts","target":"step6-deepdive-marketburst","ring2":[{"label":"Bursty load","def":"Volatility spikes order volume suddenly"},{"label":"Backpressure plan","def":"System must not fall over under a burst"}]}
+        ]}'></div>
+      </div>
+    </section>
+
     <div class="flash-card">
       <div class="flash-label">Say this in the first 2 minutes</div>
       <ul>
@@ -326,7 +343,7 @@
           <text class="diag-sublabel" x="300" y="90" style="font-size:9px;fill:var(--muted)">POST /orders  Idempotency-Key: K-9f21</text>
 
           <text class="diag-sublabel" x="300" y="112" style="font-size:9.5px;fill:var(--accent)">2. Server stores key + begins execution</text>
-          <g data-tip="INSERT with UNIQUE(idempotency_key) — this row is now the lock"><rect class="diag-box role-cache" x="480" y="118" width="180" height="34"/><text class="diag-label" x="570" y="139" style="font-size:10px">store key, execute trade</text></g>
+          <g data-tip="INSERT with UNIQUE(idempotency_key) — this row is now the lock"><rect class="diag-box role-cache" x="480" y="118" width="180" height="34"/><text class="diag-label" x="570" y="139" style="font-size:11px">store key, execute trade</text></g>
 
           <text class="diag-sublabel" x="300" y="172" style="font-size:9.5px;fill:var(--amber)">3. Response lost / client times out before it arrives</text>
           <path class="diag-arrow-path" d="M570,160 L80,178" marker-end="url(#idemArrowAmber)" stroke-dasharray="4 3" style="stroke:var(--amber)"/>
@@ -337,6 +354,7 @@
 
           <text class="diag-sublabel" x="300" y="244" style="font-size:9.5px;fill:var(--accent)">5. Key already seen — cached response replayed, NO re-execution</text>
         </svg>
+        <div class="diag-legend"><div class="diag-legend-item"><span class="diag-legend-dot role-client"></span>Client / gateway</div><div class="diag-legend-item"><span class="diag-legend-dot role-cache"></span>Cache — hot path</div></div>
       </div>
 
       <div class="entity-grid">
@@ -372,29 +390,30 @@
           <defs><marker id="ledgerArrow" markerWidth="8" markerHeight="8" refX="6" refY="3" orient="auto"><path d="M0,0 L6,3 L0,6 Z" fill="var(--red)"/></marker></defs>
 
           <text class="diag-sublabel" x="180" y="16" style="font-size:10.5px;fill:var(--red)">NAIVE — mutable balance column (lost update)</text>
-          <g data-tip="Both transactions read balance = 1000 before either writes"><rect class="diag-box role-db" x="10" y="26" width="150" height="40"/><text class="diag-label" x="85" y="50" style="font-size:10.5px">accounts.balance = 1000</text></g>
+          <g data-tip="Both transactions read balance = 1000 before either writes"><rect class="diag-box role-db" x="10" y="26" width="150" height="40"/><text class="diag-label" x="85" y="50" style="font-size:11px">accounts.balance = 1000</text></g>
 
           <path class="diag-arrow-path" d="M85,66 L85,100" marker-end="url(#ledgerArrow)" style="stroke:var(--red)"/>
-          <g data-tip="Txn A reads 1000, computes 1000-200=800"><rect class="diag-box" x="10" y="100" width="150" height="36"/><text class="diag-label" x="85" y="122" style="font-size:10px">Txn A: read 1000, -200</text></g>
+          <g data-tip="Txn A reads 1000, computes 1000-200=800"><rect class="diag-box" x="10" y="100" width="150" height="36"/><text class="diag-label" x="85" y="122" style="font-size:11px">Txn A: read 1000, -200</text></g>
           <path class="diag-arrow-path" d="M85,66 L260,100" marker-end="url(#ledgerArrow)" style="stroke:var(--red)"/>
-          <g data-tip="Txn B reads 1000 too — same stale value — computes 1000-300=700"><rect class="diag-box" x="185" y="100" width="150" height="36"/><text class="diag-label" x="260" y="122" style="font-size:10px">Txn B: read 1000, -300</text></g>
+          <g data-tip="Txn B reads 1000 too — same stale value — computes 1000-300=700"><rect class="diag-box" x="185" y="100" width="150" height="36"/><text class="diag-label" x="260" y="122" style="font-size:11px">Txn B: read 1000, -300</text></g>
 
           <path class="diag-arrow-path" d="M85,136 L85,170" marker-end="url(#ledgerArrow)" style="stroke:var(--red)"/>
           <path class="diag-arrow-path" d="M260,136 L200,170" marker-end="url(#ledgerArrow)" style="stroke:var(--red)"/>
-          <g data-tip="Whichever UPDATE commits last wins — the other write is silently lost"><rect class="diag-box" x="10" y="170" width="325" height="40" style="stroke:var(--red)"/><text class="diag-label" x="172" y="194" style="font-size:10.5px" fill="var(--red)">UPDATE balance=800, then UPDATE balance=700 — should be 500</text></g>
+          <g data-tip="Whichever UPDATE commits last wins — the other write is silently lost"><rect class="diag-box" x="10" y="170" width="325" height="40" style="stroke:var(--red)"/><text class="diag-label" x="172" y="194" style="font-size:11px" fill="var(--red)">UPDATE balance=800, then UPDATE balance=700 — should be 500</text></g>
           <text class="diag-sublabel" x="172" y="222" style="font-size:9px;fill:var(--red)">Txn A's $200 debit is silently lost — final balance is wrong</text>
 
           <text class="diag-sublabel" x="560" y="16" style="font-size:10.5px;fill:var(--accent)">LEDGER — append-only, derived balance</text>
-          <g data-tip="Every change is a new immutable row, never an overwrite"><rect class="diag-box role-cache" x="400" y="26" width="150" height="40"/><text class="diag-label" x="475" y="50" style="font-size:10.5px">ledger_entries (append-only)</text></g>
+          <g data-tip="Every change is a new immutable row, never an overwrite"><rect class="diag-box role-cache" x="400" y="26" width="150" height="40"/><text class="diag-label" x="475" y="50" style="font-size:11px">ledger_entries (append-only)</text></g>
 
           <path class="diag-arrow-path" d="M475,66 L475,100" marker-end="url(#ledgerArrow)" style="stroke:var(--accent)"/>
-          <g data-tip="Both inserts succeed independently — no read-then-write race"><rect class="diag-box" x="400" y="100" width="150" height="36"/><text class="diag-label" x="475" y="122" style="font-size:10px">INSERT delta=-200</text></g>
+          <g data-tip="Both inserts succeed independently — no read-then-write race"><rect class="diag-box" x="400" y="100" width="150" height="36"/><text class="diag-label" x="475" y="122" style="font-size:11px">INSERT delta=-200</text></g>
           <path class="diag-arrow-path" d="M475,136 L475,170" marker-end="url(#ledgerArrow)" style="stroke:var(--accent)"/>
-          <g data-tip="Both inserts succeed independently — no read-then-write race"><rect class="diag-box" x="400" y="170" width="150" height="36"/><text class="diag-label" x="475" y="192" style="font-size:10px">INSERT delta=-300</text></g>
+          <g data-tip="Both inserts succeed independently — no read-then-write race"><rect class="diag-box" x="400" y="170" width="150" height="36"/><text class="diag-label" x="475" y="192" style="font-size:11px">INSERT delta=-300</text></g>
 
           <path class="diag-arrow-path" d="M475,206 L475,240" marker-end="url(#ledgerArrow)" style="stroke:var(--accent)"/>
-          <g data-tip="Balance is always the sum of every entry, never overwritten"><rect class="diag-box role-cache" x="400" y="240" width="150" height="40"/><text class="diag-label" x="475" y="264" style="font-size:10px">SUM(delta) = 500 — correct</text></g>
+          <g data-tip="Balance is always the sum of every entry, never overwritten"><rect class="diag-box role-cache" x="400" y="240" width="150" height="40"/><text class="diag-label" x="475" y="264" style="font-size:11px">SUM(delta) = 500 — correct</text></g>
         </svg>
+        <div class="diag-legend"><div class="diag-legend-item"><span class="diag-legend-dot role-cache"></span>Cache — hot path</div><div class="diag-legend-item"><span class="diag-legend-dot role-db"></span>Database — source of truth</div></div>
       </div>
 
       <ol class="flow-steps-list">
@@ -424,11 +443,11 @@
 
           <text class="diag-sublabel" x="150" y="196" style="font-size:9px;fill:var(--muted)">flat baseline traffic</text>
           <line x1="300" y1="220" x2="300" y2="30" stroke="var(--amber)" stroke-width="1" stroke-dasharray="3 3"/>
-          <text class="diag-label" x="330" y="35" style="font-size:10.5px;fill:var(--amber)">9:30am ET market open</text>
+          <text class="diag-label" x="330" y="35" style="font-size:11px;fill:var(--amber)">9:30am ET market open</text>
           <text class="diag-sublabel" x="330" y="50" style="font-size:9px;fill:var(--amber)">~100x baseline within seconds</text>
 
           <line x1="460" y1="220" x2="460" y2="170" stroke="var(--amber)" stroke-width="1" stroke-dasharray="3 3"/>
-          <text class="diag-label" x="490" y="170" style="font-size:10px;fill:var(--amber)">4:00pm ET close</text>
+          <text class="diag-label" x="490" y="170" style="font-size:11px;fill:var(--amber)">4:00pm ET close</text>
           <text class="diag-sublabel" x="490" y="184" style="font-size:9px;fill:var(--muted)">second, smaller spike</text>
 
           <path d="M320,110 L320,150" stroke="var(--red)" stroke-width="1.5" stroke-dasharray="2 3" marker-end="url(#burstArrow)"/>
@@ -497,5 +516,6 @@
 
   </main>
   <script src="../../assets/nav.js"></script>
+  <script src="../../assets/mindmap.js"></script>
 </body>
 </html>

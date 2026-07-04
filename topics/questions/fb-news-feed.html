@@ -20,6 +20,24 @@
       </div>
     </header>
 
+    <section class="concept-map-section">
+      <button type="button" class="concept-map-head">
+        <span class="cm-title">Concept Map</span>
+        <span class="cm-hint">click to expand</span>
+        <svg class="cm-chevron" viewBox="0 0 16 16" width="11" height="11"><path d="M4 6l4 4 4-4" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg>
+      </button>
+      <div class="concept-map-body">
+        <div class="mindmap-wrap" data-mindmap='{"center":"FB News Feed","ring1":[
+          {"label":"Post Svc","def":"Validates and persists a new post, returns fast while fan-out runs async","target":"step2-entities","ring2":[{"label":"Stateless pods","def":"Scales independently of fan-out load"},{"label":"Fast write","def":"Post commit under 50ms"}]},
+          {"label":"Fan-out Worker","def":"Pushes new post IDs into follower feed caches below a follower threshold","target":"step6-deepdive-fanout","ring2":[{"label":"Push threshold","def":"Skips push above roughly 1M followers"},{"label":"Kafka-driven","def":"Consumes post_created events async"}]},
+          {"label":"Social Graph","def":"Wide-column store resolving follower lists for fan-out","target":"step2-entities","ring2":[{"label":"Cassandra","def":"Partitioned by user_id for fast scans"},{"label":"Eventual consistency","def":"Follow/unfollow lags slightly"}]},
+          {"label":"Redis Feed Cache","def":"Precomputed sorted set serving the ranked feed per user","target":"step6-deepdive-fanout","ring2":[{"label":"ZSET","def":"O(log N) inserts and ranged reads"},{"label":"Depth cap","def":"About 800 items kept per user"}]},
+          {"label":"Feed Svc","def":"Stateless reader that merges cache with a live pull for celebrity authors","target":"step4-dataflow","ring2":[{"label":"Pull merge","def":"Live fetch for followed celebrities"},{"label":"Hydration","def":"Resolves post IDs into content"}]},
+          {"label":"Ranking Svc","def":"Scores each candidate post before it is cached into a feed","target":"step6-deepdive-ranking","ring2":[{"label":"rank_score","def":"Single float used as the ZADD score"},{"label":"Scored at write","def":"Never runs on the read path"}]}
+        ]}'></div>
+      </div>
+    </section>
+
     <div class="flash-card">
       <div class="flash-label">Say this in the first 2 minutes</div>
       <ul>
@@ -244,7 +262,7 @@
           <g data-tip="Source of truth for posts"><rect class="diag-box role-db" x="150" y="185" width="130" height="46"/><text class="diag-label" x="215" y="208" style="font-size:11px">Postgres</text></g>
 
           <path class="diag-arrow-path" d="M215,231 L215,255" marker-end="url(#fnHldArrow)" stroke-dasharray="3 3"/>
-          <g data-tip="Kafka topic — post_created events"><rect class="diag-box role-async" x="150" y="255" width="130" height="35"/><text class="diag-label" x="215" y="277" style="font-size:10px">Kafka</text></g>
+          <g data-tip="Kafka topic — post_created events"><rect class="diag-box role-async" x="150" y="255" width="130" height="35"/><text class="diag-label" x="215" y="277" style="font-size:11px">Kafka</text></g>
           <path class="diag-arrow-path" d="M280,272 L430,272 L430,231" marker-end="url(#fnHldArrow)"/>
           <g data-tip="Reads SocialGraph, decides push vs skip by follower count"><rect class="diag-box role-async" x="370" y="185" width="130" height="46"/><text class="diag-label" x="435" y="204" style="font-size:11px">Fan-out Worker</text><text class="diag-sublabel" x="435" y="219" style="font-size:8.5px">push if &lt;1M followers</text></g>
 
@@ -260,7 +278,7 @@
 
           <g data-tip="Engagement events buffered for feature computation"><rect class="diag-box role-async" x="640" y="185" width="120" height="46"/><text class="diag-label" x="700" y="204" style="font-size:11px">Engagement</text><text class="diag-sublabel" x="700" y="219" style="font-size:8.5px">Kafka</text></g>
           <path class="diag-arrow-path" d="M700,231 L700,255" marker-end="url(#fnHldArrow)"/>
-          <g data-tip="Column store for engagement feature aggregation"><rect class="diag-box role-db" x="620" y="255" width="160" height="35"/><text class="diag-label" x="700" y="277" style="font-size:10px">ClickHouse</text></g>
+          <g data-tip="Column store for engagement feature aggregation"><rect class="diag-box role-db" x="620" y="255" width="160" height="35"/><text class="diag-label" x="700" y="277" style="font-size:11px">ClickHouse</text></g>
           <path class="diag-arrow-path" d="M700,255 L700,66" marker-end="url(#fnHldArrow)" stroke-dasharray="2 4"/>
         </svg>
         <div class="diag-legend">
@@ -405,9 +423,9 @@
         <svg viewBox="0 0 700 160" xmlns="http://www.w3.org/2000/svg">
           <defs><marker id="fnRankArrow" markerWidth="8" markerHeight="8" refX="6" refY="3" orient="auto"><path d="M0,0 L6,3 L0,6 Z" fill="var(--border2)"/></marker></defs>
 
-          <g data-tip="Time since posted — decays quickly, half-life ~6 hours"><rect class="diag-box role-client" x="10" y="10" width="140" height="40"/><text class="diag-label" x="80" y="34" style="font-size:10.5px">Recency</text></g>
-          <g data-tip="Historical interaction strength between viewer and author"><rect class="diag-box role-client" x="10" y="60" width="140" height="40"/><text class="diag-label" x="80" y="84" style="font-size:10.5px">Affinity score</text></g>
-          <g data-tip="Model-predicted P(like/comment/share/dwell) for this viewer"><rect class="diag-box role-client" x="10" y="110" width="140" height="40"/><text class="diag-label" x="80" y="134" style="font-size:10.5px">Engagement prediction</text></g>
+          <g data-tip="Time since posted — decays quickly, half-life ~6 hours"><rect class="diag-box role-client" x="10" y="10" width="140" height="40"/><text class="diag-label" x="80" y="34" style="font-size:11px">Recency</text></g>
+          <g data-tip="Historical interaction strength between viewer and author"><rect class="diag-box role-client" x="10" y="60" width="140" height="40"/><text class="diag-label" x="80" y="84" style="font-size:11px">Affinity score</text></g>
+          <g data-tip="Model-predicted P(like/comment/share/dwell) for this viewer"><rect class="diag-box role-client" x="10" y="110" width="140" height="40"/><text class="diag-label" x="80" y="134" style="font-size:11px">Engagement prediction</text></g>
           <path class="diag-arrow-path" d="M150,30 L230,80" marker-end="url(#fnRankArrow)"/>
           <path class="diag-arrow-path" d="M150,80 L230,80" marker-end="url(#fnRankArrow)"/>
           <path class="diag-arrow-path" d="M150,130 L230,80" marker-end="url(#fnRankArrow)"/>
@@ -418,7 +436,7 @@
           <g data-tip="Single float used as the ZADD score"><rect class="diag-box role-cache" x="440" y="55" width="120" height="50" rx="6"/><text class="diag-label" x="500" y="76" style="font-size:11px">rank_score</text><text class="diag-sublabel" x="500" y="92" style="font-size:8.5px">float, e.g. 0.842</text></g>
 
           <path class="diag-arrow-path" d="M560,80 L630,80" marker-end="url(#fnRankArrow)"/>
-          <g data-tip="Score becomes the ZSET member's sort key"><rect class="diag-box role-db" x="630" y="55" width="60" height="50" rx="6"/><text class="diag-label" x="660" y="80" style="font-size:10px">ZADD</text></g>
+          <g data-tip="Score becomes the ZSET member's sort key"><rect class="diag-box role-db" x="630" y="55" width="60" height="50" rx="6"/><text class="diag-label" x="660" y="80" style="font-size:11px">ZADD</text></g>
         </svg>
         <div class="diag-legend">
           <div class="diag-legend-item"><span class="diag-legend-dot role-client"></span>Input signals</div>
@@ -491,5 +509,6 @@
 
   </main>
   <script src="../../assets/nav.js"></script>
+  <script src="../../assets/mindmap.js"></script>
 </body>
 </html>

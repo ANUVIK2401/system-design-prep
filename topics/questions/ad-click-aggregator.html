@@ -20,6 +20,23 @@
       </div>
     </header>
 
+    <section class="concept-map-section">
+      <button type="button" class="concept-map-head">
+        <span class="cm-title">Concept Map</span>
+        <span class="cm-hint">click to expand</span>
+        <svg class="cm-chevron" viewBox="0 0 16 16" width="11" height="11"><path d="M4 6l4 4 4-4" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg>
+      </button>
+      <div class="concept-map-body">
+        <div class="mindmap-wrap" data-mindmap='{"center":"Ad Click Aggregator","ring1":[
+          {"label":"Ad Server","def":"Emits a click event the instant an ad is clicked","target":"step4-dataflow","ring2":[{"label":"Fire-and-forget","def":"Never blocks the ad redirect"},{"label":"At-least-once","def":"Duplicates are possible downstream"}]},
+          {"label":"Kafka","def":"Durable ordered log absorbing extreme write volume","target":"step5-hld","ring2":[{"label":"Partitioned","def":"By ad_id for parallel processing"},{"label":"Replay source","def":"Backs both streaming and batch"}]},
+          {"label":"Stream Processor","def":"Windows and aggregates clicks in near real time","target":"step6-deepdive-windowing","ring2":[{"label":"Event-time windows","def":"Groups by when the click happened"},{"label":"Approximate fast","def":"Exact counts come from batch later"}]},
+          {"label":"Aggregate Store","def":"Serves fast, approximate counts to the dashboard","target":"step5-hld","ring2":[{"label":"Low latency reads","def":"Dashboard never touches raw events"},{"label":"Overwritten by batch","def":"Reconciliation replaces estimates"}]},
+          {"label":"Batch Reconciler","def":"Recomputes exact counts from the immutable raw log","target":"step6-deepdive-reconciliation","ring2":[{"label":"Source of truth","def":"Billing uses this number, not the stream"},{"label":"Exactly-once","def":"Idempotent replay from the log"}]}
+        ]}'></div>
+      </div>
+    </section>
+
     <div class="flash-card">
       <div class="flash-label">Say this in the first 2 minutes</div>
       <ul>
@@ -225,7 +242,7 @@
           <path class="diag-arrow-path" d="M490,55 L525,55" marker-end="url(#acHldArrow)"/>
           <g data-tip="Per-ad/per-campaign rollups, upserted by window"><rect class="diag-box role-db" x="525" y="30" width="150" height="50"/><text class="diag-label" x="600" y="52" style="font-size:11px">Aggregate Store</text><text class="diag-sublabel" x="600" y="68" style="font-size:8.5px">wide-column / time-series</text></g>
           <path class="diag-arrow-path" d="M675,55 L710,55" marker-end="url(#acHldArrow)"/>
-          <g data-tip="Advertiser-facing dashboard, near-real-time"><rect class="diag-box role-client" x="710" y="30" width="80" height="50"/><text class="diag-label" x="750" y="52" style="font-size:10px">Dashboard</text><text class="diag-sublabel" x="750" y="68" style="font-size:8.5px">via query svc</text></g>
+          <g data-tip="Advertiser-facing dashboard, near-real-time"><rect class="diag-box role-client" x="710" y="30" width="80" height="50"/><text class="diag-label" x="750" y="52" style="font-size:11px">Dashboard</text><text class="diag-sublabel" x="750" y="68" style="font-size:8.5px">via query svc</text></g>
 
           <path class="diag-arrow-path" d="M240,80 L240,130" marker-end="url(#acHldArrow)" stroke-dasharray="3 3"/>
           <g data-tip="Every raw event is also archived here, immutable and append-only"><rect class="diag-box role-db" x="165" y="130" width="150" height="50"/><text class="diag-label" x="240" y="152" style="font-size:11px">Raw Event Log</text><text class="diag-sublabel" x="240" y="168" style="font-size:8.5px">S3 / cold storage</text></g>
@@ -305,14 +322,14 @@
 
           <path class="diag-arrow-path" d="M355,45 L390,30" marker-end="url(#eoArrow)"/>
           <text class="diag-sublabel" x="400" y="24" style="font-size:8.5px;fill:var(--accent)">new</text>
-          <g data-tip="Applies the event to the running window count exactly once"><rect class="diag-box role-cache" x="390" y="10" width="160" height="40"/><text class="diag-label" x="470" y="34" style="font-size:10.5px">Apply to Window</text></g>
+          <g data-tip="Applies the event to the running window count exactly once"><rect class="diag-box role-cache" x="390" y="10" width="160" height="40"/><text class="diag-label" x="470" y="34" style="font-size:11px">Apply to Window</text></g>
 
           <path class="diag-arrow-path" d="M355,60 L390,80" marker-end="url(#eoArrowAmber)"/>
           <text class="diag-sublabel" x="400" y="95" style="font-size:8.5px;fill:var(--amber)">duplicate</text>
-          <g data-tip="Event is silently dropped — already counted, no-op"><rect class="diag-box" x="390" y="65" width="160" height="40"/><text class="diag-label" x="470" y="89" style="font-size:10.5px">Drop (no-op)</text></g>
+          <g data-tip="Event is silently dropped — already counted, no-op"><rect class="diag-box" x="390" y="65" width="160" height="40"/><text class="diag-label" x="470" y="89" style="font-size:11px">Drop (no-op)</text></g>
 
           <path class="diag-arrow-path" d="M550,30 L585,30" marker-end="url(#eoArrow)"/>
-          <g data-tip="Snapshotted periodically so state survives a processor crash"><rect class="diag-box role-db" x="585" y="10" width="120" height="40"/><text class="diag-label" x="645" y="34" style="font-size:10.5px">Checkpoint</text></g>
+          <g data-tip="Snapshotted periodically so state survives a processor crash"><rect class="diag-box role-db" x="585" y="10" width="120" height="40"/><text class="diag-label" x="645" y="34" style="font-size:11px">Checkpoint</text></g>
 
           <path class="diag-arrow-path" d="M275,76 L275,140" marker-end="url(#eoArrow)"/>
           <g data-tip="Upsert keyed by (ad_id, window_start) — replaying the same event_id twice is a no-op by construction"><rect class="diag-box role-db" x="195" y="140" width="270" height="50"/><text class="diag-label" x="330" y="162" style="font-size:11px">Idempotent Upsert Sink</text><text class="diag-sublabel" x="330" y="178" style="font-size:8.5px">keyed on event_id, naturally replay-safe</text></g>
@@ -349,13 +366,13 @@
           <path class="diag-arrow-path" d="M700,40 L720,40" marker-end="url(#winArrow)"/>
 
           <rect class="diag-box role-cache" x="60" y="60" width="180" height="40" rx="4"/>
-          <text class="diag-label" x="150" y="84" style="font-size:10.5px">Window [12:00–12:01)</text>
+          <text class="diag-label" x="150" y="84" style="font-size:11px">Window [12:00–12:01)</text>
 
           <rect class="diag-box role-cache" x="260" y="60" width="180" height="40" rx="4"/>
-          <text class="diag-label" x="350" y="84" style="font-size:10.5px">Window [12:01–12:02)</text>
+          <text class="diag-label" x="350" y="84" style="font-size:11px">Window [12:01–12:02)</text>
 
           <rect class="diag-box" x="460" y="60" width="180" height="40" rx="4"/>
-          <text class="diag-label" x="550" y="84" style="font-size:10.5px">Window [12:02–12:03)</text>
+          <text class="diag-label" x="550" y="84" style="font-size:11px">Window [12:02–12:03)</text>
 
           <circle cx="150" cy="40" r="4" fill="var(--accent)"/>
           <circle cx="220" cy="40" r="4" fill="var(--accent)"/>
@@ -397,22 +414,22 @@
           <defs><marker id="recArrow" markerWidth="8" markerHeight="8" refX="6" refY="3" orient="auto"><path d="M0,0 L6,3 L0,6 Z" fill="var(--border2)"/></marker><marker id="recArrowAmber" markerWidth="8" markerHeight="8" refX="6" refY="3" orient="auto"><path d="M0,0 L6,3 L0,6 Z" fill="var(--amber)"/></marker></defs>
 
           <text class="diag-sublabel" x="140" y="16" style="font-size:10px;fill:var(--amber)">STREAMING PATH — seconds, approximate</text>
-          <g data-tip="Same source as ingestion"><rect class="diag-box role-async" x="10" y="30" width="120" height="44"/><text class="diag-label" x="70" y="52" style="font-size:10.5px">Kafka</text></g>
+          <g data-tip="Same source as ingestion"><rect class="diag-box role-async" x="10" y="30" width="120" height="44"/><text class="diag-label" x="70" y="52" style="font-size:11px">Kafka</text></g>
           <path class="diag-arrow-path" d="M130,52 L165,52" marker-end="url(#recArrowAmber)"/>
-          <g data-tip="Windowed, checkpointed, idempotent — but can drift under a rare replay edge case"><rect class="diag-box role-async" x="165" y="30" width="150" height="44"/><text class="diag-label" x="240" y="52" style="font-size:10.5px">Stream Processor</text></g>
+          <g data-tip="Windowed, checkpointed, idempotent — but can drift under a rare replay edge case"><rect class="diag-box role-async" x="165" y="30" width="150" height="44"/><text class="diag-label" x="240" y="52" style="font-size:11px">Stream Processor</text></g>
           <path class="diag-arrow-path" d="M315,52 L350,52" marker-end="url(#recArrowAmber)"/>
-          <g data-tip="Holds the fast, live-but-approximate numbers"><rect class="diag-box role-db" x="350" y="30" width="160" height="44"/><text class="diag-label" x="430" y="52" style="font-size:10.5px">Aggregate Store</text><text class="diag-sublabel" x="430" y="66" style="font-size:8px">approximate: true</text></g>
+          <g data-tip="Holds the fast, live-but-approximate numbers"><rect class="diag-box role-db" x="350" y="30" width="160" height="44"/><text class="diag-label" x="430" y="52" style="font-size:11px">Aggregate Store</text><text class="diag-sublabel" x="430" y="66" style="font-size:8px">approximate: true</text></g>
           <path class="diag-arrow-path" d="M510,52 L545,52" marker-end="url(#recArrowAmber)"/>
-          <g data-tip="Reads the fast numbers for live charts"><rect class="diag-box role-client" x="545" y="30" width="150" height="44"/><text class="diag-label" x="620" y="52" style="font-size:10.5px">Dashboard (live)</text></g>
+          <g data-tip="Reads the fast numbers for live charts"><rect class="diag-box role-client" x="545" y="30" width="150" height="44"/><text class="diag-label" x="620" y="52" style="font-size:11px">Dashboard (live)</text></g>
 
           <text class="diag-sublabel" x="140" y="115" style="font-size:10px;fill:var(--accent)">BATCH PATH — hours later, exact</text>
-          <g data-tip="Immutable, append-only, the one true record of every event"><rect class="diag-box role-db" x="10" y="130" width="140" height="46"/><text class="diag-label" x="80" y="153" style="font-size:10.5px">Raw Event Log</text><text class="diag-sublabel" x="80" y="167" style="font-size:8px">S3, immutable</text></g>
+          <g data-tip="Immutable, append-only, the one true record of every event"><rect class="diag-box role-db" x="10" y="130" width="140" height="46"/><text class="diag-label" x="80" y="153" style="font-size:11px">Raw Event Log</text><text class="diag-sublabel" x="80" y="167" style="font-size:8px">S3, immutable</text></g>
           <path class="diag-arrow-path" d="M150,153 L185,153" marker-end="url(#recArrow)"/>
-          <g data-tip="Nightly/hourly Spark job — recomputes counts and spend directly from raw events"><rect class="diag-box role-async" x="185" y="130" width="160" height="46"/><text class="diag-label" x="265" y="153" style="font-size:10.5px">Batch Reconciler</text></g>
+          <g data-tip="Nightly/hourly Spark job — recomputes counts and spend directly from raw events"><rect class="diag-box role-async" x="185" y="130" width="160" height="46"/><text class="diag-label" x="265" y="153" style="font-size:11px">Batch Reconciler</text></g>
           <path class="diag-arrow-path" d="M345,153 L380,153" marker-end="url(#recArrow)"/>
-          <g data-tip="Overwrites the streaming numbers for each window with the exact recomputed value"><rect class="diag-box role-db" x="380" y="130" width="180" height="46"/><text class="diag-label" x="470" y="153" style="font-size:10.5px">Aggregate Store</text><text class="diag-sublabel" x="470" y="167" style="font-size:8px">approximate: false</text></g>
+          <g data-tip="Overwrites the streaming numbers for each window with the exact recomputed value"><rect class="diag-box role-db" x="380" y="130" width="180" height="46"/><text class="diag-label" x="470" y="153" style="font-size:11px">Aggregate Store</text><text class="diag-sublabel" x="470" y="167" style="font-size:8px">approximate: false</text></g>
           <path class="diag-arrow-path" d="M560,153 L595,153" marker-end="url(#recArrow)"/>
-          <g data-tip="Billing always reads reconciled, never streaming"><rect class="diag-box role-client" x="595" y="130" width="150" height="46"/><text class="diag-label" x="670" y="153" style="font-size:10.5px">Billing System</text></g>
+          <g data-tip="Billing always reads reconciled, never streaming"><rect class="diag-box role-client" x="595" y="130" width="150" height="46"/><text class="diag-label" x="670" y="153" style="font-size:11px">Billing System</text></g>
 
           <path class="diag-arrow-path" d="M430,74 L430,130" marker-end="url(#recArrow)" stroke-dasharray="3 3"/>
           <text class="diag-sublabel" x="430" y="120" style="font-size:8px;fill:var(--muted)">same store, streaming rows overwritten in place</text>
@@ -483,5 +500,6 @@
 
   </main>
   <script src="../../assets/nav.js"></script>
+  <script src="../../assets/mindmap.js"></script>
 </body>
 </html>

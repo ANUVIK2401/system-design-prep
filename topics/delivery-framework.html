@@ -20,6 +20,24 @@
       </div>
     </header>
 
+    <section class="concept-map-section">
+      <button type="button" class="concept-map-head">
+        <span class="cm-title">Concept Map</span>
+        <span class="cm-hint">click to expand</span>
+        <svg class="cm-chevron" viewBox="0 0 16 16" width="11" height="11"><path d="M4 6l4 4 4-4" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg>
+      </button>
+      <div class="concept-map-body">
+        <div class="mindmap-wrap" data-mindmap='{"center":"Interview Framework","ring1":[
+          {"label":"Requirements","def":"Clarify functional + non-functional scope before designing anything","target":"mental-model","ring2":[{"label":"Functional","def":"What the system must do"},{"label":"Non-functional","def":"Scale, latency, availability targets"}]},
+          {"label":"Entities","def":"The core data objects and how they relate","target":"core-concepts","ring2":[{"label":"Primary keys","def":"What uniquely identifies each entity"},{"label":"Relationships","def":"Foreign keys and ownership"}]},
+          {"label":"API","def":"3-4 endpoints that define the client contract","target":"api-design","ring2":[{"label":"Request/response","def":"Shape of the payloads"},{"label":"Auth model","def":"Who can call what"}]},
+          {"label":"Data Flow","def":"How a request moves through the system end to end","target":"how-it-works","ring2":[{"label":"Read path","def":"Usually cache-first"},{"label":"Write path","def":"Usually DB-first, async fan-out after"}]},
+          {"label":"HLD","def":"The component diagram — services, DB, cache, queues","target":"tradeoffs","ring2":[{"label":"Components","def":"What boxes to draw and why"},{"label":"Tech choices","def":"Justify SQL vs NoSQL, cache, etc."}]},
+          {"label":"Deep Dive","def":"Go deep on the one thing the interviewer cares about","target":"when-to-use","ring2":[{"label":"Bottlenecks","def":"Where the system breaks first at scale"},{"label":"Failure modes","def":"What happens when a component dies"}]}
+        ]}'></div>
+      </div>
+    </section>
+
     <div class="flash-card">
       <div class="flash-label">The 5-phase framework (memorize this)</div>
       <ul>
@@ -71,6 +89,7 @@
             <text class="diag-sublabel" x="675" y="65">15 min</text>
           </g>
         </svg>
+        <div class="diag-legend"><div class="diag-legend-item"><span class="diag-legend-dot role-client"></span>Client / gateway</div><div class="diag-legend-item"><span class="diag-legend-dot role-cache"></span>Cache — hot path</div></div>
       </div>
     </section>
 
@@ -127,6 +146,7 @@
           </g>
           <path class="diag-arrow-path" d="M350,52 C440,15 530,15 550,40" marker-end="url(#estArrow)"/>
         </svg>
+        <div class="diag-legend"><div class="diag-legend-item"><span class="diag-legend-dot role-client"></span>Client / gateway</div><div class="diag-legend-item"><span class="diag-legend-dot role-cache"></span>Cache — hot path</div></div>
       </div>
       <div class="callout info">These numbers drive your decisions. A system at 100 writes/sec needs no sharding. At 100k writes/sec, you need sharding, Kafka, and a dedicated write path. Say this out loud.</div>
     </section>
@@ -235,5 +255,6 @@
 
   </main>
   <script src="../assets/nav.js"></script>
+  <script src="../assets/mindmap.js"></script>
 </body>
 </html>

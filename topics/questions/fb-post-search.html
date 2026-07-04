@@ -20,6 +20,24 @@
       </div>
     </header>
 
+    <section class="concept-map-section">
+      <button type="button" class="concept-map-head">
+        <span class="cm-title">Concept Map</span>
+        <span class="cm-hint">click to expand</span>
+        <svg class="cm-chevron" viewBox="0 0 16 16" width="11" height="11"><path d="M4 6l4 4 4-4" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg>
+      </button>
+      <div class="concept-map-body">
+        <div class="mindmap-wrap" data-mindmap='{"center":"FB Post Search","ring1":[
+          {"label":"Post Service","def":"Validates and persists a post, returns immediately without waiting on indexing","target":"step4-dataflow","ring2":[{"label":"Stateless","def":"Scales independent of the indexer"},{"label":"201 response","def":"Indexing is fully async"}]},
+          {"label":"Postgres","def":"Source of truth for post text, author, and visibility","target":"step2-entities","ring2":[{"label":"Snowflake id","def":"Post.id is the primary key"},{"label":"Visibility enum","def":"public, friends, or custom"}]},
+          {"label":"Kafka","def":"Streams post created and visibility changed events to the indexer","target":"step4-dataflow","ring2":[{"label":"Decouples write","def":"Indexing lag never blocks posting"},{"label":"Replay safe","def":"Crashed worker resumes from offset"}]},
+          {"label":"Indexing Worker","def":"Tokenizes post text and snapshots the audience into the index doc","target":"step6-deepdive-invindex","ring2":[{"label":"Consumer group","def":"Scales with post creation bursts"},{"label":"visible_to snapshot","def":"Denormalized ACL at index time"}]},
+          {"label":"Elasticsearch","def":"Inverted index serving relevance ranked queries over billions of docs","target":"step6-deepdive-invindex","ring2":[{"label":"Posting lists","def":"term maps to sorted post_id list"},{"label":"BM25 ranking","def":"Term frequency weighted by rarity"}]},
+          {"label":"Privacy Filter","def":"Re-validates the live friend and block cache before returning results","target":"step6-deepdive-privacy","ring2":[{"label":"Redis backed","def":"Avoids a graph DB call per query"},{"label":"Query time check","def":"Belt and suspenders over index time"}]}
+        ]}'></div>
+      </div>
+    </section>
+
     <div class="flash-card">
       <div class="flash-label">Say this in the first 2 minutes</div>
       <ul>
@@ -183,7 +201,7 @@
           <path class="diag-arrow-path" data-id="w4" d="M495,47 L530,47" marker-end="url(#fpsW)"/>
           <g data-target="step6-deepdive-invindex" data-id="w-worker" data-tip="Tokenizes text, snapshots the audience, builds the doc"><rect class="diag-box role-async" x="530" y="24" width="100" height="46"/><text class="diag-label" x="580" y="47" style="font-size:11px">Index Worker</text></g>
           <path class="diag-arrow-path" data-id="w5" d="M630,47 L665,47" marker-end="url(#fpsW)"/>
-          <g data-target="step6-deepdive-invindex" data-id="w-es" data-tip="Inverted index, sharded by post_id hash"><rect class="diag-box role-cache" x="665" y="24" width="65" height="46"/><text class="diag-label" x="697" y="47" style="font-size:10px">ES</text></g>
+          <g data-target="step6-deepdive-invindex" data-id="w-es" data-tip="Inverted index, sharded by post_id hash"><rect class="diag-box role-cache" x="665" y="24" width="65" height="46"/><text class="diag-label" x="697" y="47" style="font-size:11px">ES</text></g>
 
           <text class="diag-sublabel" x="150" y="105" style="font-size:10px;fill:var(--accent)">READ PATH — search query</text>
           <circle class="diag-dot diag-flow-dot" r="3.5" style="offset-path: path('M10,115 L120,115 L120,115 L245,115 L245,115 L390,115 L390,115 L510,115')"></circle>
@@ -314,16 +332,17 @@
           <text class="diag-sublabel" x="10" y="95" style="font-size:10px;fill:var(--accent)">TERM → POSTING LIST (doc_ids containing that term)</text>
           <g data-tip="Every post mentioning 'launch' or its stem"><rect class="diag-box role-cache" x="10" y="105" width="110" height="34"/><text class="diag-label" x="65" y="127" style="font-size:11px">"launch"</text></g>
           <path class="diag-arrow-path" d="M120,122 L155,122" marker-end="url(#fpsInvArrow)"/>
-          <g data-tip="Sorted list of post IDs, enables fast intersection with an ACL filter"><rect class="diag-box role-db" x="155" y="105" width="300" height="34"/><text class="diag-label" x="305" y="127" style="font-size:10.5px">[9931, 9877, 9812, 9701, ...]</text></g>
+          <g data-tip="Sorted list of post IDs, enables fast intersection with an ACL filter"><rect class="diag-box role-db" x="155" y="105" width="300" height="34"/><text class="diag-label" x="305" y="127" style="font-size:11px">[9931, 9877, 9812, 9701, ...]</text></g>
 
           <g data-tip="A different query term, same structure"><rect class="diag-box role-cache" x="10" y="150" width="110" height="34"/><text class="diag-label" x="65" y="172" style="font-size:11px">"dashboard"</text></g>
           <path class="diag-arrow-path" d="M120,167 L155,167" marker-end="url(#fpsInvArrow)"/>
-          <g data-tip="A different posting list, intersected with the first for multi-term queries"><rect class="diag-box role-db" x="155" y="150" width="300" height="34"/><text class="diag-label" x="305" y="172" style="font-size:10.5px">[9931, 9650, 9502, ...]</text></g>
+          <g data-tip="A different posting list, intersected with the first for multi-term queries"><rect class="diag-box role-db" x="155" y="150" width="300" height="34"/><text class="diag-label" x="305" y="172" style="font-size:11px">[9931, 9650, 9502, ...]</text></g>
 
           <text class="diag-sublabel" x="480" y="120" style="font-size:9px" fill="var(--amber)">multi-term query = intersect</text>
           <text class="diag-sublabel" x="480" y="135" style="font-size:9px" fill="var(--amber)">posting lists, then rank by</text>
           <text class="diag-sublabel" x="480" y="150" style="font-size:9px" fill="var(--amber)">relevance (TF-IDF/BM25)</text>
         </svg>
+        <div class="diag-legend"><div class="diag-legend-item"><span class="diag-legend-dot role-client"></span>Client / gateway</div><div class="diag-legend-item"><span class="diag-legend-dot role-cache"></span>Cache — hot path</div><div class="diag-legend-item"><span class="diag-legend-dot role-db"></span>Database — source of truth</div><div class="diag-legend-item"><span class="diag-legend-dot role-async"></span>Async — queue / worker</div></div>
       </div>
 
       <ol class="flow-steps-list">
@@ -408,5 +427,6 @@
 
   </main>
   <script src="../../assets/nav.js"></script>
+  <script src="../../assets/mindmap.js"></script>
 </body>
 </html>

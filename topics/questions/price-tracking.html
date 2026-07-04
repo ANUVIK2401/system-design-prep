@@ -20,6 +20,23 @@
       </div>
     </header>
 
+    <section class="concept-map-section">
+      <button type="button" class="concept-map-head">
+        <span class="cm-title">Concept Map</span>
+        <span class="cm-hint">click to expand</span>
+        <svg class="cm-chevron" viewBox="0 0 16 16" width="11" height="11"><path d="M4 6l4 4 4-4" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg>
+      </button>
+      <div class="concept-map-body">
+        <div class="mindmap-wrap" data-mindmap='{"center":"Price Tracking","ring1":[
+          {"label":"Scheduler","def":"Decides when each product is due for a re-scrape","target":"step4-dataflow","ring2":[{"label":"Cron-driven","def":"Cadence varies per target site"},{"label":"Per-domain queues","def":"Isolates one blocked site from others"}]},
+          {"label":"Scraper Workers","def":"Fetches pages while evading anti-bot detection","target":"step6-deepdive-antibot","ring2":[{"label":"Rotate + jitter","def":"Avoids looking like a bot"},{"label":"Anti-detection first","def":"The actual hard problem here"}]},
+          {"label":"Redis Throttle","def":"Rate-limits requests per target site","target":"step5-hld","ring2":[{"label":"Per-domain limits","def":"Keeps one site from getting hammered"},{"label":"Backpressure","def":"Slows workers before getting blocked"}]},
+          {"label":"TimescaleDB","def":"Stores the price history time series","target":"step2-entities","ring2":[{"label":"Time-series storage","def":"Optimized for timestamped writes"},{"label":"Retention policy","def":"Old granular data gets downsampled"}]},
+          {"label":"Alert Engine","def":"Evaluates price-drop rules against new data","target":"step6-deepdive-alerts","ring2":[{"label":"Rule evaluation","def":"Runs on each new price point"},{"label":"Notification Svc","def":"Delivers the alert to the user"}]}
+        ]}'></div>
+      </div>
+    </section>
+
     <div class="flash-card">
       <div class="flash-label">Say this in the first 2 minutes</div>
       <ul>
@@ -462,5 +479,6 @@
 
   </main>
   <script src="../../assets/nav.js"></script>
+  <script src="../../assets/mindmap.js"></script>
 </body>
 </html>

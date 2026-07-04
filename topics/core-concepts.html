@@ -20,6 +20,23 @@
       </div>
     </header>
 
+    <section class="concept-map-section">
+      <button type="button" class="concept-map-head">
+        <span class="cm-title">Concept Map</span>
+        <span class="cm-hint">click to expand</span>
+        <svg class="cm-chevron" viewBox="0 0 16 16" width="11" height="11"><path d="M4 6l4 4 4-4" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg>
+      </button>
+      <div class="concept-map-body">
+        <div class="mindmap-wrap" data-mindmap='{"center":"Core Concepts","ring1":[
+          {"label":"CAP Theorem","def":"Pick 2 of Consistency, Availability, Partition tolerance","target":"core-concepts","ring2":[{"label":"CP","def":"Consistent but can reject requests during a partition"},{"label":"AP","def":"Always available, may serve stale data"}]},
+          {"label":"Consistency","def":"How fresh a read is guaranteed to be","target":"consistency-models","ring2":[{"label":"Strong","def":"Always returns the latest write"},{"label":"Eventual","def":"Converges to latest given enough time"}]},
+          {"label":"Latency","def":"Order-of-magnitude cost of each operation type","target":"latency-numbers","ring2":[{"label":"Memory vs disk","def":"~100x latency gap"},{"label":"Network hop","def":"Cross-datacenter dominates tail latency"}]},
+          {"label":"Estimation","def":"Back-of-envelope math that justifies every design decision","target":"how-it-works","ring2":[{"label":"QPS math","def":"DAU ÷ seconds/day × actions/user"},{"label":"Storage math","def":"Record size × writes/day × retention"}]},
+          {"label":"Scaling","def":"Vertical vs horizontal, and the mechanisms that enable it","target":"tradeoffs","ring2":[{"label":"Sharding","def":"Split data across nodes by key"},{"label":"Replication","def":"Copy data for read scale and durability"}]}
+        ]}'></div>
+      </div>
+    </section>
+
     <div class="flash-card">
       <div class="flash-label">Say these with confidence</div>
       <ul>
@@ -193,6 +210,26 @@
       </table>
     </section>
 
+    <section id="when-to-use">
+      <h2>Applying these concepts in an interview</h2>
+      <div class="scenario-row use">
+        <span class="scenario-icon">✓</span>
+        <div class="scenario-text"><strong>State your CAP choice early:</strong> once you know AP vs CP, every downstream tradeoff (cache TTLs, replica reads, conflict handling) follows from that one decision.</div>
+      </div>
+      <div class="scenario-row use">
+        <span class="scenario-icon">✓</span>
+        <div class="scenario-text"><strong>Anchor every capacity claim to a number:</strong> "no sharding needed" only lands if you've shown the QPS math that justifies it.</div>
+      </div>
+      <div class="scenario-row watch">
+        <span class="scenario-icon">⚠</span>
+        <div class="scenario-text"><strong>Watch for scale cues from the interviewer:</strong> "assume 100M users" versus "assume 10K users" should visibly change whether you reach for horizontal scaling at all.</div>
+      </div>
+      <div class="scenario-row avoid">
+        <span class="scenario-icon">✗</span>
+        <div class="scenario-text"><strong>Don't reach for strong consistency by default:</strong> justify it against the specific feature — most consumer-facing reads tolerate eventual consistency fine.</div>
+      </div>
+    </section>
+
     <section id="interview-moves">
       <h2>Interview moves</h2>
       <ul class="moves-list">
@@ -233,5 +270,6 @@
 
   </main>
   <script src="../assets/nav.js"></script>
+  <script src="../assets/mindmap.js"></script>
 </body>
 </html>

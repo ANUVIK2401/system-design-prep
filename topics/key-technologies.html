@@ -20,6 +20,24 @@
       </div>
     </header>
 
+    <section class="concept-map-section">
+      <button type="button" class="concept-map-head">
+        <span class="cm-title">Concept Map</span>
+        <span class="cm-hint">click to expand</span>
+        <svg class="cm-chevron" viewBox="0 0 16 16" width="11" height="11"><path d="M4 6l4 4 4-4" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg>
+      </button>
+      <div class="concept-map-body">
+        <div class="mindmap-wrap" data-mindmap='{"center":"Tech Choices","ring1":[
+          {"label":"SQL","def":"Relational, ACID, use when relations and strong schema matter","target":"sql-vs-nosql","ring2":[{"label":"Postgres","def":"Default choice for transactional data"},{"label":"Joins + txns","def":"Strong consistency guarantees"}]},
+          {"label":"NoSQL","def":"Flexible schema, high write throughput","target":"sql-vs-nosql","ring2":[{"label":"DynamoDB","def":"Key-value at massive scale"},{"label":"Wide-column","def":"Cassandra-style for write-heavy data"}]},
+          {"label":"Redis","def":"Sub-millisecond reads for hot data","target":"core-concepts","ring2":[{"label":"Cache-aside","def":"Miss falls through to DB"},{"label":"Rate limiting","def":"Sorted sets / token buckets"}]},
+          {"label":"Kafka","def":"Async event log for decoupling producers/consumers","target":"kafka-pattern","ring2":[{"label":"Fan-out","def":"One event, many consumers"},{"label":"Buffering","def":"Absorbs write spikes"}]},
+          {"label":"S3","def":"Object storage for blobs over ~100KB","target":"how-it-works","ring2":[{"label":"Never in SQL","def":"Blobs bloat relational storage"},{"label":"Presigned URLs","def":"Direct client upload/download"}]},
+          {"label":"CDN","def":"Edge caching that changes your whole read path","target":"tradeoffs","ring2":[{"label":"Edge cache","def":"Requests never reach origin"},{"label":"Cache invalidation","def":"TTL + explicit purge on change"}]}
+        ]}'></div>
+      </div>
+    </section>
+
     <div class="flash-card">
       <div class="flash-label">Decision rules (memorize these)</div>
       <ul>
@@ -451,5 +469,6 @@
 
   </main>
   <script src="../assets/nav.js"></script>
+  <script src="../assets/mindmap.js"></script>
 </body>
 </html>

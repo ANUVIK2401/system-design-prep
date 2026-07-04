@@ -20,6 +20,24 @@
       </div>
     </header>
 
+    <section class="concept-map-section">
+      <button type="button" class="concept-map-head">
+        <span class="cm-title">Concept Map</span>
+        <span class="cm-hint">click to expand</span>
+        <svg class="cm-chevron" viewBox="0 0 16 16" width="11" height="11"><path d="M4 6l4 4 4-4" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg>
+      </button>
+      <div class="concept-map-body">
+        <div class="mindmap-wrap" data-mindmap='{"center":"Instagram","ring1":[
+          {"label":"Upload Service","def":"Accepts chunked uploads, writes the blob, returns fast without waiting on fan-out","target":"step6-deepdive-upload","ring2":[{"label":"202 Accepted","def":"Returns before thumbnailing or fan-out runs"},{"label":"Sync only to S3","def":"The one latency-sensitive write in the pipeline"}]},
+          {"label":"S3 + CDN","def":"Durable write-once-read-many blob storage with edge delivery","target":"step2-entities","ring2":[{"label":"Blob pointer","def":"Metadata row holds only the s3_key"},{"label":"CDN pre-warm","def":"Avoids a cold origin fetch on first viral view"}]},
+          {"label":"Feed Generation Worker","def":"Decides push versus pull fan-out per post based on follower count","target":"step6-deepdive-feedfanout","ring2":[{"label":"Push threshold","def":"Below it, fan-out-on-write to every follower"},{"label":"Pull threshold","def":"Above it, marked pull-only to avoid a write storm"}]},
+          {"label":"Follow Graph","def":"Cassandra adjacency list partitioned by follower_id","target":"step6-deepdive-followgraph","ring2":[{"label":"Partition key","def":"Follower lookups are a single-partition read"},{"label":"No joins","def":"One query shape beats a relational join table"}]},
+          {"label":"Feed Cache","def":"Redis per-user sorted set holding the precomputed home feed","target":"step2-entities","ring2":[{"label":"Capped size","def":"About 800 entries per user, oldest evicted"},{"label":"Score by time","def":"Sorted set ranks entries for cheap reads"}]},
+          {"label":"Feed Read Service","def":"Merges pushed entries with live-pulled celebrity posts at read time","target":"step6-deepdive-feedfanout","ring2":[{"label":"Merge and rank","def":"One unified feed regardless of source"},{"label":"Bounded pull","def":"A user follows only a handful of celebrities"}]}
+        ]}'></div>
+      </div>
+    </section>
+
     <div class="flash-card">
       <div class="flash-label">Say this in the first 2 minutes</div>
       <ul>
@@ -202,7 +220,7 @@
           <circle class="diag-dot diag-flow-dot" data-flow="read" r="3.5" style="offset-path: path('M10,155 L120,155 L120,155 L280,155 L280,155 L450,155')"></circle>
 
           <text class="diag-sublabel" x="150" y="200" style="font-size:10px;fill:var(--amber)">NOTIFICATION PATH — separate, decoupled</text>
-          <g data-target="step6-deepdive-upload" data-id="n-notif" data-tip="Notifies followers of a new post, independent of feed fan-out"><rect class="diag-box role-async" x="10" y="208" width="200" height="26" rx="6"/><text class="diag-label" x="110" y="225" style="font-size:10px">Notification Service (push, off same queue)</text></g>
+          <g data-target="step6-deepdive-upload" data-id="n-notif" data-tip="Notifies followers of a new post, independent of feed fan-out"><rect class="diag-box role-async" x="10" y="208" width="200" height="26" rx="6"/><text class="diag-label" x="110" y="225" style="font-size:11px">Notification Service (push, off same queue)</text></g>
         </svg>
         <div class="diag-legend">
           <div class="diag-legend-item"><span class="diag-legend-dot role-client"></span>Client apps — upload and feed viewing</div>
@@ -441,11 +459,11 @@
 
           <text class="diag-sublabel" x="490" y="20" style="font-size:10px;fill:var(--muted)">PARTITION follower_id = 42</text>
           <rect class="diag-box role-db" x="400" y="30" width="220" height="26" rx="4"/>
-          <text class="diag-label" x="510" y="47" style="font-size:10px">followee_id: 7  followed_at: t1</text>
+          <text class="diag-label" x="510" y="47" style="font-size:11px">followee_id: 7  followed_at: t1</text>
           <rect class="diag-box role-db" x="400" y="60" width="220" height="26" rx="4"/>
-          <text class="diag-label" x="510" y="77" style="font-size:10px">followee_id: 91 followed_at: t2</text>
+          <text class="diag-label" x="510" y="77" style="font-size:11px">followee_id: 91 followed_at: t2</text>
           <rect class="diag-box role-db" x="400" y="90" width="220" height="26" rx="4"/>
-          <text class="diag-label" x="510" y="107" style="font-size:10px">followee_id: 156 followed_at: t3</text>
+          <text class="diag-label" x="510" y="107" style="font-size:11px">followee_id: 156 followed_at: t3</text>
           <text class="diag-sublabel" x="510" y="128" style="font-size:9px;fill:var(--muted)">... clustered by followed_at, all in one partition</text>
 
           <path class="diag-arrow-path" d="M345,103 L400,60" marker-end="url(#fgArrow)"/>
@@ -455,6 +473,7 @@
           <text class="diag-sublabel" x="30" y="188" style="font-size:9.5px">Billions of edges, one access pattern ("who does X follow") — a join buys nothing here,</text>
           <text class="diag-sublabel" x="30" y="202" style="font-size:9.5px">and costs index maintenance + join overhead at a scale relational engines don't handle cheaply.</text>
         </svg>
+        <div class="diag-legend"><div class="diag-legend-item"><span class="diag-legend-dot role-client"></span>Client / gateway</div><div class="diag-legend-item"><span class="diag-legend-dot role-db"></span>Database — source of truth</div></div>
       </div>
 
       <ol class="flow-steps-list">
@@ -518,5 +537,6 @@
 
   </main>
   <script src="../../assets/nav.js"></script>
+  <script src="../../assets/mindmap.js"></script>
 </body>
 </html>

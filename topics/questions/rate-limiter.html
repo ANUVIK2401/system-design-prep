@@ -20,6 +20,24 @@
       </div>
     </header>
 
+    <section class="concept-map-section">
+      <button type="button" class="concept-map-head">
+        <span class="cm-title">Concept Map</span>
+        <span class="cm-hint">click to expand</span>
+        <svg class="cm-chevron" viewBox="0 0 16 16" width="11" height="11"><path d="M4 6l4 4 4-4" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg>
+      </button>
+      <div class="concept-map-body">
+        <div class="mindmap-wrap" data-mindmap='{"center":"Rate Limiter","ring1":[
+          {"label":"API Gateway","def":"Terminates TLS and authenticates requests before the limiter check","target":"step5-hld","ring2":[{"label":"Auth","def":"Resolves the scope identifier"},{"label":"Routing","def":"Sends traffic to backend instances"}]},
+          {"label":"Rate Limit MW","def":"Stateless middleware that computes the key and calls Redis","target":"step4-dataflow","ring2":[{"label":"Stateless pods","def":"Runs as a sidecar or in-process plugin"},{"label":"Key builder","def":"Builds scope plus identifier plus window"}]},
+          {"label":"Redis Cluster","def":"Shared atomic counters that make the allow or deny decision race free","target":"step6-deepdive-tokenbucket","ring2":[{"label":"Atomic INCR","def":"Single threaded, no app level locking"},{"label":"Lua scripts","def":"Read compute write in one round trip"}]},
+          {"label":"Postgres rules","def":"Durable rate limit rule config, polled into memory every 30s","target":"step2-entities","ring2":[{"label":"Cold config","def":"Never touched on the hot path"},{"label":"Scope enum","def":"user, api_key, ip, endpoint"}]},
+          {"label":"Metrics Alerting","def":"Async pipeline tracking deny rates and hot keys off the request path","target":"step5-hld","ring2":[{"label":"Async counters","def":"Never adds latency to the decision"},{"label":"Hot key detection","def":"Flags shards with imbalance"}]},
+          {"label":"Sliding Window","def":"Exact algorithm using a sorted set to avoid boundary bursts","target":"step6-deepdive-window","ring2":[{"label":"ZADD plus ZCARD","def":"Sorted set per identifier"},{"label":"Fixed window risk","def":"Allows 2x burst at the edge"}]}
+        ]}'></div>
+      </div>
+    </section>
+
     <div class="flash-card">
       <div class="flash-label">Say this in the first 2 minutes</div>
       <ul>
@@ -236,7 +254,7 @@
           <path class="diag-arrow-path" d="M620,151 L620,185" marker-end="url(#rlHldArrow)"/>
           <g data-tip="Async, batched — never blocks the allow/deny decision"><rect class="diag-box role-async" x="555" y="185" width="130" height="46"/><text class="diag-label" x="620" y="208" style="font-size:11px">Metrics/Alerting</text><text class="diag-sublabel" x="620" y="223" style="font-size:8.5px">deny-rate, hot keys</text></g>
 
-          <g data-tip="Emits deny events for monitoring dashboards"><rect class="diag-box role-async" x="10" y="240" width="230" height="40" rx="4"/><text class="diag-label" x="125" y="264" style="font-size:10px">Middleware emits async deny/allow counters → Metrics</text></g>
+          <g data-tip="Emits deny events for monitoring dashboards"><rect class="diag-box role-async" x="10" y="240" width="230" height="40" rx="4"/><text class="diag-label" x="125" y="264" style="font-size:11px">Middleware emits async deny/allow counters → Metrics</text></g>
         </svg>
         <div class="diag-legend">
           <div class="diag-legend-item"><span class="diag-legend-dot role-client"></span>Clients / gateway / middleware</div>
@@ -311,7 +329,7 @@
 
           <path class="rl-tb-consume" d="M275,80 L400,80" stroke="var(--amber)" stroke-width="2" marker-end="url(#rlTbArrow)" fill="none"/>
           <text x="335" y="70" text-anchor="middle" font-size="9" fill="var(--amber)" font-family="Inter,sans-serif">request consumes 1</text>
-          <g data-tip="Request arrives, checks tokens &gt;= 1"><rect class="diag-box role-client" x="400" y="55" width="90" height="50"/><text class="diag-label" x="445" y="80" style="font-size:10px">Request</text><text class="diag-sublabel" x="445" y="94" style="font-size:8px">cost: 1 token</text></g>
+          <g data-tip="Request arrives, checks tokens &gt;= 1"><rect class="diag-box role-client" x="400" y="55" width="90" height="50"/><text class="diag-label" x="445" y="80" style="font-size:11px">Request</text><text class="diag-sublabel" x="445" y="94" style="font-size:8px">cost: 1 token</text></g>
         </svg>
         <button class="flow-cmp-replay" data-replay="rl-tb-consume">▸ Replay consume</button>
       </div>
@@ -440,5 +458,6 @@
 
   </main>
   <script src="../../assets/nav.js"></script>
+  <script src="../../assets/mindmap.js"></script>
 </body>
 </html>

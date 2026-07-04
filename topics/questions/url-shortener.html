@@ -20,6 +20,23 @@
       </div>
     </header>
 
+    <section class="concept-map-section">
+      <button type="button" class="concept-map-head">
+        <span class="cm-title">Concept Map</span>
+        <span class="cm-hint">click to expand</span>
+        <svg class="cm-chevron" viewBox="0 0 16 16" width="11" height="11"><path d="M4 6l4 4 4-4" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg>
+      </button>
+      <div class="concept-map-body">
+        <div class="mindmap-wrap" data-mindmap='{"center":"URL Shortener","ring1":[
+          {"label":"Redirect Svc","def":"Stateless lookup-and-redirect service on the hot read path","target":"step5-hld","ring2":[{"label":"Stateless pods","def":"Scales horizontally with zero shared state"},{"label":"Thin logic","def":"Just a cache/DB lookup + 302"}]},
+          {"label":"Shorten Svc","def":"Validates URL and requests a new short code on write","target":"step3-api","ring2":[{"label":"ID generation","def":"Base62 counter vs hash vs Snowflake"},{"label":"Alias check","def":"Custom aliases live in a separate table"}]},
+          {"label":"Redis Cache","def":"Hot short_code to long_url mappings, sub-ms lookups","target":"step6-deepdive-cache","ring2":[{"label":"Cache-aside","def":"Miss falls through to Postgres, then backfills"},{"label":"LRU eviction","def":"Keeps only the hottest codes in memory"}]},
+          {"label":"Postgres","def":"Source of truth with a unique index on short_code","target":"step2-entities","ring2":[{"label":"Unique index","def":"Every redirect is a point lookup, never a scan"},{"label":"Read replicas","def":"Absorb cache-miss reads at scale"}]},
+          {"label":"CDN","def":"Edge-caches the 302 response so popular links skip origin","target":"step4-dataflow","ring2":[{"label":"Edge cache","def":"Repeat hits on a link never reach the service"},{"label":"Purge on delete","def":"Explicit DEL keeps CDN and cache consistent"}]}
+        ]}'></div>
+      </div>
+    </section>
+
     <div class="flash-card">
       <div class="flash-label">Say this in the first 2 minutes</div>
       <ul>
@@ -396,5 +413,6 @@
 
   </main>
   <script src="../../assets/nav.js"></script>
+  <script src="../../assets/mindmap.js"></script>
 </body>
 </html>

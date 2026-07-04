@@ -20,6 +20,24 @@
       </div>
     </header>
 
+    <section class="concept-map-section">
+      <button type="button" class="concept-map-head">
+        <span class="cm-title">Concept Map</span>
+        <span class="cm-hint">click to expand</span>
+        <svg class="cm-chevron" viewBox="0 0 16 16" width="11" height="11"><path d="M4 6l4 4 4-4" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg>
+      </button>
+      <div class="concept-map-body">
+        <div class="mindmap-wrap" data-mindmap='{"center":"Ticketmaster","ring1":[
+          {"label":"Waiting Room","def":"Token-bucket queue that admits clients at a controlled rate","target":"step5-hld","ring2":[{"label":"Thundering herd","def":"Absorbs 3-5M requests before they reach Redis"},{"label":"Admit rate","def":"Tuned to match measured downstream capacity"}]},
+          {"label":"Seat Map Svc","def":"Stateless read service that merges Postgres rows with Redis lock state","target":"step4-dataflow","ring2":[{"label":"Read-only merge","def":"Durable status plus live hold state"},{"label":"Stateless","def":"Scales horizontally with no coordination"}]},
+          {"label":"Reservation Svc","def":"Orchestrates lock acquire, payment, and confirm","target":"step6-deepdive-locking","ring2":[{"label":"Idempotent ops","def":"Can restart mid-flow without losing lock state"},{"label":"Fixed lock order","def":"Sorts seat_ids to avoid deadlock"}]},
+          {"label":"Redis Cluster","def":"Holds the distributed per-seat lock using atomic SETNX with a TTL","target":"step6-deepdive-holdstate","ring2":[{"label":"SETNX plus TTL","def":"Atomic claim and self-cleanup in one op"},{"label":"Hard dependency","def":"Needs Sentinel or Cluster HA on the write path"}]},
+          {"label":"Postgres","def":"Durable seat status and reservation records with ACID guarantees","target":"step2-entities","ring2":[{"label":"Off hot path","def":"Only written to on confirm, never during hold"},{"label":"Audit trail","def":"Supports refunds and disputes"}]},
+          {"label":"Payment Gateway","def":"External processor charged only after a lock is confirmed held","target":"step5-hld","ring2":[{"label":"PCI compliance","def":"Not worth building in-house"},{"label":"Retry-safe webhook","def":"Confirm cannot double-charge on retry"}]}
+        ]}'></div>
+      </div>
+    </section>
+
     <div class="flash-card">
       <div class="flash-label">Say this in the first 2 minutes</div>
       <ul>
@@ -298,9 +316,9 @@
             <path class="tm-pess-arrow-2" d="M85,75 L200,75" stroke="var(--amber)" stroke-width="2" stroke-dasharray="4 3" marker-end="url(#tmPessArrow)" fill="none"/>
             <circle class="diag-dot diag-flow-dot" r="3" style="offset-path: path('M85,35 L200,35')"></circle>
             <rect class="diag-box role-client" x="5" y="15" width="80" height="40" data-tip="First request to arrive"></rect>
-            <text class="diag-label" x="45" y="39" style="font-size:10px">User A</text>
+            <text class="diag-label" x="45" y="39" style="font-size:11px">User A</text>
             <rect class="diag-box role-client" x="5" y="60" width="80" height="40" data-tip="Arrives microseconds later"></rect>
-            <text class="diag-label" x="45" y="84" style="font-size:10px">User B</text>
+            <text class="diag-label" x="45" y="84" style="font-size:11px">User B</text>
             <g data-tip="SETNX is atomic — only one caller can ever win">
               <rect class="diag-box role-cache" x="200" y="30" width="130" height="50" rx="6"></rect>
               <text class="diag-label" x="265" y="50" style="font-weight:600;font-size:11px">Redis lock</text>
@@ -319,9 +337,9 @@
             <path class="tm-opt-arrow-3" d="M230,80 L85,105" stroke="var(--amber)" stroke-width="2" stroke-dasharray="4 3" marker-end="url(#tmOptArrow)" fill="none"/>
             <circle class="diag-dot diag-flow-dot" r="3" style="offset-path: path('M85,25 L230,25')"></circle>
             <rect class="diag-box role-client" x="5" y="10" width="80" height="35" data-tip="Reads version=1, writes version=2"></rect>
-            <text class="diag-label" x="45" y="31" style="font-size:10px">User A</text>
+            <text class="diag-label" x="45" y="31" style="font-size:11px">User A</text>
             <rect class="diag-box role-client" x="5" y="45" width="80" height="35" data-tip="Also reads version=1, writes version=2"></rect>
-            <text class="diag-label" x="45" y="66" style="font-size:10px">User B</text>
+            <text class="diag-label" x="45" y="66" style="font-size:11px">User B</text>
             <g data-tip="Both read the same version — only the first write wins, the second gets a version conflict AFTER doing full work">
               <rect class="diag-box role-cache" x="230" y="15" width="140" height="50" rx="6"></rect>
               <text class="diag-label" x="300" y="35" style="font-weight:600;font-size:11px">DB row, version=1</text>
@@ -455,5 +473,6 @@
 
   </main>
   <script src="../../assets/nav.js"></script>
+  <script src="../../assets/mindmap.js"></script>
 </body>
 </html>

@@ -20,6 +20,24 @@
       </div>
     </header>
 
+    <section class="concept-map-section">
+      <button type="button" class="concept-map-head">
+        <span class="cm-title">Concept Map</span>
+        <span class="cm-hint">click to expand</span>
+        <svg class="cm-chevron" viewBox="0 0 16 16" width="11" height="11"><path d="M4 6l4 4 4-4" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg>
+      </button>
+      <div class="concept-map-body">
+        <div class="mindmap-wrap" data-mindmap='{"center":"Bitly","ring1":[
+          {"label":"Redirect Svc","def":"Stateless service that looks up a short code and issues the redirect","target":"step5-hld","ring2":[{"label":"Go, stateless","def":"Low per-request overhead on the hottest path"},{"label":"Fires click event","def":"Emits to Kafka after responding, non-blocking"}]},
+          {"label":"Shorten Svc","def":"Validates the URL and checks the custom alias namespace on write","target":"step2-entities","ring2":[{"label":"Stateless pods","def":"Scales horizontally with no shared state"},{"label":"Alias check","def":"Separate table so aliases never collide with codes"}]},
+          {"label":"Redis","def":"Hot short_code to long_url cache in front of Postgres","target":"step6-deepdive-cache","ring2":[{"label":"Cache-aside","def":"Miss falls through to Postgres, sets back"},{"label":"CDN in front","def":"Edge cache absorbs viral-link spikes"}]},
+          {"label":"Postgres","def":"Source of truth for URL rows with a unique index on short_code","target":"step2-entities","ring2":[{"label":"Unique index","def":"Redirect is always a point lookup, never a scan"},{"label":"Read replicas","def":"Absorb cache-miss reads at high volume"}]},
+          {"label":"Snowflake","def":"Bit-packed ID generator that mints codes with zero DB round-trip","target":"step6-deepdive-idgen","ring2":[{"label":"64-bit ID","def":"Timestamp plus node ID plus sequence"},{"label":"Clock drift risk","def":"Node refuses IDs if its clock moves backward"}]},
+          {"label":"Kafka to ClickHouse","def":"Fire-and-forget click analytics pipeline, fully decoupled from redirects","target":"step6-deepdive-analytics","ring2":[{"label":"Kafka buffers bursts","def":"Absorbs viral spikes without backpressure"},{"label":"ClickHouse aggregates","def":"Column store built for group-by-and-count"}]}
+        ]}'></div>
+      </div>
+    </section>
+
     <div class="flash-card">
       <div class="flash-label">Say this in the first 2 minutes</div>
       <ul>
@@ -438,5 +456,6 @@
 
   </main>
   <script src="../../assets/nav.js"></script>
+  <script src="../../assets/mindmap.js"></script>
 </body>
 </html>

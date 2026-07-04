@@ -20,6 +20,24 @@
       </div>
     </header>
 
+    <section class="concept-map-section">
+      <button type="button" class="concept-map-head">
+        <span class="cm-title">Concept Map</span>
+        <span class="cm-hint">click to expand</span>
+        <svg class="cm-chevron" viewBox="0 0 16 16" width="11" height="11"><path d="M4 6l4 4 4-4" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg>
+      </button>
+      <div class="concept-map-body">
+        <div class="mindmap-wrap" data-mindmap='{"center":"Metrics Monitoring","ring1":[
+          {"label":"Ingestion Tier","def":"Kafka buffers write bursts, decouples agents from TSDB write rate","target":"step4-dataflow","ring2":[{"label":"Backpressure","def":"Absorbs uneven producer rate spikes"},{"label":"Never drops","def":"Bursts queue rather than get lost"}]},
+          {"label":"TSDB raw tier","def":"Columnar, compressed, sharded by series id at 10s resolution","target":"step2-entities","ring2":[{"label":"series_id key","def":"Hash of metric name plus labels"},{"label":"Write-optimized","def":"Handles 10M points per second"}]},
+          {"label":"Downsample Worker","def":"Compacts old high-resolution data into coarser long-term tiers","target":"step6-deepdive-downsampling","ring2":[{"label":"3 tiers","def":"10s, 1min, and 1hr resolutions"},{"label":"Cost + speed","def":"Solves storage cost and query latency together"}]},
+          {"label":"Alerting Engine","def":"Streams the ingestion firehose directly, never queries the dashboard path","target":"step6-deepdive-alerting","ring2":[{"label":"In-memory state","def":"Tracks per-series breach windows"},{"label":"Sub-minute","def":"No polling interval to wait out"}]},
+          {"label":"AlertRule Store","def":"Postgres holds low-volume rule config with relational integrity","target":"step2-entities","ring2":[{"label":"Cached in memory","def":"Engine polls config, not per evaluation"},{"label":"Threshold + window","def":"Comparator plus eval_window seconds"}]},
+          {"label":"Notification Svc","def":"Fires pages, Slack, or email within a minute of a breach","target":"step5-hld","ring2":[{"label":"Breach trigger","def":"Fired the moment a window condition is met"},{"label":"No query hop","def":"Never waits on the analytical query path"}]}
+        ]}'></div>
+      </div>
+    </section>
+
     <div class="flash-card">
       <div class="flash-label">Say this in the first 2 minutes</div>
       <ul>
@@ -312,6 +330,7 @@
           <path class="state-arrow" d="M580,100 L580,140" marker-end="url(#dsArrow)"/>
           <g data-tip="Query service inspects the requested range and picks the coarsest tier that still covers it"><rect class="diag-box" x="200" y="150" width="320" height="55"/><text class="diag-label" x="360" y="173" style="font-size:11px">Query Service — auto-selects resolution</text><text class="diag-sublabel" x="360" y="190" style="font-size:8.5px">range &lt;24h → raw, &lt;7d → 1min, &gt;7d → 1hr</text></g>
         </svg>
+        <div class="diag-legend"><div class="diag-legend-item"><span class="diag-legend-dot role-cache"></span>Cache — hot path</div><div class="diag-legend-item"><span class="diag-legend-dot role-db"></span>Database — source of truth</div><div class="diag-legend-item"><span class="diag-legend-dot role-async"></span>Async — queue / worker</div></div>
       </div>
 
       <ol class="flow-steps-list">
@@ -376,6 +395,7 @@
           <path class="state-arrow" d="M395,160 L440,160" marker-end="url(#alArrowGood)"/>
           <g data-tip="Fired the moment a window's breach condition is satisfied"><rect class="diag-box role-async" x="440" y="135" width="150" height="50"/><text class="diag-label" x="515" y="157" style="font-size:11px">Notification Svc</text><text class="diag-sublabel" x="515" y="173" style="font-size:8.5px">&lt;1min end-to-end</text></g>
         </svg>
+        <div class="diag-legend"><div class="diag-legend-item"><span class="diag-legend-dot role-cache"></span>Cache — hot path</div><div class="diag-legend-item"><span class="diag-legend-dot role-db"></span>Database — source of truth</div><div class="diag-legend-item"><span class="diag-legend-dot role-async"></span>Async — queue / worker</div></div>
       </div>
 
       <ol class="flow-steps-list">
@@ -439,5 +459,6 @@
 
   </main>
   <script src="../../assets/nav.js"></script>
+  <script src="../../assets/mindmap.js"></script>
 </body>
 </html>

@@ -20,6 +20,24 @@
       </div>
     </header>
 
+    <section class="concept-map-section">
+      <button type="button" class="concept-map-head">
+        <span class="cm-title">Concept Map</span>
+        <span class="cm-hint">click to expand</span>
+        <svg class="cm-chevron" viewBox="0 0 16 16" width="11" height="11"><path d="M4 6l4 4 4-4" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg>
+      </button>
+      <div class="concept-map-body">
+        <div class="mindmap-wrap" data-mindmap='{"center":"Online Auction","ring1":[
+          {"label":"Bid Service","def":"Validates the increment and issues a conditional UPDATE to place a bid","target":"step4-dataflow","ring2":[{"label":"Stateless pods","def":"No shared state between instances"},{"label":"CAS write","def":"Compare and swap on the version column"}]},
+          {"label":"Postgres","def":"Source of truth for Auction and Bid rows with optimistic locking","target":"step2-entities","ring2":[{"label":"Version column","def":"Every bid write checks it first"},{"label":"Append only Bid","def":"Every attempt is recorded for audit"}]},
+          {"label":"Auction State Machine","def":"Enforces scheduled to active to closing to closed transitions","target":"step6-deepdive-statemachine","ring2":[{"label":"Guarded transitions","def":"Each move validated in one transaction"},{"label":"Irreversible steps","def":"Active to closing cannot revert"}]},
+          {"label":"Auction Close Worker","def":"Detects ends_at has passed and settles the winner exactly once","target":"step6-deepdive-bidrace","ring2":[{"label":"Redis lock","def":"Only one worker may close an auction"},{"label":"Idempotent settle","def":"Safe to resume after a crash"}]},
+          {"label":"Redis Pub Sub","def":"Broadcasts the new high bid to watchers without blocking the write","target":"step5-hld","ring2":[{"label":"Fire and forget","def":"Decoupled from the CAS response"},{"label":"Fan out","def":"Feeds the WebSocket gateway"}]},
+          {"label":"WebSocket Gateway","def":"Holds live connections and pushes bid updates to every watcher","target":"step3-api","ring2":[{"label":"10k watchers","def":"On the hottest auctions"},{"label":"Reconnect resync","def":"Client re-fetches state on drop"}]}
+        ]}'></div>
+      </div>
+    </section>
+
     <div class="flash-card">
       <div class="flash-label">Say this in the first 2 minutes</div>
       <ul>
@@ -236,7 +254,7 @@
           <path class="diag-arrow-path" d="M415,151 L415,185" marker-end="url(#auHldArrow)"/>
           <g data-tip="Polls ends_at, promotes closing → closed exactly once"><rect class="diag-box role-async" x="350" y="185" width="150" height="46"/><text class="diag-label" x="425" y="208" style="font-size:11px">Auction Close Worker</text></g>
           <path class="diag-arrow-path" d="M425,231 L425,260" marker-end="url(#auHldArrow)" stroke-dasharray="3 3"/>
-          <g data-tip="Distributed lock so only one worker closes a given auction"><rect class="diag-box role-cache" x="350" y="260" width="150" height="30"/><text class="diag-label" x="425" y="280" style="font-size:10px">Redis lock (close mutex)</text></g>
+          <g data-tip="Distributed lock so only one worker closes a given auction"><rect class="diag-box role-cache" x="350" y="260" width="150" height="30"/><text class="diag-label" x="425" y="280" style="font-size:11px">Redis lock (close mutex)</text></g>
 
           <path class="diag-arrow-path" d="M280,128 L555,128" marker-end="url(#auHldArrow)" stroke-dasharray="3 3"/>
           <g data-tip="Publishes new high bid on every accepted write"><rect class="diag-box role-async" x="555" y="105" width="150" height="46"/><text class="diag-label" x="630" y="128" style="font-size:11px">Redis Pub/Sub</text></g>
@@ -471,5 +489,6 @@
 
   </main>
   <script src="../../assets/nav.js"></script>
+  <script src="../../assets/mindmap.js"></script>
 </body>
 </html>

@@ -20,6 +20,24 @@
       </div>
     </header>
 
+    <section class="concept-map-section">
+      <button type="button" class="concept-map-head">
+        <span class="cm-title">Concept Map</span>
+        <span class="cm-hint">click to expand</span>
+        <svg class="cm-chevron" viewBox="0 0 16 16" width="11" height="11"><path d="M4 6l4 4 4-4" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg>
+      </button>
+      <div class="concept-map-body">
+        <div class="mindmap-wrap" data-mindmap='{"center":"Strava","ring1":[
+          {"label":"Upload Svc","def":"Accepts the GPS track, writes durable storage, then enqueues matching","target":"step4-dataflow","ring2":[{"label":"Fast 202","def":"Responds before matching runs"},{"label":"Durable first","def":"S3 and Postgres both committed"}]},
+          {"label":"Segment Matcher","def":"Snaps a noisy GPS track onto known segments using a spatial index","target":"step6-deepdive-matching","ring2":[{"label":"Geohash or R-tree","def":"Bounds the candidate search region"},{"label":"Curve similarity","def":"Frechet distance rejects false matches"}]},
+          {"label":"Cassandra","def":"Wide-column store holding ordered segment efforts per partition","target":"step2-entities","ring2":[{"label":"segment_id partition","def":"Fastest-N query stays in one partition"},{"label":"Source of truth","def":"Leaderboard rebuilds from here"}]},
+          {"label":"Redis Leaderboard","def":"Sorted set serving live segment rankings under 100ms","target":"step6-deepdive-leaderboard","ring2":[{"label":"ZADD/ZRANK","def":"O(log N) writes and rank lookups"},{"label":"Rebuildable","def":"Regenerated from Cassandra if lost"}]},
+          {"label":"Leaderboard Svc","def":"Stateless reader serving top-N and personal rank queries","target":"step3-api","ring2":[{"label":"Read-only","def":"No business logic beyond auth"},{"label":"Scope param","def":"all_time vs following filters"}]},
+          {"label":"Feed Fan-out","def":"Async pipeline distributing kudos, comments, and followed activity","target":"step5-hld","ring2":[{"label":"Decoupled","def":"Never blocks the upload response"},{"label":"Social layer","def":"Sits on top of activity data"}]}
+        ]}'></div>
+      </div>
+    </section>
+
     <div class="flash-card">
       <div class="flash-label">Say this in the first 2 minutes</div>
       <ul>
@@ -237,7 +255,7 @@
           <path class="diag-arrow-path" d="M155,151 L155,185" marker-end="url(#stHldArrow)"/>
           <g data-tip="Immutable compressed polylines"><rect class="diag-box role-db" x="90" y="185" width="130" height="46"/><text class="diag-label" x="155" y="208" style="font-size:11px">S3</text></g>
           <path class="diag-arrow-path" d="M155,151 L60,151 L60,185" marker-end="url(#stHldArrow)" stroke-dasharray="3 3"/>
-          <g data-tip="Activity + athlete metadata"><rect class="diag-box role-db" x="10" y="185" width="90" height="46"/><text class="diag-label" x="55" y="208" style="font-size:10px">Postgres</text></g>
+          <g data-tip="Activity + athlete metadata"><rect class="diag-box role-db" x="10" y="185" width="90" height="46"/><text class="diag-label" x="55" y="208" style="font-size:11px">Postgres</text></g>
 
           <path class="diag-arrow-path" d="M310,151 L310,185" marker-end="url(#stHldArrow)"/>
           <g data-tip="ZRANGE top N, sub-5ms hot path"><rect class="diag-box role-cache" x="245" y="185" width="130" height="46"/><text class="diag-label" x="310" y="208" style="font-size:11px">Redis</text></g>
@@ -317,7 +335,7 @@
           <g data-tip="Geohash cells the track passes through are queried for nearby segments"><rect class="diag-box role-cache" x="360" y="35" width="130" height="46" rx="6"/><text class="diag-label" x="425" y="58" style="font-size:11px">Spatial Index</text><text class="diag-sublabel" x="425" y="72" style="font-size:8.5px">geohash/R-tree</text></g>
           <path class="diag-arrow-path" d="M300,58 L360,58" marker-end="url(#stMatchArrow)"/>
           <path class="diag-arrow-path" d="M490,58 L525,58" marker-end="url(#stMatchArrow)"/>
-          <g data-tip="2-3 candidate segments near this bounding box"><rect class="diag-box" x="525" y="35" width="80" height="46" rx="6"/><text class="diag-label" x="565" y="53" style="font-size:10px">Candidates</text><text class="diag-sublabel" x="565" y="68" style="font-size:8.5px">2-3 segments</text></g>
+          <g data-tip="2-3 candidate segments near this bounding box"><rect class="diag-box" x="525" y="35" width="80" height="46" rx="6"/><text class="diag-label" x="565" y="53" style="font-size:11px">Candidates</text><text class="diag-sublabel" x="565" y="68" style="font-size:8.5px">2-3 segments</text></g>
 
           <text class="diag-sublabel" x="20" y="120" style="font-size:10px;fill:var(--accent)">SNAPPED RESULT — matched to canonical segment path</text>
           <path d="M20,160 L300,140" fill="none" stroke="var(--border2)" stroke-width="4" stroke-linecap="round"/>
@@ -354,6 +372,7 @@
           <path class="diag-arrow-path" d="M595,68 L630,68" marker-end="url(#stLbArrow)"/>
           <g data-tip="Only fires if the athlete's new rank crosses a notable threshold"><rect class="diag-box role-async" x="630" y="45" width="60" height="46"/><text class="diag-label" x="660" y="63" style="font-size:9px">Notify</text><text class="diag-sublabel" x="660" y="78" style="font-size:7.5px">if top-10</text></g>
         </svg>
+        <div class="diag-legend"><div class="diag-legend-item"><span class="diag-legend-dot role-cache"></span>Cache — hot path</div><div class="diag-legend-item"><span class="diag-legend-dot role-db"></span>Database — source of truth</div><div class="diag-legend-item"><span class="diag-legend-dot role-async"></span>Async — queue / worker</div></div>
       </div>
 
       <ol class="flow-steps-list">
@@ -418,5 +437,6 @@
 
   </main>
   <script src="../../assets/nav.js"></script>
+  <script src="../../assets/mindmap.js"></script>
 </body>
 </html>

@@ -71,6 +71,7 @@
           <path class="diag-arrow-path" d="M280,55 L320,75" marker-end="url(#lr1)" stroke-dasharray="4 3"/>
           <g data-tip="Status store — client polls this, or it triggers the webhook"><rect class="diag-box role-db" x="320" y="70" width="130" height="50"/><text class="diag-label" x="385" y="92">Status Store</text><text class="diag-sublabel" x="385" y="108">queued/running/done</text></g>
         </svg>
+        <div class="diag-legend"><div class="diag-legend-item"><span class="diag-legend-dot role-client"></span>Client / gateway</div><div class="diag-legend-item"><span class="diag-legend-dot role-db"></span>Database — source of truth</div><div class="diag-legend-item"><span class="diag-legend-dot role-async"></span>Async — queue / worker</div></div>
       </div>
       <ol class="flow-steps-list">
         <li><span>Submit:</span> client sends the job with an idempotency key, gets back <code>202 Accepted</code> + job_id instantly</li>

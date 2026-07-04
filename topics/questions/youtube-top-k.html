@@ -20,6 +20,24 @@
       </div>
     </header>
 
+    <section class="concept-map-section">
+      <button type="button" class="concept-map-head">
+        <span class="cm-title">Concept Map</span>
+        <span class="cm-hint">click to expand</span>
+        <svg class="cm-chevron" viewBox="0 0 16 16" width="11" height="11"><path d="M4 6l4 4 4-4" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg>
+      </button>
+      <div class="concept-map-body">
+        <div class="mindmap-wrap" data-mindmap='{"center":"YouTube Top-K","ring1":[
+          {"label":"Kafka","def":"Durable ordered event log, partitioned by video_id","target":"step5-hld","ring2":[{"label":"Partitioned","def":"One video co-locates on one partition"},{"label":"Fire-and-forget","def":"Ingestion never blocks on counting"}]},
+          {"label":"View Counter Svc","def":"Pre-aggregates locally before touching the shared sketch","target":"step6-deepdive-heavyhitters","ring2":[{"label":"Local batching","def":"Absorbs a viral video before it hits the sketch"},{"label":"Added lag","def":"A few seconds before a count reflects everywhere"}]},
+          {"label":"Count-Min Sketch","def":"Fixed d by w matrix estimating counts regardless of cardinality","target":"step6-deepdive-cms","ring2":[{"label":"d hash rows","def":"One increment per row per event"},{"label":"Take the min","def":"Tightest upper bound across collisions"}]},
+          {"label":"Top-K Min-Heap","def":"Size-K heap tracking only the current best candidates","target":"step6-deepdive-heavyhitters","ring2":[{"label":"Bounded memory","def":"Never grows past K entries"},{"label":"Sketch is not enough","def":"Still needs ranking on top of estimates"}]},
+          {"label":"Snapshot Job","def":"Periodically extracts the heap and writes it durably","target":"step5-hld","ring2":[{"label":"Bounded staleness","def":"Freshness limited by snapshot interval"},{"label":"Decouples reads","def":"Millions of readers never hit the live sketch"}]},
+          {"label":"Query Service","def":"Serves every trending request from the durable snapshot","target":"step2-entities","ring2":[{"label":"snapshot_age_ms","def":"Exposes staleness instead of hiding it"},{"label":"Never touches sketch","def":"Read path fully decoupled from ingestion"}]}
+        ]}'></div>
+      </div>
+    </section>
+
     <div class="flash-card">
       <div class="flash-label">Say this in the first 2 minutes</div>
       <ul>
@@ -289,12 +307,13 @@
     <section id="step6-deepdive-cms">
       <div class="step-pill">Step 6 of 6 — Deep Dives</div>
       <h2>Deep dive: Count-Min Sketch mechanics</h2>
-      <p style="font-size:13px;color:#999;margin-bottom:0.75rem">A view event for a video is hashed by <strong>d</strong> independent hash functions, each mapping to one column in its own row of a <strong>d × w</strong> counter matrix. One event increments <strong>d</strong> cells at once — one per row. To estimate a video's count, hash it the same way and take the <strong>minimum</strong> across those <strong>d</strong> cells — collisions can only inflate a cell, never deflate it, so the min is the tightest available upper bound.</p>
+      <p style="font-size:13px;color:#999;margin-bottom:0.5rem">A view event is hashed by <strong>d</strong> independent hash functions, each mapping to one column in its own row of a <strong>d × w</strong> counter matrix. One event increments <strong>d</strong> cells at once — one per row.</p>
+      <p style="font-size:13px;color:#999;margin-bottom:0.75rem">To estimate a count, hash it the same way and take the <strong>minimum</strong> across those <strong>d</strong> cells — collisions can only inflate a cell, never deflate it, so the min is the tightest available upper bound.</p>
       <div class="diagram-wrap">
         <svg viewBox="0 0 520 300" xmlns="http://www.w3.org/2000/svg" id="cmsMatrix">
           <defs><marker id="cmsArrow" markerWidth="8" markerHeight="8" refX="6" refY="3" orient="auto"><path d="M0,0 L6,3 L0,6 Z" fill="var(--accent)"/></marker></defs>
           <text class="diag-sublabel" x="260" y="14" style="font-size:10px;fill:var(--muted)">4 HASH ROWS × 10 COLUMNS — one event, one cell per row</text>
-          <g data-tip="A single incoming view event for one video"><rect class="diag-box role-client" x="10" y="30" width="90" height="40"/><text class="diag-label" x="55" y="54" style="font-size:10px">view event</text></g>
+          <g data-tip="A single incoming view event for one video"><rect class="diag-box role-client" x="10" y="30" width="90" height="40"/><text class="diag-label" x="55" y="54" style="font-size:11px">view event</text></g>
           <g id="cmsRows"></g>
           <text id="cmsEstimateLabel" x="260" y="290" text-anchor="middle" font-size="10.5" fill="var(--accent)" font-family="Inter,sans-serif"></text>
         </svg>
@@ -432,6 +451,7 @@
           <text class="diag-sublabel" x="360" y="128" style="font-size:9px;fill:var(--muted)">δ shrinks as matrix depth d grows — d ≈ ln(1/δ)</text>
           <text class="diag-sublabel" x="360" y="148" style="font-size:9px;fill:var(--muted)">wider + deeper matrix = tighter bound, more memory</text>
         </svg>
+        <div class="diag-legend"><div class="diag-legend-item"><span class="diag-legend-dot role-cache"></span>Cache — hot path</div><div class="diag-legend-item"><span class="diag-legend-dot role-db"></span>Database — source of truth</div><div class="diag-legend-item"><span class="diag-legend-dot role-async"></span>Async — queue / worker</div></div>
       </div>
       <ol class="flow-steps-list">
         <li><span>Stream has unbounded cardinality</span> — hundreds of millions of distinct video_ids, no way to hold one counter each affordably</li>
@@ -467,6 +487,7 @@
           <path class="diag-arrow-path" d="M590,70 L590,170" marker-end="url(#winArrow)"/>
           <g data-tip="Top-K across the video's entire lifetime"><rect class="diag-box role-db" x="480" y="170" width="220" height="42"/><text class="diag-label" x="590" y="195" style="font-size:11px">All-Time Top-K Result</text></g>
         </svg>
+        <div class="diag-legend"><div class="diag-legend-item"><span class="diag-legend-dot role-cache"></span>Cache — hot path</div><div class="diag-legend-item"><span class="diag-legend-dot role-db"></span>Database — source of truth</div></div>
       </div>
       <ol class="flow-steps-list">
         <li><span>Windowed queries need decay</span> — a video's popularity 3 hours ago shouldn't count toward "trending now," so old buckets must expire</li>
@@ -529,5 +550,6 @@
 
   </main>
   <script src="../../assets/nav.js"></script>
+  <script src="../../assets/mindmap.js"></script>
 </body>
 </html>

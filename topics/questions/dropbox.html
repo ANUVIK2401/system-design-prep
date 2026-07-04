@@ -20,6 +20,24 @@
       </div>
     </header>
 
+    <section class="concept-map-section">
+      <button type="button" class="concept-map-head">
+        <span class="cm-title">Concept Map</span>
+        <span class="cm-hint">click to expand</span>
+        <svg class="cm-chevron" viewBox="0 0 16 16" width="11" height="11"><path d="M4 6l4 4 4-4" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg>
+      </button>
+      <div class="concept-map-body">
+        <div class="mindmap-wrap" data-mindmap='{"center":"Dropbox","ring1":[
+          {"label":"Block Service","def":"Checks chunk hash existence and handles chunk upload and download","target":"step6-deepdive-upload","ring2":[{"label":"Stateless pods","def":"Chunk operations are independent, scale horizontally"},{"label":"Batch existence check","def":"One request checks many hashes at once"}]},
+          {"label":"Metadata Svc","def":"Owns the file tree, versions, and permissions","target":"step2-entities","ring2":[{"label":"Postgres-backed","def":"ACID guarantees matter for a version commit"},{"label":"Commits last","def":"Only writes after every chunk is confirmed durable"}]},
+          {"label":"S3","def":"Content-addressed object storage for immutable chunks","target":"step2-entities","ring2":[{"label":"Hash as key","def":"Same content uploaded twice is a free no-op"},{"label":"ref_count","def":"Tracks references for garbage collection"}]},
+          {"label":"PostgreSQL","def":"Relational store for the file tree and version rows","target":"step2-entities","ring2":[{"label":"parent_dir index","def":"Fast directory listing via self-reference"},{"label":"Strong consistency","def":"Not eventual, unlike the block layer"}]},
+          {"label":"Notification Svc","def":"Long-poll signal service that tells a client something changed","target":"step5-hld","ring2":[{"label":"Signal only","def":"Client still pulls the actual delta"},{"label":"Debounced fan-out","def":"Batches rapid edits into one signal"}]},
+          {"label":"CDN","def":"Edge-caches frequently downloaded blocks in front of S3","target":"step4-dataflow","ring2":[{"label":"Accelerates reads","def":"Popular blocks skip a direct S3 hit"},{"label":"Download path only","def":"Uploads never touch the CDN"}]}
+        ]}'></div>
+      </div>
+    </section>
+
     <div class="flash-card">
       <div class="flash-label">Say this in the first 2 minutes</div>
       <ul>
@@ -175,7 +193,7 @@
           <path class="diag-arrow-path" data-id="d1" d="M585,70 L585,105" marker-end="url(#dbR)"/>
           <g data-target="step2-entities" data-id="d-meta" data-tip="Returns the chunk-hash list for the requested version"><rect class="diag-box" x="530" y="105" width="110" height="46"/><text class="diag-label" x="585" y="128" style="font-size:11px">Metadata Svc</text></g>
           <path class="diag-arrow-path" data-id="d2" d="M640,128 L675,128" marker-end="url(#dbR)"/>
-          <g data-target="step2-entities" data-id="d-cdn" data-tip="Edge-caches frequently downloaded blocks"><rect class="diag-box role-cdn" x="675" y="105" width="55" height="46"/><text class="diag-label" x="702" y="128" style="font-size:10px">CDN</text></g>
+          <g data-target="step2-entities" data-id="d-cdn" data-tip="Edge-caches frequently downloaded blocks"><rect class="diag-box role-cdn" x="675" y="105" width="55" height="46"/><text class="diag-label" x="702" y="128" style="font-size:11px">CDN</text></g>
         </svg>
         <div class="diag-legend">
           <div class="diag-legend-item"><span class="diag-legend-dot role-client"></span>Upload path — only new chunks transfer</div>
@@ -289,6 +307,7 @@
           <path class="diag-arrow-path" d="M547,146 L547,180 L235,180 L235,150" marker-end="url(#dbUpArrow)"/>
           <g data-tip="Commit once every chunk hash is confirmed present"><rect class="diag-box role-db" x="140" y="150" width="190" height="50"/><text class="diag-label" x="235" y="172" style="font-size:11px">Commit metadata</text><text class="diag-sublabel" x="235" y="188" style="font-size:8.5px">chunk_hashes = [h1,h2,h3]</text></g>
         </svg>
+        <div class="diag-legend"><div class="diag-legend-item"><span class="diag-legend-dot role-client"></span>Client / gateway</div><div class="diag-legend-item"><span class="diag-legend-dot role-cache"></span>Cache — hot path</div><div class="diag-legend-item"><span class="diag-legend-dot role-db"></span>Database — source of truth</div><div class="diag-legend-item"><span class="diag-legend-dot role-async"></span>Async — queue / worker</div></div>
       </div>
       <ol class="flow-steps-list">
         <li><span>Split</span> — client divides the file into ~4MB chunks locally</li>
@@ -364,5 +383,6 @@
 
   </main>
   <script src="../../assets/nav.js"></script>
+  <script src="../../assets/mindmap.js"></script>
 </body>
 </html>

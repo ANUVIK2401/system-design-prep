@@ -20,6 +20,24 @@
       </div>
     </header>
 
+    <section class="concept-map-section">
+      <button type="button" class="concept-map-head">
+        <span class="cm-title">Concept Map</span>
+        <span class="cm-hint">click to expand</span>
+        <svg class="cm-chevron" viewBox="0 0 16 16" width="11" height="11"><path d="M4 6l4 4 4-4" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg>
+      </button>
+      <div class="concept-map-body">
+        <div class="mindmap-wrap" data-mindmap='{"center":"Local Delivery","ring1":[
+          {"label":"Order Service","def":"Owns the order state machine with optimistic-locked transitions","target":"step6-deepdive-statemachine","ring2":[{"label":"version column","def":"Prevents double-dispatch via optimistic lock"},{"label":"Postgres-backed","def":"ACID guarantees for a financial transaction"}]},
+          {"label":"Matching Svc","def":"Finds the nearest available driver by expanding outward from a geohash cell","target":"step6-deepdive-geohash","ring2":[{"label":"Ring expansion","def":"Own cell first, then neighbors, then next ring"},{"label":"Blends idle time","def":"Ranking is not distance-only"}]},
+          {"label":"Redis GEO","def":"In-memory geospatial index shared by the write and read paths","target":"step2-entities","ring2":[{"label":"GEOADD writes","def":"Ephemeral driver position, TTL around 30s"},{"label":"Sub-ms radius query","def":"No durability needed per single ping"}]},
+          {"label":"Order DB","def":"Postgres store of order rows, the transactional source of truth","target":"step2-entities","ring2":[{"label":"Strict state","def":"Delivery is a financial transaction"},{"label":"Sharded by metro_id","def":"At high order volume per region"}]},
+          {"label":"ETA Svc","def":"Streaming consumer that composes distance, traffic, prep time, and driver load","target":"step5-hld","ring2":[{"label":"Off Kafka","def":"Consumes the same location stream continuously"},{"label":"Recomputed live","def":"Not a single static formula"}]},
+          {"label":"Notification Svc","def":"Pushes order state changes to customer and driver apps over WebSocket","target":"step5-hld","ring2":[{"label":"Async push","def":"Decoupled from the order-state change itself"},{"label":"No polling","def":"Clients receive pushes, not pulls"}]}
+        ]}'></div>
+      </div>
+    </section>
+
     <div class="flash-card">
       <div class="flash-label">Say this in the first 2 minutes</div>
       <ul>
@@ -467,5 +485,6 @@
 
   </main>
   <script src="../../assets/nav.js"></script>
+  <script src="../../assets/mindmap.js"></script>
 </body>
 </html>

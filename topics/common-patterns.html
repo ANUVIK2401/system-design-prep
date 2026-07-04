@@ -20,6 +20,24 @@
       </div>
     </header>
 
+    <section class="concept-map-section">
+      <button type="button" class="concept-map-head">
+        <span class="cm-title">Concept Map</span>
+        <span class="cm-hint">click to expand</span>
+        <svg class="cm-chevron" viewBox="0 0 16 16" width="11" height="11"><path d="M4 6l4 4 4-4" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg>
+      </button>
+      <div class="concept-map-body">
+        <div class="mindmap-wrap" data-mindmap='{"center":"Patterns","ring1":[
+          {"label":"Read-heavy","def":"Cache aggressively, add read replicas, put a CDN in front","target":"read-heavy","ring2":[{"label":"Cache-aside","def":"Miss falls through, backfills cache"},{"label":"Read replicas","def":"Scale reads horizontally"}]},
+          {"label":"Write-heavy","def":"Buffer writes async, batch to the DB","target":"write-heavy","ring2":[{"label":"Kafka buffer","def":"Absorbs write spikes"},{"label":"Batching","def":"Fewer, larger DB writes"}]},
+          {"label":"Fan-out","def":"Push vs pull tradeoff for notifying many consumers","target":"fan-out","ring2":[{"label":"Fan-out on write","def":"Push at write time, fast reads"},{"label":"Fan-out on read","def":"Pull at read time, cheap for inactive users"}]},
+          {"label":"Saga","def":"Multi-step transaction with compensating actions on failure","target":"saga","ring2":[{"label":"Orchestration","def":"Central coordinator drives steps"},{"label":"Compensation","def":"Undo prior steps on failure"}]},
+          {"label":"CQRS","def":"Separate models for reads and writes when shapes diverge","target":"cqrs","ring2":[{"label":"Write model","def":"Optimized for consistency"},{"label":"Read model","def":"Denormalized for query speed"}]},
+          {"label":"Consistent Hashing","def":"Distributes keys so node changes remap minimal data","target":"tradeoffs","ring2":[{"label":"Hash ring","def":"Keys map to the next node clockwise"},{"label":"Virtual nodes","def":"Smooths load across heterogeneous machines"}]}
+        ]}'></div>
+      </div>
+    </section>
+
     <div class="flash-card">
       <div class="flash-label">Pattern recognition cues</div>
       <ul>
@@ -54,6 +72,7 @@
           <text class="diag-sublabel" x="550" y="115" style="font-size:9px">sync (~100ms lag)</text>
           <g><rect class="diag-box role-db" x="540" y="35" width="150" height="55"/><text class="diag-label" x="615" y="58">Primary DB</text><text class="diag-sublabel" x="615" y="74">source of truth</text></g>
         </svg>
+        <div class="diag-legend"><div class="diag-legend-item"><span class="diag-legend-dot role-client"></span>Client / gateway</div><div class="diag-legend-item"><span class="diag-legend-dot role-cache"></span>Cache — hot path</div><div class="diag-legend-item"><span class="diag-legend-dot role-db"></span>Database — source of truth</div></div>
       </div>
       <table class="def-table">
         <thead><tr><th>Lever</th><th>Effect</th></tr></thead>
@@ -80,6 +99,7 @@
           <path class="diag-arrow-path" d="M530,52 L565,52" marker-end="url(#wh1)"/>
           <g><rect class="diag-box role-db" x="565" y="25" width="135" height="55"/><text class="diag-label" x="632" y="48">ClickHouse</text><text class="diag-sublabel" x="632" y="64">/ Cassandra</text></g>
         </svg>
+        <div class="diag-legend"><div class="diag-legend-item"><span class="diag-legend-dot role-client"></span>Client / gateway</div><div class="diag-legend-item"><span class="diag-legend-dot role-db"></span>Database — source of truth</div><div class="diag-legend-item"><span class="diag-legend-dot role-async"></span>Async — queue / worker</div></div>
       </div>
       <div class="callout warn">Never write directly to a relational DB at &gt;10k writes/sec. Buffer in Kafka, batch into a columnar store, or use Cassandra with a write-optimized LSM tree.</div>
     </section>
@@ -150,6 +170,7 @@
           <path class="diag-arrow-path" d="M595,52 L630,52" marker-end="url(#cq1)"/>
           <g><rect class="diag-box role-client" x="630" y="25" width="60" height="55"/><text class="diag-label" x="660" y="58" style="font-size:11px">Read</text></g>
         </svg>
+        <div class="diag-legend"><div class="diag-legend-item"><span class="diag-legend-dot role-client"></span>Client / gateway</div><div class="diag-legend-item"><span class="diag-legend-dot role-cache"></span>Cache — hot path</div></div>
       </div>
       <div class="callout info">Example: e-commerce writes normalized order data to Postgres; an async job denormalizes it into Elasticsearch for flexible search queries. Read and write models evolve independently.</div>
     </section>
@@ -185,6 +206,7 @@
           <path class="diag-arrow-path" d="M490,62 L530,62" marker-end="url(#ob1)"/>
           <g><rect class="diag-box role-async" x="530" y="40" width="160" height="45"/><text class="diag-label" x="610" y="62" style="font-size:11px">Publish to Kafka</text></g>
         </svg>
+        <div class="diag-legend"><div class="diag-legend-item"><span class="diag-legend-dot role-cache"></span>Cache — hot path</div><div class="diag-legend-item"><span class="diag-legend-dot role-async"></span>Async — queue / worker</div></div>
       </div>
       <div class="callout good">Solves the dual-write problem: if you write to DB then publish to Kafka, you can't guarantee both succeed. Outbox makes the message part of the DB transaction — guaranteed to be published eventually.</div>
     </section>
@@ -261,6 +283,26 @@
       </div>
     </section>
 
+    <section id="when-to-use">
+      <h2>When to reach for each pattern</h2>
+      <div class="scenario-row use">
+        <span class="scenario-icon">✓</span>
+        <div class="scenario-text"><strong>Use read-heavy/write-heavy patterns first:</strong> they're the cheapest fix and apply to almost every question — check the read:write ratio before anything else.</div>
+      </div>
+      <div class="scenario-row use">
+        <span class="scenario-icon">✓</span>
+        <div class="scenario-text"><strong>Use saga + outbox together for money or inventory:</strong> any multi-service write that must never partially fail needs both compensating actions and reliable event delivery.</div>
+      </div>
+      <div class="scenario-row watch">
+        <span class="scenario-icon">⚠</span>
+        <div class="scenario-text"><strong>Watch out for CQRS overkill:</strong> only split read/write models when the shapes genuinely diverge — adding it "for scale" without a real shape mismatch is over-engineering.</div>
+      </div>
+      <div class="scenario-row avoid">
+        <span class="scenario-icon">✗</span>
+        <div class="scenario-text"><strong>Avoid consistent hashing until resharding is a real pain point:</strong> a fixed shard count with modulo hashing is fine until you actually need to add/remove nodes live.</div>
+      </div>
+    </section>
+
     <section id="interview-moves">
       <h2>Interview moves</h2>
       <ul class="moves-list">
@@ -302,5 +344,6 @@
 
   </main>
   <script src="../assets/nav.js"></script>
+  <script src="../assets/mindmap.js"></script>
 </body>
 </html>

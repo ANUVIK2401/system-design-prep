@@ -20,6 +20,24 @@
       </div>
     </header>
 
+    <section class="concept-map-section">
+      <button type="button" class="concept-map-head">
+        <span class="cm-title">Concept Map</span>
+        <span class="cm-hint">click to expand</span>
+        <svg class="cm-chevron" viewBox="0 0 16 16" width="11" height="11"><path d="M4 6l4 4 4-4" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg>
+      </button>
+      <div class="concept-map-body">
+        <div class="mindmap-wrap" data-mindmap='{"center":"WhatsApp","ring1":[
+          {"label":"Connection Svc","def":"Stateful service holding millions of long-lived WebSockets","target":"step5-hld","ring2":[{"label":"Stateful tier","def":"The one genuinely stateful piece in this design"},{"label":"~50k sockets/node","def":"Per-connection memory is the binding constraint"}]},
+          {"label":"Message Svc","def":"Assigns ordered message IDs and orchestrates fan-out to recipients","target":"step4-dataflow","ring2":[{"label":"Stateless","def":"Scales trivially behind the connection tier"},{"label":"Durable write first","def":"Never acks send before Cassandra commits"}]},
+          {"label":"Redis","def":"Session routing table and per-user offline message queue","target":"step6-deepdive-offline","ring2":[{"label":"Not durable copy","def":"Rebuilt from Cassandra if ever lost"},{"label":"Sub-ms lookup","def":"Routes to the right connection server instantly"}]},
+          {"label":"Cassandra","def":"Durable append-only message log partitioned by conversation","target":"step2-entities","ring2":[{"label":"TIMEUUID clustering","def":"Gives ordered writes with zero read-time sorting"},{"label":"Source of truth","def":"Fallback if the Redis queue is ever lost"}]},
+          {"label":"Postgres","def":"Tracks each device and its per-device sync cursor","target":"step2-entities","ring2":[{"label":"Hot lookup","def":"Checked on every send, so cache-backed"},{"label":"Strong consistency","def":"Needed for exact device-to-server routing"}]},
+          {"label":"Push Notif Svc","def":"Wakes a fully offline device through APNs or FCM","target":"step5-hld","ring2":[{"label":"Best-effort","def":"A wake-up nudge, not a delivery guarantee"},{"label":"Last resort","def":"Only needed when no socket is open at all"}]}
+        ]}'></div>
+      </div>
+    </section>
+
     <div class="flash-card">
       <div class="flash-label">Say this in the first 2 minutes</div>
       <ul>
@@ -403,5 +421,6 @@
 
   </main>
   <script src="../../assets/nav.js"></script>
+  <script src="../../assets/mindmap.js"></script>
 </body>
 </html>

@@ -20,6 +20,24 @@
       </div>
     </header>
 
+    <section class="concept-map-section">
+      <button type="button" class="concept-map-head">
+        <span class="cm-title">Concept Map</span>
+        <span class="cm-hint">click to expand</span>
+        <svg class="cm-chevron" viewBox="0 0 16 16" width="11" height="11"><path d="M4 6l4 4 4-4" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg>
+      </button>
+      <div class="concept-map-body">
+        <div class="mindmap-wrap" data-mindmap='{"center":"Online Chess","ring1":[
+          {"label":"Game Server","def":"Stateful sticky-session process owning both sockets for one game","target":"step5-hld","ring2":[{"label":"Sticky session","def":"Reconnect must rejoin the same instance"},{"label":"Stateful","def":"Not a stateless request/response service"}]},
+          {"label":"Move Validation","def":"Pure legality check against current FEN and turn before any write","target":"step6-deepdive-movevalidation","ring2":[{"label":"Synchronous","def":"Runs in the hot path with no external calls"},{"label":"Idempotency key","def":"Lets a lost ack be retried safely"}]},
+          {"label":"Game State Store","def":"Redis key per game_id holding the authoritative live board","target":"step2-entities","ring2":[{"label":"move_count version","def":"Rejects stale writes as an optimistic lock"},{"label":"No durability","def":"Recovered from the append-only move log"}]},
+          {"label":"Move Log DB","def":"Postgres append-only history for replay and disputes","target":"step2-entities","ring2":[{"label":"Off hot path","def":"Written async, never blocks a live move"},{"label":"Cheat detection","def":"Feeds a post-game engine-analysis pipeline"}]},
+          {"label":"Matchmaking Svc","def":"Buckets players by rating and widens the search window over time","target":"step6-deepdive-matchmaking","ring2":[{"label":"Rating buckets","def":"Groups by ELO for a cheap bucket scan"},{"label":"Widening window","def":"Trades match quality for bounded wait time"}]},
+          {"label":"Spectator Fan-out","def":"Pub/sub plus CDN edge layer fully decoupled from the players write path","target":"step6-deepdive-spectators","ring2":[{"label":"One publish","def":"Single event per move, not one per viewer"},{"label":"Edge nodes","def":"Absorb up to 1M viewer connections"}]}
+        ]}'></div>
+      </div>
+    </section>
+
     <div class="flash-card">
       <div class="flash-label">Say this in the first 2 minutes</div>
       <ul>
@@ -328,6 +346,7 @@
           <path class="diag-arrow-path" d="M480,196 L125,222" marker-end="url(#chMvArrowAmber)"/>
           <text class="diag-sublabel" x="300" y="215" style="font-size:8.5px;fill:var(--amber)">4. duplicate-safe ack delivered</text>
         </svg>
+        <div class="diag-legend"><div class="diag-legend-item"><span class="diag-legend-dot role-client"></span>Client / gateway</div><div class="diag-legend-item"><span class="diag-legend-dot role-cache"></span>Cache — hot path</div><div class="diag-legend-item"><span class="diag-legend-dot role-async"></span>Async — queue / worker</div></div>
       </div>
 
       <ol class="flow-steps-list">
@@ -350,23 +369,24 @@
 
           <text class="diag-sublabel" x="350" y="14" style="font-size:10px;fill:var(--muted)">RATING LADDER — buckets of ~100 ELO, widening search window over time</text>
 
-          <rect class="diag-box role-db" x="20" y="40" width="90" height="36"/><text class="diag-label" x="65" y="62" style="font-size:10px">800-900</text>
-          <rect class="diag-box role-db" x="20" y="86" width="90" height="36"/><text class="diag-label" x="65" y="108" style="font-size:10px">900-1000</text>
-          <rect class="diag-box role-cache" x="20" y="132" width="90" height="36"/><text class="diag-label" x="65" y="154" style="font-size:10px">1000-1100</text>
-          <rect class="diag-box role-db" x="20" y="178" width="90" height="36"/><text class="diag-label" x="65" y="200" style="font-size:10px">1100-1200</text>
-          <rect class="diag-box role-db" x="20" y="224" width="90" height="36"/><text class="diag-label" x="65" y="246" style="font-size:10px">1200-1300</text>
+          <rect class="diag-box role-db" x="20" y="40" width="90" height="36"/><text class="diag-label" x="65" y="62" style="font-size:11px">800-900</text>
+          <rect class="diag-box role-db" x="20" y="86" width="90" height="36"/><text class="diag-label" x="65" y="108" style="font-size:11px">900-1000</text>
+          <rect class="diag-box role-cache" x="20" y="132" width="90" height="36"/><text class="diag-label" x="65" y="154" style="font-size:11px">1000-1100</text>
+          <rect class="diag-box role-db" x="20" y="178" width="90" height="36"/><text class="diag-label" x="65" y="200" style="font-size:11px">1100-1200</text>
+          <rect class="diag-box role-db" x="20" y="224" width="90" height="36"/><text class="diag-label" x="65" y="246" style="font-size:11px">1200-1300</text>
 
-          <g data-tip="Player queues at rating 1050, lands in the 1000-1100 bucket"><rect class="diag-box role-client" x="150" y="132" width="140" height="36"/><text class="diag-label" x="220" y="154" style="font-size:10px">Player A (1050)</text></g>
+          <g data-tip="Player queues at rating 1050, lands in the 1000-1100 bucket"><rect class="diag-box role-client" x="150" y="132" width="140" height="36"/><text class="diag-label" x="220" y="154" style="font-size:11px">Player A (1050)</text></g>
           <path class="diag-arrow-path" d="M290,150 L340,150" marker-end="url(#chMmArrow)"/>
-          <g data-tip="t=0s: window is +/-50 ELO — no match found yet"><rect class="diag-box" x="340" y="115" width="150" height="36"/><text class="diag-label" x="415" y="137" style="font-size:10px">t=0s, window ±50</text></g>
+          <g data-tip="t=0s: window is +/-50 ELO — no match found yet"><rect class="diag-box" x="340" y="115" width="150" height="36"/><text class="diag-label" x="415" y="137" style="font-size:11px">t=0s, window ±50</text></g>
           <path class="diag-arrow-path" d="M415,151 L415,175" marker-end="url(#chMmArrow)" stroke-dasharray="3 3"/>
-          <g data-tip="t=5s: window widens to +/-150 ELO if still unmatched"><rect class="diag-box role-async" x="340" y="175" width="150" height="36"/><text class="diag-label" x="415" y="197" style="font-size:10px">t=5s, window ±150</text></g>
+          <g data-tip="t=5s: window widens to +/-150 ELO if still unmatched"><rect class="diag-box role-async" x="340" y="175" width="150" height="36"/><text class="diag-label" x="415" y="197" style="font-size:11px">t=5s, window ±150</text></g>
           <path class="diag-arrow-path" d="M415,211 L415,235" marker-end="url(#chMmArrow)" stroke-dasharray="3 3"/>
           <g data-tip="t=15s: window widens further, latency constraint may also relax"><rect class="diag-box role-async" x="340" y="235" width="150" height="15"/></g>
 
-          <g data-tip="Player queues at rating 1080, within the widened window of Player A"><rect class="diag-box role-client" x="530" y="175" width="150" height="36"/><text class="diag-label" x="605" y="197" style="font-size:10px">Player B (1080)</text></g>
+          <g data-tip="Player queues at rating 1080, within the widened window of Player A"><rect class="diag-box role-client" x="530" y="175" width="150" height="36"/><text class="diag-label" x="605" y="197" style="font-size:11px">Player B (1080)</text></g>
           <path class="diag-arrow-path" d="M530,193 L490,193" marker-end="url(#chMmArrow)"/>
         </svg>
+        <div class="diag-legend"><div class="diag-legend-item"><span class="diag-legend-dot role-client"></span>Client / gateway</div><div class="diag-legend-item"><span class="diag-legend-dot role-cache"></span>Cache — hot path</div><div class="diag-legend-item"><span class="diag-legend-dot role-db"></span>Database — source of truth</div><div class="diag-legend-item"><span class="diag-legend-dot role-async"></span>Async — queue / worker</div></div>
       </div>
 
       <ol class="flow-steps-list">
@@ -482,5 +502,6 @@
 
   </main>
   <script src="../../assets/nav.js"></script>
+  <script src="../../assets/mindmap.js"></script>
 </body>
 </html>

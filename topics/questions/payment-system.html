@@ -20,6 +20,24 @@
       </div>
     </header>
 
+    <section class="concept-map-section">
+      <button type="button" class="concept-map-head">
+        <span class="cm-title">Concept Map</span>
+        <span class="cm-hint">click to expand</span>
+        <svg class="cm-chevron" viewBox="0 0 16 16" width="11" height="11"><path d="M4 6l4 4 4-4" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg>
+      </button>
+      <div class="concept-map-body">
+        <div class="mindmap-wrap" data-mindmap='{"center":"Payment System","ring1":[
+          {"label":"Payment API","def":"Idempotency check on every request before any state changes","target":"step5-hld","ring2":[{"label":"Idempotency-Key","def":"Required header, UNIQUE DB constraint"},{"label":"Fast lookup","def":"Short-circuits duplicate requests"}]},
+          {"label":"Payment Orchestration","def":"Owns the transaction state machine end to end","target":"step6-deepdive-idempotent","ring2":[{"label":"State machine","def":"pending to authorized to completed or failed"},{"label":"Single owner","def":"Avoids split-brain state ownership"}]},
+          {"label":"External Processor","def":"Card network or bank rail, confirms asynchronously via webhook","target":"step4-dataflow","ring2":[{"label":"Async confirm","def":"200ms to 30s plus depending on rail"},{"label":"Immediate ack","def":"Ack is not the final result"}]},
+          {"label":"Webhook Ingestion","def":"Verifies signature and dedups by processor event id","target":"step6-deepdive-webhooks","ring2":[{"label":"HMAC verify","def":"Confirms the event is genuinely from the processor"},{"label":"Event dedup","def":"Re-delivery becomes a safe no-op"}]},
+          {"label":"Ledger Service","def":"Append-only double-entry rows that net to zero per transaction","target":"step6-deepdive-ledger","ring2":[{"label":"No mutable balance","def":"Balance is derived, never stored as one field"},{"label":"Sum to zero","def":"Debit and credits always net to zero"}]},
+          {"label":"Reconciliation Job","def":"Nightly batch cross-checks internal ledger against processor statement","target":"step4-dataflow","ring2":[{"label":"Statement pull","def":"Full settlement report, not just webhooks"},{"label":"Auto vs page","def":"Matches auto-resolve, mismatches page on-call"}]}
+        ]}'></div>
+      </div>
+    </section>
+
     <div class="flash-card">
       <div class="flash-label">Say this in the first 2 minutes</div>
       <ul>
@@ -315,7 +333,7 @@
           <path class="diag-arrow-path" d="M80,72 L380,72" marker-end="url(#idemPsArrow)"/>
 
           <text class="diag-sublabel" x="380" y="92" style="font-size:9.5px;fill:var(--accent)">2. Transaction row created in "pending" — before processor confirms anything</text>
-          <g data-tip="INSERT with UNIQUE(idempotency_key) — this row is the lock"><rect class="diag-box role-cache" x="290" y="98" width="180" height="32"/><text class="diag-label" x="380" y="118" style="font-size:10px">status = pending</text></g>
+          <g data-tip="INSERT with UNIQUE(idempotency_key) — this row is the lock"><rect class="diag-box role-cache" x="290" y="98" width="180" height="32"/><text class="diag-label" x="380" y="118" style="font-size:11px">status = pending</text></g>
 
           <text class="diag-sublabel" x="380" y="150" style="font-size:9.5px">3. Orchestration calls the processor, gets an immediate ack only</text>
           <path class="diag-arrow-path" d="M380,130 L670,150" marker-end="url(#idemPsArrow)"/>
@@ -325,12 +343,13 @@
           <path class="diag-arrow-path" d="M670,168 L380,204" marker-end="url(#idemPsAmber)" style="stroke:var(--amber)" stroke-dasharray="4 3"/>
 
           <text class="diag-sublabel" x="380" y="228" style="font-size:9.5px;fill:var(--amber)">5. Webhook deduped by processor_event_id — a re-delivery is a no-op</text>
-          <g data-tip="UNIQUE(processor_event_id) — duplicate delivery fails the insert, handled as a no-op"><rect class="diag-box role-async" x="290" y="234" width="180" height="32"/><text class="diag-label" x="380" y="254" style="font-size:10px">dedup check</text></g>
+          <g data-tip="UNIQUE(processor_event_id) — duplicate delivery fails the insert, handled as a no-op"><rect class="diag-box role-async" x="290" y="234" width="180" height="32"/><text class="diag-label" x="380" y="254" style="font-size:11px">dedup check</text></g>
 
           <text class="diag-sublabel" x="380" y="282" style="font-size:9.5px;fill:var(--accent)">6. On first-seen confirmation: transaction → "completed", ledger entry written</text>
           <path class="diag-arrow-path" d="M380,266 L80,296" marker-end="url(#idemPsAccent)" style="stroke:var(--accent)"/>
           <text class="diag-sublabel" x="180" y="310" style="font-size:9px;fill:var(--muted)">client polls or receives a push — same idempotency key still resolves consistently</text>
         </svg>
+        <div class="diag-legend"><div class="diag-legend-item"><span class="diag-legend-dot role-client"></span>Client / gateway</div><div class="diag-legend-item"><span class="diag-legend-dot role-cache"></span>Cache — hot path</div><div class="diag-legend-item"><span class="diag-legend-dot role-db"></span>Database — source of truth</div><div class="diag-legend-item"><span class="diag-legend-dot role-async"></span>Async — queue / worker</div></div>
       </div>
 
       <div class="entity-grid">
@@ -364,25 +383,26 @@
           <defs><marker id="ledgerPsArrow" markerWidth="8" markerHeight="8" refX="6" refY="3" orient="auto"><path d="M0,0 L6,3 L0,6 Z" fill="var(--red)"/></marker></defs>
 
           <text class="diag-sublabel" x="180" y="16" style="font-size:10.5px;fill:var(--red)">NAIVE — mutable balance columns (can't split atomically)</text>
-          <g data-tip="A single UPDATE per account has no transactional link to the other two"><rect class="diag-box role-db" x="10" y="26" width="150" height="40"/><text class="diag-label" x="85" y="50" style="font-size:10px">buyer.balance -= 100</text></g>
-          <g data-tip="If this UPDATE fails after the buyer's succeeded, money vanishes"><rect class="diag-box" x="10" y="80" width="150" height="36"/><text class="diag-label" x="85" y="102" style="font-size:10px">merchant.balance += 97</text></g>
-          <g data-tip="A third independent UPDATE — three separate race windows, not one atomic move"><rect class="diag-box" x="10" y="130" width="150" height="36"/><text class="diag-label" x="85" y="152" style="font-size:10px">platform.balance += 3</text></g>
+          <g data-tip="A single UPDATE per account has no transactional link to the other two"><rect class="diag-box role-db" x="10" y="26" width="150" height="40"/><text class="diag-label" x="85" y="50" style="font-size:11px">buyer.balance -= 100</text></g>
+          <g data-tip="If this UPDATE fails after the buyer's succeeded, money vanishes"><rect class="diag-box" x="10" y="80" width="150" height="36"/><text class="diag-label" x="85" y="102" style="font-size:11px">merchant.balance += 97</text></g>
+          <g data-tip="A third independent UPDATE — three separate race windows, not one atomic move"><rect class="diag-box" x="10" y="130" width="150" height="36"/><text class="diag-label" x="85" y="152" style="font-size:11px">platform.balance += 3</text></g>
           <path class="diag-arrow-path" d="M85,66 L85,80" marker-end="url(#ledgerPsArrow)" style="stroke:var(--red)"/>
           <path class="diag-arrow-path" d="M85,116 L85,130" marker-end="url(#ledgerPsArrow)" style="stroke:var(--red)"/>
-          <g data-tip="No single row proves the three updates are one transaction that nets to zero"><rect class="diag-box" x="10" y="180" width="325" height="40" style="stroke:var(--red)"/><text class="diag-label" x="172" y="204" style="font-size:10px" fill="var(--red)">3 independent UPDATEs — a partial failure leaves no trace of what should net to zero</text></g>
+          <g data-tip="No single row proves the three updates are one transaction that nets to zero"><rect class="diag-box" x="10" y="180" width="325" height="40" style="stroke:var(--red)"/><text class="diag-label" x="172" y="204" style="font-size:11px" fill="var(--red)">3 independent UPDATEs — a partial failure leaves no trace of what should net to zero</text></g>
           <text class="diag-sublabel" x="172" y="230" style="font-size:9px;fill:var(--red)">There is no row anywhere that says "these three changes belong together"</text>
 
           <text class="diag-sublabel" x="560" y="16" style="font-size:10.5px;fill:var(--accent)">LEDGER — one transaction, three linked rows, sums to zero</text>
-          <g data-tip="One transaction_id ties all three entries together"><rect class="diag-box role-cache" x="400" y="26" width="150" height="40"/><text class="diag-label" x="475" y="50" style="font-size:10px">transaction_id = T-501</text></g>
-          <g data-tip="INSERT delta=-100 for the buyer account"><rect class="diag-box" x="400" y="80" width="150" height="36"/><text class="diag-label" x="475" y="102" style="font-size:10px">buyer: delta = -100</text></g>
-          <g data-tip="INSERT delta=+97 for the merchant account"><rect class="diag-box" x="400" y="126" width="150" height="36"/><text class="diag-label" x="475" y="148" style="font-size:10px">merchant: delta = +97</text></g>
-          <g data-tip="INSERT delta=+3 for the platform fee account"><rect class="diag-box" x="400" y="172" width="150" height="36"/><text class="diag-label" x="475" y="194" style="font-size:10px">platform fee: delta = +3</text></g>
+          <g data-tip="One transaction_id ties all three entries together"><rect class="diag-box role-cache" x="400" y="26" width="150" height="40"/><text class="diag-label" x="475" y="50" style="font-size:11px">transaction_id = T-501</text></g>
+          <g data-tip="INSERT delta=-100 for the buyer account"><rect class="diag-box" x="400" y="80" width="150" height="36"/><text class="diag-label" x="475" y="102" style="font-size:11px">buyer: delta = -100</text></g>
+          <g data-tip="INSERT delta=+97 for the merchant account"><rect class="diag-box" x="400" y="126" width="150" height="36"/><text class="diag-label" x="475" y="148" style="font-size:11px">merchant: delta = +97</text></g>
+          <g data-tip="INSERT delta=+3 for the platform fee account"><rect class="diag-box" x="400" y="172" width="150" height="36"/><text class="diag-label" x="475" y="194" style="font-size:11px">platform fee: delta = +3</text></g>
           <path class="diag-arrow-path" d="M475,66 L475,80" marker-end="url(#ledgerPsArrow)" style="stroke:var(--accent)"/>
           <path class="diag-arrow-path" d="M475,116 L475,126" marker-end="url(#ledgerPsArrow)" style="stroke:var(--accent)"/>
           <path class="diag-arrow-path" d="M475,162 L475,172" marker-end="url(#ledgerPsArrow)" style="stroke:var(--accent)"/>
-          <g data-tip="All three entries share one transaction_id and commit atomically"><rect class="diag-box role-cache" x="400" y="220" width="150" height="40"/><text class="diag-label" x="475" y="244" style="font-size:10px">-100 + 97 + 3 = 0 — verified</text></g>
+          <g data-tip="All three entries share one transaction_id and commit atomically"><rect class="diag-box role-cache" x="400" y="220" width="150" height="40"/><text class="diag-label" x="475" y="244" style="font-size:11px">-100 + 97 + 3 = 0 — verified</text></g>
           <path class="diag-arrow-path" d="M475,208 L475,220" marker-end="url(#ledgerPsArrow)" style="stroke:var(--accent)"/>
         </svg>
+        <div class="diag-legend"><div class="diag-legend-item"><span class="diag-legend-dot role-cache"></span>Cache — hot path</div><div class="diag-legend-item"><span class="diag-legend-dot role-db"></span>Database — source of truth</div></div>
       </div>
 
       <ol class="flow-steps-list">
@@ -414,16 +434,17 @@
           <path class="diag-arrow-path" d="M95,66 L95,100" marker-end="url(#reconArrowAmber)" style="stroke:var(--amber)"/>
           <path class="diag-arrow-path" d="M275,66 L275,100" marker-end="url(#reconArrowAmber)" style="stroke:var(--amber)"/>
           <path class="diag-arrow-path" d="M455,66 L455,100" marker-end="url(#reconArrowAmber)" style="stroke:var(--amber)"/>
-          <g data-tip="A transaction can sit here far longer than a user should have to wait"><rect class="diag-box" x="10" y="100" width="530" height="40" style="stroke:var(--amber)"/><text class="diag-label" x="275" y="124" style="font-size:10px" fill="var(--amber)">Transaction sits in "pending" — or a duplicate webhook risks a double-credit if not deduped</text></g>
+          <g data-tip="A transaction can sit here far longer than a user should have to wait"><rect class="diag-box" x="10" y="100" width="530" height="40" style="stroke:var(--amber)"/><text class="diag-label" x="275" y="124" style="font-size:11px" fill="var(--amber)">Transaction sits in "pending" — or a duplicate webhook risks a double-credit if not deduped</text></g>
 
           <path class="diag-arrow-path" d="M275,140 L275,175" marker-end="url(#reconArrow)"/>
-          <g data-tip="Backstop 1: a timeout-based status check calls the processor's own API directly"><rect class="diag-box role-async" x="60" y="175" width="220" height="46"/><text class="diag-label" x="170" y="198" style="font-size:10px">Timeout-based status check</text><text class="diag-sublabel" x="170" y="212" style="font-size:8px">polls processor API if pending too long</text></g>
+          <g data-tip="Backstop 1: a timeout-based status check calls the processor's own API directly"><rect class="diag-box role-async" x="60" y="175" width="220" height="46"/><text class="diag-label" x="170" y="198" style="font-size:11px">Timeout-based status check</text><text class="diag-sublabel" x="170" y="212" style="font-size:8px">polls processor API if pending too long</text></g>
 
-          <g data-tip="Backstop 2: nightly job pulls the full settlement statement, not just recent events"><rect class="diag-box role-async" x="300" y="175" width="220" height="46"/><text class="diag-label" x="410" y="198" style="font-size:10px">Nightly Reconciliation Job</text><text class="diag-sublabel" x="410" y="212" style="font-size:8px">pulls processor statement/report API</text></g>
+          <g data-tip="Backstop 2: nightly job pulls the full settlement statement, not just recent events"><rect class="diag-box role-async" x="300" y="175" width="220" height="46"/><text class="diag-label" x="410" y="198" style="font-size:11px">Nightly Reconciliation Job</text><text class="diag-sublabel" x="410" y="212" style="font-size:8px">pulls processor statement/report API</text></g>
 
           <path class="diag-arrow-path" d="M410,221 L410,250" marker-end="url(#reconArrowRed)" style="stroke:var(--red)"/>
           <g data-tip="Matches auto-resolve; unexplained mismatches page a human"><rect class="diag-box role-db" x="290" y="250" width="240" height="26"/><text class="diag-label" x="410" y="267" style="font-size:9.5px">Match → auto-resolve. Mismatch → alert on-call</text></g>
         </svg>
+        <div class="diag-legend"><div class="diag-legend-item"><span class="diag-legend-dot role-db"></span>Database — source of truth</div><div class="diag-legend-item"><span class="diag-legend-dot role-async"></span>Async — queue / worker</div></div>
       </div>
 
       <ol class="flow-steps-list">
@@ -487,5 +508,6 @@
 
   </main>
   <script src="../../assets/nav.js"></script>
+  <script src="../../assets/mindmap.js"></script>
 </body>
 </html>

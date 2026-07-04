@@ -20,6 +20,24 @@
       </div>
     </header>
 
+    <section class="concept-map-section">
+      <button type="button" class="concept-map-head">
+        <span class="cm-title">Concept Map</span>
+        <span class="cm-hint">click to expand</span>
+        <svg class="cm-chevron" viewBox="0 0 16 16" width="11" height="11"><path d="M4 6l4 4 4-4" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg>
+      </button>
+      <div class="concept-map-body">
+        <div class="mindmap-wrap" data-mindmap='{"center":"Yelp","ring1":[
+          {"label":"Search Svc","def":"Builds the geo and keyword filter, then executes a ranked query","target":"step6-deepdive-ranking","ring2":[{"label":"Stateless","def":"Ranking logic lives outside the index"},{"label":"Cache check","def":"Redis checked before Elasticsearch"}]},
+          {"label":"Write Svc","def":"Validates and persists business listing and review writes","target":"step2-entities","ring2":[{"label":"One review rule","def":"Unique constraint per user per business"},{"label":"Sync commit","def":"Postgres write before async reindex"}]},
+          {"label":"Elasticsearch","def":"Search engine combining geo-radius filter with rank scoring","target":"step6-deepdive-geoindex","ring2":[{"label":"geo_point field","def":"Native radius query support"},{"label":"Read-optimized copy","def":"Can briefly lag the source of truth"}]},
+          {"label":"Redis","def":"Caches hot search queries and the denormalized rating summary","target":"step2-entities","ring2":[{"label":"Query cache","def":"Keyed on geohash cell plus category"},{"label":"Rating cache","def":"Avoids a COUNT AVG per page load"}]},
+          {"label":"Postgres","def":"Transactional source of truth for Business and Review rows","target":"step2-entities","ring2":[{"label":"ACID commit","def":"Strong consistency on ownership edits"},{"label":"Denormalized rating","def":"avg_rating stored on Business"}]},
+          {"label":"Kafka Reindexer","def":"Propagates writes into the search index asynchronously","target":"step4-dataflow","ring2":[{"label":"CDC pipeline","def":"Change events drive the reindex"},{"label":"Eventual freshness","def":"Search can lag by seconds"}]}
+        ]}'></div>
+      </div>
+    </section>
+
     <div class="flash-card">
       <div class="flash-label">Say this in the first 2 minutes</div>
       <ul>
@@ -505,5 +523,6 @@
 
   </main>
   <script src="../../assets/nav.js"></script>
+  <script src="../../assets/mindmap.js"></script>
 </body>
 </html>

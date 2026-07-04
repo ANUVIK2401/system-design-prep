@@ -20,6 +20,23 @@
       </div>
     </header>
 
+    <section class="concept-map-section">
+      <button type="button" class="concept-map-head">
+        <span class="cm-title">Concept Map</span>
+        <span class="cm-hint">click to expand</span>
+        <svg class="cm-chevron" viewBox="0 0 16 16" width="11" height="11"><path d="M4 6l4 4 4-4" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg>
+      </button>
+      <div class="concept-map-body">
+        <div class="mindmap-wrap" data-mindmap='{"center":"Distributed Cache","ring1":[
+          {"label":"Client Library","def":"Ring-aware, hashes keys locally and routes directly to the owner","target":"step6-deepdive-ring","ring2":[{"label":"No proxy hop","def":"Skips a network hop for sub-ms latency"},{"label":"Topology cached","def":"Holds a local copy of ring shape"}]},
+          {"label":"Cache Nodes","def":"In-memory key-value storage sharded via consistent hashing","target":"step5-hld","ring2":[{"label":"Virtual nodes","def":"Spread ownership for even load"},{"label":"RAM only","def":"No disk round trip on the hot path"}]},
+          {"label":"Replica Nodes","def":"Standby copy per shard so a primary failure does not lose data","target":"step5-hld","ring2":[{"label":"Async or sync","def":"Consistency dial per write"},{"label":"Failover target","def":"Promoted when primary dies"}]},
+          {"label":"Coordination Layer","def":"Gossip or etcd tracks ring topology and node health","target":"step6-deepdive-ring","ring2":[{"label":"Gossip protocol","def":"Peer-to-peer topology sync"},{"label":"Node status","def":"alive, suspect, or dead"}]},
+          {"label":"Backing Database","def":"Source of truth only touched on a cache miss","target":"step5-hld","ring2":[{"label":"Miss path only","def":"Shielded from most traffic"},{"label":"Herd protection","def":"Request coalescing guards it"}]}
+        ]}'></div>
+      </div>
+    </section>
+
     <div class="flash-card">
       <div class="flash-label">Say this in the first 2 minutes</div>
       <ul>
@@ -354,7 +371,7 @@
 
     <section id="step6-deepdive-eviction">
       <h2>Deep dive: eviction and invalidation</h2>
-      <p style="font-size:13px;color:#999;margin-bottom:0.75rem">Two separate questions: which entries get evicted under memory pressure (LRU vs LFU), and how the cache stays consistent with the backing store as data changes (write-through vs write-back vs cache-aside). TTL expiry is a third, independent mechanism that interacts with both.</p>
+      <p style="font-size:13px;color:#999;margin-bottom:0.75rem">Two separate questions: which entries get evicted under memory pressure (LRU vs LFU), and how the cache stays consistent with the backing store (write-through vs write-back vs cache-aside).</p>
 
       <table class="grid-table">
         <thead><tr><th>Eviction policy</th><th>Evicts</th><th>Good for</th><th>Weak point</th></tr></thead>
@@ -401,7 +418,7 @@
           <path class="diag-arrow-path" d="M345,159 L380,159" marker-end="url(#thGood)"/>
           <g data-tip="Only ONE request per key reaches the DB; rest wait on it"><rect class="diag-box role-db" x="380" y="136" width="150" height="46"/><text class="diag-label" x="455" y="155" style="font-size:11px">Database</text><text class="diag-sublabel" x="455" y="171" style="font-size:8px;fill:var(--accent)">1 query, not 1,000s</text></g>
           <path class="diag-arrow-path" d="M270,182 L270,215" marker-end="url(#thGood)"/>
-          <g data-tip="Result fans back out to every waiting client from the single fetch"><rect class="diag-box role-async" x="195" y="215" width="150" height="38"/><text class="diag-label" x="270" y="238" style="font-size:10.5px">Fan-out result to waiters</text></g>
+          <g data-tip="Result fans back out to every waiting client from the single fetch"><rect class="diag-box role-async" x="195" y="215" width="150" height="38"/><text class="diag-label" x="270" y="238" style="font-size:11px">Fan-out result to waiters</text></g>
         </svg>
         <div class="diag-legend">
           <div class="diag-legend-item"><span class="diag-legend-dot role-client"></span>Clients — many simultaneous requesters for one key</div>
@@ -471,5 +488,6 @@
 
   </main>
   <script src="../../assets/nav.js"></script>
+  <script src="../../assets/mindmap.js"></script>
 </body>
 </html>

@@ -20,6 +20,24 @@
       </div>
     </header>
 
+    <section class="concept-map-section">
+      <button type="button" class="concept-map-head">
+        <span class="cm-title">Concept Map</span>
+        <span class="cm-hint">click to expand</span>
+        <svg class="cm-chevron" viewBox="0 0 16 16" width="11" height="11"><path d="M4 6l4 4 4-4" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg>
+      </button>
+      <div class="concept-map-body">
+        <div class="mindmap-wrap" data-mindmap='{"center":"LeetCode Judge","ring1":[
+          {"label":"Submit Svc","def":"Validates a submission and persists it before enqueueing the job","target":"step2-entities","ring2":[{"label":"Stateless pods","def":"Does intake only, no execution"},{"label":"Fast 202","def":"Returns queued status in ms"}]},
+          {"label":"Kafka","def":"Buffers submission jobs so a contest-start spike never overwhelms workers","target":"step6-deepdive-sandbox","ring2":[{"label":"Burst absorption","def":"Handles 100x steady-state traffic"},{"label":"Language partitions","def":"Avoids one runtime blocking others"}]},
+          {"label":"Judge Workers","def":"Pool that runs each test case inside an isolated sandbox","target":"step6-deepdive-sandbox","ring2":[{"label":"gVisor","def":"Userspace kernel intercepts syscalls"},{"label":"cgroup caps","def":"Hard CPU, memory, wall-clock limits"}]},
+          {"label":"Postgres","def":"Stores Submission and Problem metadata with strong consistency","target":"step2-entities","ring2":[{"label":"Status transitions","def":"queued to running to passed or failed"},{"label":"UUID keys","def":"Client-safe optimistic generation"}]},
+          {"label":"ClickHouse","def":"Column store holding per-test-case verdicts and runtimes","target":"step2-entities","ring2":[{"label":"Append-only","def":"One row per test case per submission"},{"label":"Aggregate queries","def":"Pass rate and runtime distribution"}]},
+          {"label":"WS Gateway","def":"Pushes live grading status to the still-open client socket","target":"step3-api","ring2":[{"label":"Push over poll","def":"Sub-second updates without polling"},{"label":"Sticky routing","def":"Per submission_id connection"}]}
+        ]}'></div>
+      </div>
+    </section>
+
     <div class="flash-card">
       <div class="flash-label">Say this in the first 2 minutes</div>
       <ul>
@@ -313,7 +331,7 @@
           <g data-tip="Isolated filesystem, network namespace with no egress"><rect class="diag-box role-client" x="60" y="60" width="580" height="165" rx="6"/><text class="diag-label" x="350" y="80" style="font-size:11px">Container (no network, read-only rootfs)</text></g>
           <g data-tip="gVisor intercepts syscalls in userspace — the untrusted code never talks to the real kernel directly"><rect class="diag-box role-cache" x="100" y="100" width="500" height="115" rx="6"/><text class="diag-label" x="350" y="120" style="font-size:11px">gVisor userspace kernel</text></g>
           <g data-tip="Denies dangerous syscalls outright — ptrace, mount, reboot, raw sockets"><rect class="diag-box role-async" x="140" y="140" width="420" height="70" rx="6"/><text class="diag-label" x="350" y="160" style="font-size:11px">seccomp-bpf syscall filter</text></g>
-          <g data-tip="cgroups enforce the numbers that actually stop abuse"><rect class="diag-box" x="180" y="180" width="340" height="25" rx="4"/><text class="diag-label" x="350" y="197" style="font-size:10px">cgroup limits: 2s CPU · 256MB mem · 64 procs</text></g>
+          <g data-tip="cgroups enforce the numbers that actually stop abuse"><rect class="diag-box" x="180" y="180" width="340" height="25" rx="4"/><text class="diag-label" x="350" y="197" style="font-size:11px">cgroup limits: 2s CPU · 256MB mem · 64 procs</text></g>
         </svg>
         <div class="diag-legend">
           <div class="diag-legend-item"><span class="diag-legend-dot role-db"></span>Host OS — never directly reachable</div>
@@ -402,5 +420,6 @@
 
   </main>
   <script src="../../assets/nav.js"></script>
+  <script src="../../assets/mindmap.js"></script>
 </body>
 </html>

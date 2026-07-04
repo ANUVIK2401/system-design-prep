@@ -13,12 +13,29 @@
     <header class="page-head">
       <div class="pill">Questions</div>
       <h1>Design ChatGPT</h1>
-      <p class="sub">Tests whether you recognize this as a GPU-inference-capacity-and-scheduling problem, not a CRUD problem — the scarce resource is GPU compute, and everything else (batching, streaming, context management) exists to squeeze more useful work out of it.</p>
+      <p class="sub">Tests whether you recognize this as a GPU-capacity-and-scheduling problem, not a CRUD problem. The scarce resource is GPU compute — batching, streaming, and context management all exist to squeeze more out of it.</p>
       <div class="meta-row">
         <span class="badge green">45-55 min interview</span>
         <span class="badge blue">Hard</span>
       </div>
     </header>
+
+    <section class="concept-map-section">
+      <button type="button" class="concept-map-head">
+        <span class="cm-title">Concept Map</span>
+        <span class="cm-hint">click to expand</span>
+        <svg class="cm-chevron" viewBox="0 0 16 16" width="11" height="11"><path d="M4 6l4 4 4-4" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg>
+      </button>
+      <div class="concept-map-body">
+        <div class="mindmap-wrap" data-mindmap='{"center":"ChatGPT","ring1":[
+          {"label":"API Gateway","def":"Auth and rate limiting before a request reaches a GPU","target":"step3-api","ring2":[{"label":"Rate limits","def":"Protects scarce GPU capacity"},{"label":"Routing","def":"Sends requests to the batcher"}]},
+          {"label":"Scheduler / Batcher","def":"Groups concurrent requests into GPU-efficient batches","target":"step6-deepdive-batching","ring2":[{"label":"Continuous batching","def":"New requests join a batch mid-flight"},{"label":"GPU utilization","def":"The core scarce-resource problem"}]},
+          {"label":"GPU Worker Fleet","def":"Runs the actual model inference","target":"step5-hld","ring2":[{"label":"Scarce resource","def":"Everything else exists to use it well"},{"label":"Autoscaled","def":"Fleet size tracks demand"}]},
+          {"label":"Stream Router","def":"Pushes generated tokens back as they are produced","target":"step6-deepdive-streaming","ring2":[{"label":"Token streaming","def":"User sees output incrementally"},{"label":"Lower perceived latency","def":"First token matters more than total time"}]},
+          {"label":"Conversation DB","def":"Stores message history and context per conversation","target":"step2-entities","ring2":[{"label":"Context window","def":"Bounds how much history is replayed"},{"label":"Truncation policy","def":"Oldest turns drop first"}]}
+        ]}'></div>
+      </div>
+    </section>
 
     <div class="flash-card">
       <div class="flash-label">Say this in the first 2 minutes</div>
@@ -304,19 +321,20 @@
           <defs><marker id="cgBatchArrow" markerWidth="8" markerHeight="8" refX="6" refY="3" orient="auto"><path d="M0,0 L6,3 L0,6 Z" fill="var(--border2)"/></marker></defs>
 
           <text class="diag-sublabel" x="180" y="16" style="font-size:10px;fill:var(--amber)">NAIVE — one request per GPU call</text>
-          <g data-tip="Request A occupies the whole GPU alone for its full duration"><rect class="diag-box role-async" x="10" y="30" width="150" height="30"/><text class="diag-label" x="85" y="49" style="font-size:10px">Request A (GPU idle for rest)</text></g>
-          <g data-tip="Request B has to wait for A to fully finish before it can start"><rect class="diag-box" x="170" y="30" width="150" height="30"/><text class="diag-label" x="245" y="49" style="font-size:10px">Request B waits</text></g>
-          <g data-tip="Most of the GPU's capacity per call goes unused"><rect class="diag-box" x="330" y="30" width="150" height="30"/><text class="diag-label" x="405" y="49" style="font-size:10px">Request C waits</text></g>
+          <g data-tip="Request A occupies the whole GPU alone for its full duration"><rect class="diag-box role-async" x="10" y="30" width="150" height="30"/><text class="diag-label" x="85" y="49" style="font-size:11px">Request A (GPU idle for rest)</text></g>
+          <g data-tip="Request B has to wait for A to fully finish before it can start"><rect class="diag-box" x="170" y="30" width="150" height="30"/><text class="diag-label" x="245" y="49" style="font-size:11px">Request B waits</text></g>
+          <g data-tip="Most of the GPU's capacity per call goes unused"><rect class="diag-box" x="330" y="30" width="150" height="30"/><text class="diag-label" x="405" y="49" style="font-size:11px">Request C waits</text></g>
           <text class="diag-sublabel" x="400" y="78" style="font-size:9px;fill:var(--muted)">total time = A + B + C, run one after another — GPU mostly idle relative to its batch capacity</text>
 
           <text class="diag-sublabel" x="180" y="110" style="font-size:10px;fill:var(--accent)">CONTINUOUS BATCHING — requests share the GPU concurrently</text>
-          <g data-tip="Joins the batch when it arrives, generating tokens alongside whatever is already in-flight"><rect class="diag-box role-cache" x="10" y="130" width="220" height="30"/><text class="diag-label" x="120" y="149" style="font-size:10px">Request A — tokens 1..N</text></g>
-          <g data-tip="Joins mid-batch as soon as it arrives, no need to wait for A or C to finish"><rect class="diag-box role-cache" x="60" y="166" width="220" height="30"/><text class="diag-label" x="170" y="185" style="font-size:10px">Request B — joins in-progress batch</text></g>
-          <g data-tip="Finishes early and leaves; its GPU slot is immediately reused by the next arrival"><rect class="diag-box role-cache" x="30" y="202" width="150" height="30"/><text class="diag-label" x="105" y="221" style="font-size:10px">Request C — finishes, leaves</text></g>
+          <g data-tip="Joins the batch when it arrives, generating tokens alongside whatever is already in-flight"><rect class="diag-box role-cache" x="10" y="130" width="220" height="30"/><text class="diag-label" x="120" y="149" style="font-size:11px">Request A — tokens 1..N</text></g>
+          <g data-tip="Joins mid-batch as soon as it arrives, no need to wait for A or C to finish"><rect class="diag-box role-cache" x="60" y="166" width="220" height="30"/><text class="diag-label" x="170" y="185" style="font-size:11px">Request B — joins in-progress batch</text></g>
+          <g data-tip="Finishes early and leaves; its GPU slot is immediately reused by the next arrival"><rect class="diag-box role-cache" x="30" y="202" width="150" height="30"/><text class="diag-label" x="105" y="221" style="font-size:11px">Request C — finishes, leaves</text></g>
           <path class="diag-arrow-path" d="M230,145 L280,145" marker-end="url(#cgBatchArrow)"/>
-          <g data-tip="A new request slots into the batch the moment a GPU cycle is free, no fixed batch boundary"><rect class="diag-box role-async" x="280" y="130" width="180" height="30"/><text class="diag-label" x="370" y="149" style="font-size:10px">Request D — joins as C leaves</text></g>
+          <g data-tip="A new request slots into the batch the moment a GPU cycle is free, no fixed batch boundary"><rect class="diag-box role-async" x="280" y="130" width="180" height="30"/><text class="diag-label" x="370" y="149" style="font-size:11px">Request D — joins as C leaves</text></g>
           <text class="diag-sublabel" x="400" y="245" style="font-size:9px;fill:var(--muted)">GPU batch stays near-full at all times; requests of different lengths enter and exit independently</text>
         </svg>
+        <div class="diag-legend"><div class="diag-legend-item"><span class="diag-legend-dot role-cache"></span>Cache — hot path</div><div class="diag-legend-item"><span class="diag-legend-dot role-async"></span>Async — queue / worker</div></div>
       </div>
       <ol class="flow-steps-list">
         <li><span>New request arrives at the scheduler</span> — it doesn't wait for a fresh batch to form</li>
@@ -337,8 +355,8 @@
           <defs><marker id="cgStreamArrow" markerWidth="8" markerHeight="8" refX="6" refY="3" orient="auto"><path d="M0,0 L6,3 L0,6 Z" fill="var(--accent)"/></marker></defs>
 
           <text class="diag-sublabel" x="150" y="16" style="font-size:10px;fill:var(--accent)">GOOD — stream each token immediately</text>
-          <g data-tip="Client opens the connection and waits for the first byte"><rect class="diag-box role-client" x="10" y="30" width="110" height="40"/><text class="diag-label" x="65" y="54" style="font-size:10px">Client</text></g>
-          <g data-tip="Generates token 1, pushes it immediately — no buffering"><rect class="diag-box role-async" x="160" y="30" width="140" height="40"/><text class="diag-label" x="230" y="54" style="font-size:10px">GPU Worker</text></g>
+          <g data-tip="Client opens the connection and waits for the first byte"><rect class="diag-box role-client" x="10" y="30" width="110" height="40"/><text class="diag-label" x="65" y="54" style="font-size:11px">Client</text></g>
+          <g data-tip="Generates token 1, pushes it immediately — no buffering"><rect class="diag-box role-async" x="160" y="30" width="140" height="40"/><text class="diag-label" x="230" y="54" style="font-size:11px">GPU Worker</text></g>
           <path class="diag-arrow-path" d="M120,42 L155,42" marker-end="url(#cgStreamArrow)"/>
           <path class="diag-arrow-path" d="M300,50 L120,50" marker-end="url(#cgStreamArrow)"/>
           <text class="diag-sublabel" x="210" y="38" style="font-size:8.5px;fill:var(--muted)">prompt sent</text>
@@ -351,13 +369,14 @@
           <text class="diag-sublabel" x="210" y="126" style="font-size:9px;fill:var(--muted)">user is reading tokens 1-3 while token 8 is still being generated</text>
 
           <text class="diag-sublabel" x="150" y="160" style="font-size:10px;fill:var(--amber)">BAD — wait for the full response first</text>
-          <g data-tip="Client sends the prompt and gets nothing back until generation fully completes"><rect class="diag-box role-client" x="10" y="176" width="110" height="40"/><text class="diag-label" x="65" y="200" style="font-size:10px">Client</text></g>
-          <g data-tip="Buffers the entire response, several seconds of generation, before sending anything"><rect class="diag-box" x="160" y="176" width="140" height="40"/><text class="diag-label" x="230" y="196" style="font-size:10px">GPU Worker</text><text class="diag-sublabel" x="230" y="210" style="font-size:8.5px">buffers full response</text></g>
+          <g data-tip="Client sends the prompt and gets nothing back until generation fully completes"><rect class="diag-box role-client" x="10" y="176" width="110" height="40"/><text class="diag-label" x="65" y="200" style="font-size:11px">Client</text></g>
+          <g data-tip="Buffers the entire response, several seconds of generation, before sending anything"><rect class="diag-box" x="160" y="176" width="140" height="40"/><text class="diag-label" x="230" y="196" style="font-size:11px">GPU Worker</text><text class="diag-sublabel" x="230" y="210" style="font-size:8.5px">buffers full response</text></g>
           <path class="diag-arrow-path" d="M120,188 L155,188" marker-end="url(#cgStreamArrow)"/>
           <path class="diag-arrow-path" d="M300,222 L120,222" marker-end="url(#cgStreamArrow)" stroke-dasharray="3 3"/>
           <text class="diag-sublabel" x="210" y="236" style="font-size:8.5px;fill:var(--amber)">full response → several seconds later, all at once</text>
           <text class="diag-sublabel" x="230" y="256" style="font-size:9px;fill:var(--muted)">user stares at a blank/loading screen for the entire generation time</text>
         </svg>
+        <div class="diag-legend"><div class="diag-legend-item"><span class="diag-legend-dot role-client"></span>Client / gateway</div><div class="diag-legend-item"><span class="diag-legend-dot role-async"></span>Async — queue / worker</div></div>
       </div>
       <ol class="flow-steps-list">
         <li><span>Client sends the prompt and opens a streaming connection</span> — SSE or WebSocket, held open for the duration of generation</li>
@@ -378,21 +397,21 @@
           <defs><marker id="cgCtxArrow" markerWidth="8" markerHeight="8" refX="6" refY="3" orient="auto"><path d="M0,0 L6,3 L0,6 Z" fill="var(--border2)"/></marker></defs>
 
           <text class="diag-sublabel" x="180" y="16" style="font-size:10px;fill:var(--muted)">EVERY TURN — retrieve history, assemble prompt</text>
-          <g data-tip="New user message arrives for an existing conversation"><rect class="diag-box role-client" x="10" y="30" width="120" height="40"/><text class="diag-label" x="70" y="54" style="font-size:10px">New Message</text></g>
+          <g data-tip="New user message arrives for an existing conversation"><rect class="diag-box role-client" x="10" y="30" width="120" height="40"/><text class="diag-label" x="70" y="54" style="font-size:11px">New Message</text></g>
           <path class="diag-arrow-path" d="M130,50 L165,50" marker-end="url(#cgCtxArrow)"/>
-          <g data-tip="Fetches prior turns for this conversation_id, ordered by seq"><rect class="diag-box role-db" x="165" y="30" width="150" height="40"/><text class="diag-label" x="240" y="54" style="font-size:10px">Conversation DB</text></g>
+          <g data-tip="Fetches prior turns for this conversation_id, ordered by seq"><rect class="diag-box role-db" x="165" y="30" width="150" height="40"/><text class="diag-label" x="240" y="54" style="font-size:11px">Conversation DB</text></g>
           <path class="diag-arrow-path" d="M315,50 L350,50" marker-end="url(#cgCtxArrow)"/>
-          <g data-tip="Packs retrieved turns plus the new message into the model's input"><rect class="diag-box" x="350" y="30" width="150" height="40"/><text class="diag-label" x="425" y="54" style="font-size:10px">Context Assembler</text></g>
+          <g data-tip="Packs retrieved turns plus the new message into the model's input"><rect class="diag-box" x="350" y="30" width="150" height="40"/><text class="diag-label" x="425" y="54" style="font-size:11px">Context Assembler</text></g>
           <path class="diag-arrow-path" d="M500,50 L535,50" marker-end="url(#cgCtxArrow)"/>
-          <g data-tip="Checks whether assembled context fits the model's token budget"><rect class="diag-box role-async" x="535" y="30" width="180" height="40"/><text class="diag-label" x="625" y="48" style="font-size:10px">Fits context window?</text><text class="diag-sublabel" x="625" y="62" style="font-size:8.5px">token budget check</text></g>
+          <g data-tip="Checks whether assembled context fits the model's token budget"><rect class="diag-box role-async" x="535" y="30" width="180" height="40"/><text class="diag-label" x="625" y="48" style="font-size:11px">Fits context window?</text><text class="diag-sublabel" x="625" y="62" style="font-size:8.5px">token budget check</text></g>
 
           <path class="diag-arrow-path" d="M625,70 L625,100" marker-end="url(#cgCtxArrow)"/>
           <text class="diag-sublabel" x="700" y="95" style="font-size:8.5px;fill:var(--accent)">yes → send as-is</text>
           <text class="diag-sublabel" x="500" y="95" style="font-size:8.5px;fill:var(--amber)">no → apply a strategy</text>
 
-          <g data-tip="Drop the oldest turns entirely to make room for the newest ones"><rect class="diag-box role-async" x="30" y="120" width="200" height="50"/><text class="diag-label" x="130" y="140" style="font-size:10px">Truncation</text><text class="diag-sublabel" x="130" y="155" style="font-size:8.5px">drop oldest turns</text></g>
-          <g data-tip="Compress older turns into a short summary, keep recent turns verbatim"><rect class="diag-box role-async" x="280" y="120" width="200" height="50"/><text class="diag-label" x="380" y="140" style="font-size:10px">Summarization</text><text class="diag-sublabel" x="380" y="155" style="font-size:8.5px">compress older turns</text></g>
-          <g data-tip="Keep only the most recent K turns, always slide forward"><rect class="diag-box role-async" x="530" y="120" width="200" height="50"/><text class="diag-label" x="630" y="140" style="font-size:10px">Sliding Window</text><text class="diag-sublabel" x="630" y="155" style="font-size:8.5px">keep last K turns</text></g>
+          <g data-tip="Drop the oldest turns entirely to make room for the newest ones"><rect class="diag-box role-async" x="30" y="120" width="200" height="50"/><text class="diag-label" x="130" y="140" style="font-size:11px">Truncation</text><text class="diag-sublabel" x="130" y="155" style="font-size:8.5px">drop oldest turns</text></g>
+          <g data-tip="Compress older turns into a short summary, keep recent turns verbatim"><rect class="diag-box role-async" x="280" y="120" width="200" height="50"/><text class="diag-label" x="380" y="140" style="font-size:11px">Summarization</text><text class="diag-sublabel" x="380" y="155" style="font-size:8.5px">compress older turns</text></g>
+          <g data-tip="Keep only the most recent K turns, always slide forward"><rect class="diag-box role-async" x="530" y="120" width="200" height="50"/><text class="diag-label" x="630" y="140" style="font-size:11px">Sliding Window</text><text class="diag-sublabel" x="630" y="155" style="font-size:8.5px">keep last K turns</text></g>
 
           <path class="diag-arrow-path" d="M130,170 L130,200" marker-end="url(#cgCtxArrow)"/>
           <path class="diag-arrow-path" d="M380,170 L380,200" marker-end="url(#cgCtxArrow)"/>
@@ -401,6 +420,7 @@
           <text class="diag-sublabel" x="380" y="215" style="font-size:8.5px;fill:var(--accent)">keeps gist, loses exact wording</text>
           <text class="diag-sublabel" x="630" y="215" style="font-size:8.5px;fill:var(--amber)">simple, but abrupt cutoff</text>
         </svg>
+        <div class="diag-legend"><div class="diag-legend-item"><span class="diag-legend-dot role-client"></span>Client / gateway</div><div class="diag-legend-item"><span class="diag-legend-dot role-db"></span>Database — source of truth</div><div class="diag-legend-item"><span class="diag-legend-dot role-async"></span>Async — queue / worker</div></div>
       </div>
       <ol class="flow-steps-list">
         <li><span>New message arrives for an existing conversation</span> — the system needs prior turns to respond coherently</li>
@@ -463,5 +483,6 @@
 
   </main>
   <script src="../../assets/nav.js"></script>
+  <script src="../../assets/mindmap.js"></script>
 </body>
 </html>

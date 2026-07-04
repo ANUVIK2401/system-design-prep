@@ -23,6 +23,14 @@
       <button class="filter-btn" data-filter="tech">Key Technologies</button>
       <button class="filter-btn" data-filter="advanced">Advanced Topics</button>
       <button class="filter-btn" data-filter="questions">Questions</button>
+      <div class="view-toggle" id="viewToggle" role="tablist" aria-label="Choose view">
+        <button type="button" class="view-toggle-btn active" data-view="grid" role="tab" aria-selected="true">Grid</button>
+        <button type="button" class="view-toggle-btn" data-view="map" role="tab" aria-selected="false">Map</button>
+      </div>
+    </div>
+
+    <div class="index-map-view" id="indexMapView" hidden>
+      <div class="index-mindmap-wrap" id="indexMindmapWrap"></div>
     </div>
 
     <div class="topic-grid" id="topicGrid">
@@ -666,6 +674,7 @@
   </main>
 
   <script src="assets/nav.js"></script>
+  <script src="assets/index-mindmap.js"></script>
   <script>
     const btns = document.querySelectorAll('.filter-btn');
     const cards = document.querySelectorAll('.topic-card');

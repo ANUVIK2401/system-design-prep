@@ -20,6 +20,23 @@
       </div>
     </header>
 
+    <section class="concept-map-section">
+      <button type="button" class="concept-map-head">
+        <span class="cm-title">Concept Map</span>
+        <span class="cm-hint">click to expand</span>
+        <svg class="cm-chevron" viewBox="0 0 16 16" width="11" height="11"><path d="M4 6l4 4 4-4" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg>
+      </button>
+      <div class="concept-map-body">
+        <div class="mindmap-wrap" data-mindmap='{"center":"Web Crawler","ring1":[
+          {"label":"URL Frontier","def":"One priority queue per domain, gated by a politeness delay","target":"step6-deepdive-frontier","ring2":[{"label":"Per-domain queues","def":"One slow site never blocks the rest"},{"label":"Politeness delay","def":"Caps request rate per domain"}]},
+          {"label":"Fetcher Worker Pool","def":"Distributed workers that actually fetch pages","target":"step4-dataflow","ring2":[{"label":"DNS Cache","def":"Avoids a lookup on every fetch"},{"label":"Robots.txt Cache","def":"Checked before a fetch is allowed"}]},
+          {"label":"Dedup / Bloom Svc","def":"Cheap membership check against billions of seen URLs","target":"step6-deepdive-bloom","ring2":[{"label":"Bloom filter","def":"Fraction of the memory of a real set"},{"label":"Gates re-entry","def":"Decides what re-enters the frontier"}]},
+          {"label":"Parser / Link Extractor","def":"Pulls new links out of fetched content","target":"step5-hld","ring2":[{"label":"Feeds itself","def":"New links flow back into the frontier"},{"label":"Content Store","def":"Write-once storage for crawled pages"}]},
+          {"label":"Recrawl Scheduler","def":"Decides how often each page deserves to be revisited","target":"step6-deepdive-recrawl","ring2":[{"label":"Change-rate aware","def":"A news homepage recrawls far more than a static page"},{"label":"Fetch budget","def":"Avoids wasting it on unchanged pages"}]}
+        ]}'></div>
+      </div>
+    </section>
+
     <div class="flash-card">
       <div class="flash-label">Say this in the first 2 minutes</div>
       <ul>
@@ -335,6 +352,7 @@
 
           <text class="diag-sublabel" x="360" y="235" style="font-size:9px">Result: 500 idle fetcher workers cannot force a fetch against a domain still inside its delay window</text>
         </svg>
+        <div class="diag-legend"><div class="diag-legend-item"><span class="diag-legend-dot role-cache"></span>Cache — hot path</div><div class="diag-legend-item"><span class="diag-legend-dot role-async"></span>Async — queue / worker</div></div>
       </div>
 
       <ol class="flow-steps-list">
@@ -358,7 +376,8 @@
         <div class="stat-card"><div class="stat-val">0.1%</div><div class="stat-label">target false-positive rate (p)</div></div>
       </div>
 
-      <p style="font-size:13px;color:#ccc;margin:0.75rem 0">Sized from the standard formulas <code>m = -(n · ln p) / (ln 2)²</code> and <code>k = (m/n) · ln 2</code>. At n=10B and p=0.1%, that's <code>m ≈ 1.44×10¹¹ bits ≈ 18GB</code> — versus roughly 640GB to store 10B full 64-byte hash-set entries. Close to a 35x memory reduction for a 1-in-1000 chance of wrongly treating a genuinely new URL as already seen.</p>
+      <p style="font-size:13px;color:#ccc;margin-bottom:0.5rem">Sized from the standard formulas <code>m = -(n · ln p) / (ln 2)²</code> and <code>k = (m/n) · ln 2</code>. At n=10B and p=0.1%, that's <code>m ≈ 1.44×10¹¹ bits ≈ 18GB</code>.</p>
+      <p style="font-size:13px;color:#ccc;margin:0 0 0.75rem">Versus roughly 640GB to store 10B full 64-byte hash-set entries — close to a 35x memory reduction for a 1-in-1000 false-positive chance.</p>
 
       <div class="diagram-wrap">
         <svg viewBox="0 0 700 190" xmlns="http://www.w3.org/2000/svg">
@@ -381,6 +400,7 @@
           <path class="diag-arrow-path" d="M540,135 L570,50" marker-end="url(#blArrow)" stroke-dasharray="3 3"/>
           <text class="diag-sublabel" x="620" y="45" style="font-size:8.5px" text-anchor="middle">false positive → push anyway</text>
         </svg>
+        <div class="diag-legend"><div class="diag-legend-item"><span class="diag-legend-dot role-client"></span>Client / gateway</div><div class="diag-legend-item"><span class="diag-legend-dot role-cache"></span>Cache — hot path</div><div class="diag-legend-item"><span class="diag-legend-dot role-db"></span>Database — source of truth</div></div>
       </div>
 
       <ol class="flow-steps-list">
@@ -415,6 +435,7 @@
           <text class="diag-sublabel" x="90" y="180" style="font-size:9px">High-change page (news homepage): next_recrawl_at = now + hours</text>
           <text class="diag-sublabel" x="480" y="180" style="font-size:9px">Low-change page (static doc): next_recrawl_at = now + weeks</text>
         </svg>
+        <div class="diag-legend"><div class="diag-legend-item"><span class="diag-legend-dot role-cache"></span>Cache — hot path</div><div class="diag-legend-item"><span class="diag-legend-dot role-db"></span>Database — source of truth</div><div class="diag-legend-item"><span class="diag-legend-dot role-async"></span>Async — queue / worker</div></div>
       </div>
 
       <ol class="flow-steps-list">
@@ -478,5 +499,6 @@
 
   </main>
   <script src="../../assets/nav.js"></script>
+  <script src="../../assets/mindmap.js"></script>
 </body>
 </html>
