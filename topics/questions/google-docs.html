@@ -4,6 +4,8 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Design Google Docs — SD Prep</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link rel="stylesheet" href="../../assets/style.css">
 </head>
 <body>
@@ -229,7 +231,11 @@
     <section id="step5-hld">
       <div class="step-pill">Step 5 of 6 — High-Level Design</div>
       <h2>High-level design</h2>
-      <p style="font-size:13px;color:#999;margin-bottom:0.75rem">The local OT engine on each client, a stateless doc service fanning out to a per-document OT server, durable revision log, snapshot/compaction worker, and a separate presence service for cursors and avatars.</p>
+      <ul style="font-size:13px;color:#999;margin:0 0 0.75rem;padding-left:1.1rem">
+        <li>Local <strong>OT engine</strong> on each client, stateless doc service in front.</li>
+        <li>One authoritative <strong>per-document OT server</strong> + durable revision log.</li>
+        <li>Snapshot/compaction worker; separate <strong>presence service</strong> for cursors.</li>
+      </ul>
 
       <div class="diagram-wrap">
         <svg viewBox="0 0 800 320" xmlns="http://www.w3.org/2000/svg">
@@ -313,7 +319,11 @@
     <section id="step6-deepdive-ot">
       <div class="step-pill">Step 6 of 6 — Deep Dives</div>
       <h2>Deep dive: Operational Transformation — the hardest diagram on this site</h2>
-      <p style="font-size:13px;color:#999;margin-bottom:0.75rem">Two users type near the same position at the same time, before either has seen the other's edit. The server must adjust — <em>transform</em> — one operation against the other so that no matter which order each client applies them locally, everyone converges to the exact same final string.</p>
+      <ul style="font-size:13px;color:#999;margin:0 0 0.75rem;padding-left:1.1rem">
+        <li>Two users type near the same position concurrently.</li>
+        <li>Server <em>transforms</em> one operation against the other.</li>
+        <li>Result: every client converges to the same final string.</li>
+      </ul>
 
       <div class="callout info"><strong>Setup:</strong> document is <code>"Hello orld"</code> (10 characters, missing the "w" in World). User A inserts <code>"W"</code> at position 6. User B, at the same instant, inserts <code>"!"</code> at position 10 (end of string). Neither has seen the other's op yet — both applied their own op locally and sent it to the server optimistically.</div>
 
@@ -400,7 +410,11 @@
 
     <section id="step6-deepdive-crdt">
       <h2>Deep dive: CRDT vs OT</h2>
-      <p style="font-size:13px;color:#999;margin-bottom:0.75rem">OT depends on a central server to pick an order and transform. CRDTs bake enough metadata into each operation that any two replicas converge mathematically, regardless of order or whether a server is even involved.</p>
+      <ul style="font-size:13px;color:#999;margin:0 0 0.75rem;padding-left:1.1rem">
+        <li><strong>OT</strong>: central server picks an order and transforms.</li>
+        <li><strong>CRDT</strong>: metadata in each op makes replicas converge mathematically.</li>
+        <li>CRDTs need no server and tolerate any delivery order.</li>
+      </ul>
 
       <div class="diagram-wrap">
         <svg viewBox="0 0 800 260" xmlns="http://www.w3.org/2000/svg">

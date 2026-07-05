@@ -4,6 +4,8 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Design a Metrics Monitoring & Alerting System — SD Prep</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link rel="stylesheet" href="../../assets/style.css">
 </head>
 <body>
@@ -374,7 +376,10 @@
 
     <section id="step6-deepdive-alerting">
       <h2>Deep dive: alerting pipeline separate from dashboards</h2>
-      <p style="font-size:13px;color:#999;margin-bottom:0.75rem">Alert evaluation reads the ingestion stream directly as it arrives — it never queries the same TSDB path dashboards use, because that path is both too slow and contended by expensive analytical queries.</p>
+      <ul style="font-size:13px;color:#999;margin:0 0 0.75rem;padding-left:1.1rem">
+        <li>Alert evaluation reads the <strong>ingestion stream</strong> directly.</li>
+        <li>Never the dashboard TSDB path — too slow, query-contended.</li>
+      </ul>
 
       <div class="diagram-wrap">
         <svg viewBox="0 0 740 230" xmlns="http://www.w3.org/2000/svg">

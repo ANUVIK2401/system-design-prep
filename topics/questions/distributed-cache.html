@@ -4,6 +4,8 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Design a Distributed Cache — SD Prep</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link rel="stylesheet" href="../../assets/style.css">
 </head>
 <body>
@@ -307,7 +309,11 @@
     <section id="step6-deepdive-ring">
       <div class="step-pill">Step 6 of 6 — Deep Dives</div>
       <h2>Deep dive: consistent hashing ring</h2>
-      <p style="font-size:13px;color:#999;margin-bottom:0.75rem">Nodes and keys both hash onto the same circular keyspace. A key is owned by the first node found moving clockwise. Virtual nodes (vnodes) spread each physical node's ownership around the ring so load stays even.</p>
+      <ul style="font-size:13px;color:#999;margin:0 0 0.75rem;padding-left:1.1rem">
+        <li>Nodes and keys hash onto the same circular keyspace.</li>
+        <li>Key owner = first node clockwise from the key.</li>
+        <li><strong>Vnodes</strong> scatter each node's ownership so load stays even.</li>
+      </ul>
 
       <div class="diagram-wrap">
         <svg viewBox="0 0 480 480" xmlns="http://www.w3.org/2000/svg">

@@ -4,6 +4,8 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Design Online Chess — SD Prep</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link rel="stylesheet" href="../../assets/style.css">
 </head>
 <body>
@@ -98,7 +100,11 @@
     <section id="step2-entities">
       <div class="step-pill">Step 2 of 6 — Core Entities</div>
       <h2>Core entities</h2>
-      <p style="font-size:13px;color:#999;margin-bottom:0.75rem">Live board state lives in Redis for sub-millisecond read/write on the hot path; player identity and rating live in Postgres for durability; every move is appended to an immutable log for replay, disputes, and post-game analysis.</p>
+      <ul style="font-size:13px;color:#999;margin:0 0 0.75rem;padding-left:1.1rem">
+        <li>Live board state → <strong>Redis</strong>, sub-millisecond hot path.</li>
+        <li>Player identity + rating → <strong>Postgres</strong>, durability.</li>
+        <li>Every move appended to an <strong>immutable log</strong> — replay, disputes, analysis.</li>
+      </ul>
 
       <div class="entity-grid">
         <div class="entity-box">
@@ -143,7 +149,11 @@
     <section id="step3-api">
       <div class="step-pill">Step 3 of 6 — API / Interface</div>
       <h2>API design</h2>
-      <p style="font-size:13px;color:#999;margin-bottom:0.75rem">Matchmaking is REST since it's a one-shot request; gameplay and spectating are both WebSockets since both are long-lived, low-latency, bidirectional-in-spirit streams — but on two separate connection pools.</p>
+      <ul style="font-size:13px;color:#999;margin:0 0 0.75rem;padding-left:1.1rem">
+        <li>Matchmaking = <strong>REST</strong> — one-shot request.</li>
+        <li>Gameplay + spectating = <strong>WebSockets</strong> — long-lived, low-latency streams.</li>
+        <li>Two <strong>separate connection pools</strong>, never shared.</li>
+      </ul>
 
       <div class="api-card">
         <div class="api-line"><span class="api-method post">POST</span><span class="api-path">/matchmaking/queue</span><span class="api-auth">Auth: required (player)</span></div>
@@ -183,7 +193,11 @@
     <section id="step4-dataflow">
       <div class="step-pill">Step 4 of 6 — Data Flow</div>
       <h2>Data flow</h2>
-      <p style="font-size:13px;color:#999;margin-bottom:0.75rem">A move write (blue) touches the game server and Redis directly; the same applied move is then fanned out to spectators (amber) through a separate broadcast layer that never talks to the authoritative game server.</p>
+      <ul style="font-size:13px;color:#999;margin:0 0 0.75rem;padding-left:1.1rem">
+        <li>Move write (blue): game server + Redis, directly.</li>
+        <li>Applied move fans out to spectators (amber) via broadcast layer.</li>
+        <li>Broadcast layer never talks to the authoritative game server.</li>
+      </ul>
 
       <div class="diagram-wrap" data-paths='{"write":{"boxes":["dw-c1","dw-gs","dw-mv","dw-redis"],"arrows":["dw1","dw2","dw3"]},"fanout":{"boxes":["dw-redis","dw-pubsub","dw-spec"],"arrows":["dw4","dw5"]}}'>
         <svg viewBox="0 0 740 220" xmlns="http://www.w3.org/2000/svg">
@@ -230,7 +244,11 @@
     <section id="step5-hld">
       <div class="step-pill">Step 5 of 6 — High-Level Design</div>
       <h2>High-level design</h2>
-      <p style="font-size:13px;color:#999;margin-bottom:0.75rem">The two players hold a sticky session against one game server instance; that server is the sole writer to the game's Redis state; matchmaking and spectator fan-out are separate services that never sit on the players' hot path.</p>
+      <ul style="font-size:13px;color:#999;margin:0 0 0.75rem;padding-left:1.1rem">
+        <li>Players hold a <strong>sticky session</strong> to one game server.</li>
+        <li>That server is the <strong>sole writer</strong> to the game's Redis state.</li>
+        <li>Matchmaking + spectator fan-out never sit on the hot path.</li>
+      </ul>
 
       <div class="diagram-wrap">
         <svg viewBox="0 0 780 320" xmlns="http://www.w3.org/2000/svg">
@@ -313,7 +331,11 @@
     <section id="step6-deepdive-movevalidation">
       <div class="step-pill">Step 6 of 6 — Deep Dives</div>
       <h2>Deep dive: move validation and delivery</h2>
-      <p style="font-size:13px;color:#999;margin-bottom:0.75rem">A move is validated once, applied once, then delivered twice — an ack to the sender and a broadcast to the opponent. If the ack is lost, the client retries with the same idempotency key rather than resubmitting a fresh move.</p>
+      <ul style="font-size:13px;color:#999;margin:0 0 0.75rem;padding-left:1.1rem">
+        <li>Validated once, applied once, delivered twice (ack + broadcast).</li>
+        <li>Lost ack → client retries with the same <strong>idempotency key</strong>.</li>
+        <li>Never resubmit as a fresh move.</li>
+      </ul>
 
       <div class="diagram-wrap">
         <svg viewBox="0 0 700 260" xmlns="http://www.w3.org/2000/svg">
@@ -401,7 +423,10 @@
 
     <section id="step6-deepdive-spectators">
       <h2>Deep dive: spectator fan-out at 1M viewers</h2>
-      <p style="font-size:13px;color:#999;margin-bottom:0.75rem">The two players' write path and the spectators' read path must never share infrastructure — a viral match with 1M viewers cannot be allowed to add latency or connection pressure to the two people actually playing.</p>
+      <ul style="font-size:13px;color:#999;margin:0 0 0.75rem;padding-left:1.1rem">
+        <li>Player write path and spectator read path <strong>never share infrastructure</strong>.</li>
+        <li>A viral 1M-viewer match must add zero latency for the players.</li>
+      </ul>
 
       <div class="diagram-wrap">
         <svg viewBox="0 0 720 260" xmlns="http://www.w3.org/2000/svg">

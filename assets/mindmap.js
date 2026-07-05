@@ -157,20 +157,56 @@
       }
     });
 
-    // Touch/iPad pan support (simple drag-to-scroll within the wrap).
+    // Touch/iPad: one-finger pan (drag-to-scroll), two-finger pinch-to-zoom, double-tap to reset.
     let isDown = false, startX = 0, startY = 0, scrollLeft = 0, scrollTop = 0;
+    let scale = 1, pinchStartDist = 0, pinchStartScale = 1, lastTapT = 0;
+    const MIN_SCALE = 0.6, MAX_SCALE = 3, DOUBLE_TAP_MS = 300;
+    svg.style.transformOrigin = 'center center';
+
+    function touchDist(e) {
+      const [a, b] = e.touches;
+      return Math.hypot(b.clientX - a.clientX, b.clientY - a.clientY);
+    }
+    function applyScale(s) {
+      scale = Math.min(MAX_SCALE, Math.max(MIN_SCALE, s));
+      svg.style.transform = scale === 1 ? '' : `scale(${scale})`;
+    }
+
     container.addEventListener('touchstart', (e) => {
+      if (e.touches.length === 2) {
+        isDown = false;
+        pinchStartDist = touchDist(e);
+        pinchStartScale = scale;
+        return;
+      }
       const t = e.touches[0];
       isDown = true; startX = t.clientX; startY = t.clientY;
       scrollLeft = container.scrollLeft; scrollTop = container.scrollTop;
     }, { passive: true });
     container.addEventListener('touchmove', (e) => {
+      if (e.touches.length === 2 && pinchStartDist > 0) {
+        applyScale(pinchStartScale * (touchDist(e) / pinchStartDist));
+        return;
+      }
       if (!isDown) return;
       const t = e.touches[0];
       container.scrollLeft = scrollLeft - (t.clientX - startX);
       container.scrollTop = scrollTop - (t.clientY - startY);
     }, { passive: true });
-    container.addEventListener('touchend', () => { isDown = false; });
+    container.addEventListener('touchend', (e) => {
+      isDown = false;
+      if (e.touches.length < 2) pinchStartDist = 0;
+      // Double-tap resets pan + zoom
+      const now = performance.now();
+      if (now - lastTapT < DOUBLE_TAP_MS && e.changedTouches.length === 1) {
+        applyScale(1);
+        container.scrollLeft = 0;
+        container.scrollTop = 0;
+        lastTapT = 0;
+        return;
+      }
+      lastTapT = now;
+    }, { passive: true });
   }
 
   // ── Collapsible "Concept Map" section wiring: starts collapsed on every page ──

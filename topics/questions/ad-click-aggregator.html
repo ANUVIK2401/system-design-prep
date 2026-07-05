@@ -4,6 +4,8 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Design an Ad Click Aggregator — SD Prep</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link rel="stylesheet" href="../../assets/style.css">
 </head>
 <body>
@@ -308,7 +310,10 @@
     <section id="step6-deepdive-exactlyonce">
       <div class="step-pill">Step 6 of 6 — Deep Dives</div>
       <h2>Deep dive: exactly-once stream aggregation</h2>
-      <p style="font-size:13px;color:#999;margin-bottom:0.75rem">Kafka only guarantees at-least-once delivery — a producer retry or consumer rebalance can redeliver the same event. Correctness comes from making the aggregation idempotent, not from eliminating redelivery.</p>
+      <ul style="font-size:13px;color:#999;margin:0 0 0.75rem;padding-left:1.1rem">
+        <li><strong>Kafka</strong> is at-least-once — retries and rebalances redeliver events.</li>
+        <li>Correctness = idempotent aggregation, not eliminating redelivery.</li>
+      </ul>
 
       <div class="diagram-wrap">
         <svg viewBox="0 0 720 230" xmlns="http://www.w3.org/2000/svg">
@@ -355,7 +360,11 @@
 
     <section id="step6-deepdive-windowing">
       <h2>Deep dive: windowed aggregation and watermarks</h2>
-      <p style="font-size:13px;color:#999;margin-bottom:0.75rem">Events are grouped into fixed 1-minute tumbling windows. A watermark tracks how far event-time has progressed, and a grace period decides how long a window stays open for stragglers before it's considered final.</p>
+      <ul style="font-size:13px;color:#999;margin:0 0 0.75rem;padding-left:1.1rem">
+        <li>Events group into fixed <strong>1-minute tumbling windows</strong>.</li>
+        <li><strong>Watermark</strong> tracks how far event-time has progressed.</li>
+        <li><strong>Grace period</strong> holds windows open for stragglers, then finalizes.</li>
+      </ul>
 
       <div class="diagram-wrap">
         <svg viewBox="0 0 740 230" xmlns="http://www.w3.org/2000/svg">
@@ -407,7 +416,11 @@
 
     <section id="step6-deepdive-reconciliation">
       <h2>Deep dive: streaming vs batch reconciliation</h2>
-      <p style="font-size:13px;color:#999;margin-bottom:0.75rem">Two paths compute the same numbers on different timelines: streaming is fast but can drift under replay, rebalance, or a dedup edge case; batch is slow but reads the immutable log directly, so it's always exact.</p>
+      <ul style="font-size:13px;color:#999;margin:0 0 0.75rem;padding-left:1.1rem">
+        <li>Two paths compute the same numbers on different timelines.</li>
+        <li><strong>Streaming</strong>: fast, but drifts under replay or dedup edge cases.</li>
+        <li><strong>Batch</strong>: slow, reads the immutable log — always exact.</li>
+      </ul>
 
       <div class="diagram-wrap">
         <svg viewBox="0 0 760 240" xmlns="http://www.w3.org/2000/svg">

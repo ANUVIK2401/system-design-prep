@@ -4,6 +4,8 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Design Facebook Post Search — SD Prep</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link rel="stylesheet" href="../../assets/style.css">
 </head>
 <body>
@@ -363,7 +365,11 @@
         <div class="flow-cmp-col miss">
           <div class="flow-cmp-title">Filter at index time</div>
           <p style="font-size:12.5px;color:#999;line-height:1.6">Each document stores a denormalized <code>visible_to</code> list computed when it's indexed. Queries filter against it directly — fast, no extra hop.</p>
-          <p style="font-size:12.5px;color:var(--amber);line-height:1.6"><strong>Risk:</strong> if a user's audience shrinks (friend removed, post switched to friends-only) after indexing, the stale <code>visible_to</code> keeps showing it to someone who should no longer see it — a real privacy leak until the next re-index event fires.</p>
+          <ul style="font-size:12.5px;color:var(--amber);line-height:1.6;margin:0;padding-left:1.1rem">
+            <li><strong>Risk:</strong> audience shrinks after indexing (unfriend, visibility change).</li>
+            <li>Stale <code>visible_to</code> keeps serving the post — privacy leak.</li>
+            <li>Leak persists until the next re-index event fires.</li>
+          </ul>
         </div>
         <div class="flow-cmp-col hit">
           <div class="flow-cmp-title">Filter at query time</div>

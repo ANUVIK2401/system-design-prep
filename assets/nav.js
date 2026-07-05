@@ -103,7 +103,7 @@
       <span>Your progress</span>
       <span class="sb-progress-count">${doneCount}/${TOPICS.length}</span>
     </div>
-    <div class="sb-progress-track"><div class="sb-progress-fill" style="width:${(doneCount / TOPICS.length) * 100}%"></div></div>
+    <div class="sb-progress-track"><div class="sb-progress-fill" style="width:0%"></div></div>
   </div>`;
 
   // ── "On this page" mini-TOC — current page's own h2 sections, active one tracked below ──
@@ -145,6 +145,14 @@
 
   sidebar.innerHTML = html;
 
+  // Animate the progress fill from 0 to its real width on every page load
+  const progressFill = sidebar.querySelector('.sb-progress-fill');
+  if (progressFill) {
+    requestAnimationFrame(() => requestAnimationFrame(() => {
+      progressFill.style.width = `${(doneCount / TOPICS.length) * 100}%`;
+    }));
+  }
+
   // ── Accordion toggle (CSS grid-rows 0fr/1fr transition, no JS height calc) ──
   sidebar.querySelectorAll('.sb-cat-head').forEach(btn => {
     btn.addEventListener('click', () => {
@@ -173,18 +181,66 @@
     overlay.classList.remove('active');
   });
 
-  // ── Scroll progress bar ──
+  // ── Scroll progress bar + scroll-to-top button (one shared passive scroll handler) ──
   const progress = document.createElement('div');
   progress.id = 'scroll-progress';
   document.body.appendChild(progress);
+
+  const scrollTopBtn = document.createElement('button');
+  scrollTopBtn.id = 'scroll-top-btn';
+  scrollTopBtn.type = 'button';
+  scrollTopBtn.setAttribute('aria-label', 'Scroll to top');
+  scrollTopBtn.innerHTML = '<svg viewBox="0 0 16 16" width="16" height="16"><path d="M8 13V3M4 7l4-4 4 4" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg>';
+  document.body.appendChild(scrollTopBtn);
+  scrollTopBtn.addEventListener('click', () => {
+    const reduce = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+    window.scrollTo({ top: 0, behavior: reduce ? 'auto' : 'smooth' });
+  });
+
+  const SCROLL_TOP_THRESHOLD = 400;
   const updateProgress = () => {
     const h = document.documentElement;
     const scrolled = h.scrollTop;
     const max = h.scrollHeight - h.clientHeight;
     progress.style.width = max > 0 ? `${(scrolled / max) * 100}%` : '0%';
+    scrollTopBtn.classList.toggle('visible', scrolled > SCROLL_TOP_THRESHOLD);
   };
   document.addEventListener('scroll', updateProgress, { passive: true });
   updateProgress();
+
+  // ── Touch: swipe right from the left edge opens the sidebar; swipe left on the open sidebar closes it ──
+  (function initSwipeNav() {
+    const SWIPE_THRESHOLD = 60;   // px of horizontal travel
+    const EDGE_ZONE = 60;         // px from left edge that can start an open-swipe
+    const MIN_VELOCITY = 0.3;     // px/ms — distinguishes a swipe from a slow scroll-drag
+    let startX = 0, startY = 0, startT = 0, tracking = false, fromEdge = false;
+
+    document.addEventListener('touchstart', (e) => {
+      if (!window.matchMedia('(max-width: 1024px)').matches) return;
+      const t = e.touches[0];
+      startX = t.clientX; startY = t.clientY; startT = performance.now();
+      fromEdge = startX <= EDGE_ZONE;
+      tracking = fromEdge || sidebar.classList.contains('open');
+    }, { passive: true });
+
+    document.addEventListener('touchend', (e) => {
+      if (!tracking) return;
+      tracking = false;
+      const t = e.changedTouches[0];
+      const dx = t.clientX - startX;
+      const dy = t.clientY - startY;
+      const dt = Math.max(performance.now() - startT, 1);
+      if (Math.abs(dx) < SWIPE_THRESHOLD || Math.abs(dy) > Math.abs(dx)) return; // vertical scroll, not a swipe
+      if (Math.abs(dx) / dt < MIN_VELOCITY) return;
+      if (dx > 0 && fromEdge && !sidebar.classList.contains('open')) {
+        sidebar.classList.add('open');
+        overlay.classList.add('active');
+      } else if (dx < 0 && sidebar.classList.contains('open')) {
+        sidebar.classList.remove('open');
+        overlay.classList.remove('active');
+      }
+    }, { passive: true });
+  })();
 
   // ── Section icons (monochrome inline SVG, 14px) ──
   const ICONS = {
@@ -200,9 +256,9 @@
   };
   const CHEVRON = '<svg class="sec-chevron" viewBox="0 0 16 16" width="11" height="11"><path d="M4 6l4 4 4-4" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg>';
 
-  // Collapse defaults: MacBook (>900px) → everything expanded (chevron still works).
-  // iPad/mobile (<=900px) → only the first section starts open; rest collapsed, user opens as they study.
-  const isNarrow = window.matchMedia('(max-width: 900px)').matches;
+  // Collapse defaults: MacBook (>1024px) → everything expanded (chevron still works).
+  // iPad/mobile (<=1024px) → only the first section (Step 1) starts open; rest collapsed, user opens as they study.
+  const isNarrow = window.matchMedia('(max-width: 1024px)').matches;
   const allSections = Array.from(document.querySelectorAll('main > section[id]'));
 
   allSections.forEach((sec, i) => {
@@ -323,8 +379,8 @@
         const route = (paths && id) ? paths[id] : null;
         wrap.classList.add('path-active');
         if (route) {
-          route.boxes.forEach(b => wrap.querySelector(`.diag-box[data-id="${b}"]`)?.classList.add('path-on'));
-          route.arrows.forEach(a => wrap.querySelector(`.diag-arrow-path[data-id="${a}"]`)?.classList.add('path-on'));
+          route.boxes.forEach(b => wrap.querySelectorAll(`.diag-box[data-id="${b}"]`).forEach(el => el.classList.add('path-on')));
+          route.arrows.forEach(a => wrap.querySelectorAll(`.diag-arrow-path[data-id="${a}"]`).forEach(el => el.classList.add('path-on')));
         } else if (diagBox) {
           diagBox.classList.add('path-on');
         }
@@ -469,8 +525,8 @@
       if (!route) return;
       box.addEventListener('mouseenter', () => {
         wrap.classList.add('path-active');
-        route.boxes.forEach(b => wrap.querySelector(`.diag-box[data-id="${b}"]`)?.classList.add('path-on'));
-        route.arrows.forEach(a => wrap.querySelector(`.diag-arrow-path[data-id="${a}"]`)?.classList.add('path-on'));
+        route.boxes.forEach(b => wrap.querySelectorAll(`.diag-box[data-id="${b}"]`).forEach(el => el.classList.add('path-on')));
+        route.arrows.forEach(a => wrap.querySelectorAll(`.diag-arrow-path[data-id="${a}"]`).forEach(el => el.classList.add('path-on')));
       });
       box.addEventListener('mouseleave', () => {
         wrap.classList.remove('path-active');
@@ -479,21 +535,34 @@
     });
   });
 
-  // ── Generic hover tooltip for any [data-tip] inside a .diagram-wrap ──
+  // ── Generic tooltip for any [data-tip] inside a .diagram-wrap: hover on desktop, long-press (500ms) on touch ──
   document.querySelectorAll('.diagram-wrap').forEach(wrap => {
     const tip = document.createElement('div');
     tip.className = 'diag-tip';
     wrap.appendChild(tip);
+    const showTip = (el) => {
+      tip.textContent = el.dataset.tip;
+      const wrapRect = wrap.getBoundingClientRect();
+      const elRect = (el.querySelector('rect,circle') || el).getBoundingClientRect();
+      tip.style.left = (elRect.left - wrapRect.left + elRect.width / 2) + 'px';
+      tip.style.top = (elRect.top - wrapRect.top) + 'px'; // anchored above the node — above the finger on touch
+      tip.classList.add('show');
+    };
     wrap.querySelectorAll('[data-tip]').forEach(el => {
-      el.addEventListener('mouseenter', (e) => {
-        tip.textContent = el.dataset.tip;
-        const wrapRect = wrap.getBoundingClientRect();
-        const elRect = (el.querySelector('rect,circle') || el).getBoundingClientRect();
-        tip.style.left = (elRect.left - wrapRect.left + elRect.width / 2) + 'px';
-        tip.style.top = (elRect.top - wrapRect.top) + 'px';
-        tip.classList.add('show');
-      });
+      el.addEventListener('mouseenter', () => showTip(el));
       el.addEventListener('mouseleave', () => tip.classList.remove('show'));
+
+      const LONG_PRESS_MS = 500;
+      let pressTimer = null;
+      el.addEventListener('touchstart', () => {
+        pressTimer = setTimeout(() => showTip(el), LONG_PRESS_MS);
+      }, { passive: true });
+      ['touchend', 'touchmove', 'touchcancel'].forEach(ev => {
+        el.addEventListener(ev, () => {
+          clearTimeout(pressTimer);
+          if (ev !== 'touchmove') setTimeout(() => tip.classList.remove('show'), ev === 'touchend' ? 1200 : 0);
+        }, { passive: true });
+      });
     });
   });
 
@@ -538,11 +607,11 @@
   // ── Global sticky step tracker: [1 REQ] → [2 ENTITIES] → ... → [6 DEEP DIVE], replaces goal-arc + per-section step-pill ──
   (function buildStepTracker() {
     const STEP_LABELS = {
-      'step1-requirements': ['1', 'Req'],
-      'step2-entities':     ['2', 'Entities'],
-      'step3-api':          ['3', 'API'],
-      'step4-dataflow':     ['4', 'Flow'],
-      'step5-hld':          ['5', 'Design'],
+      'step1-requirements': ['1', 'Req',      'REQ'],
+      'step2-entities':     ['2', 'Entities', 'ENT'],
+      'step3-api':          ['3', 'API',      'API'],
+      'step4-dataflow':     ['4', 'Flow',     'FLOW'],
+      'step5-hld':          ['5', 'Design',   'HLD'],
     };
     const stepSections = allSections.filter(sec => STEP_LABELS[sec.id] || sec.id.startsWith('step6-deepdive'));
     if (!stepSections.length) return;
@@ -554,17 +623,17 @@
       if (sec.id.startsWith('step6-deepdive')) {
         if (seen.has('step6')) return;
         seen.add('step6');
-        items.push({ id: sec.id, num: '6', label: 'Deep Dive' });
+        items.push({ id: sec.id, num: '6', label: 'Deep Dive', abbr: 'DIVE' });
       } else {
-        const [num, label] = STEP_LABELS[sec.id];
-        items.push({ id: sec.id, num, label });
+        const [num, label, abbr] = STEP_LABELS[sec.id];
+        items.push({ id: sec.id, num, label, abbr });
       }
     });
     if (items.length < 2) return; // not a 6-step framework page, skip
 
     const tracker = document.createElement('div');
     tracker.className = 'step-tracker';
-    tracker.innerHTML = items.map((it, i) => `${i > 0 ? '<span class="step-tracker-arrow">→</span>' : ''}<a class="step-tracker-item" data-tracker="${it.id}" href="#${it.id}"><span class="step-tracker-num">${it.num}</span><span class="step-tracker-label">${it.label.toUpperCase()}</span></a>`).join('');
+    tracker.innerHTML = items.map((it, i) => `${i > 0 ? '<span class="step-tracker-arrow">→</span>' : ''}<a class="step-tracker-item" data-tracker="${it.id}" href="#${it.id}"><span class="step-tracker-num">${it.num}</span><span class="step-tracker-label lbl-full">${it.label.toUpperCase()}</span><span class="step-tracker-label lbl-abbr">${it.abbr}</span></a>`).join('');
     const main = document.querySelector('main');
     const firstSection = main.querySelector('section[id]');
     main.insertBefore(tracker, firstSection);

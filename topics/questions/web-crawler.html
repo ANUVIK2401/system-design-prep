@@ -4,6 +4,8 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Design a Web Crawler — SD Prep</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link rel="stylesheet" href="../../assets/style.css">
 </head>
 <body>
@@ -142,7 +144,11 @@
     <section id="step3-api">
       <div class="step-pill">Step 3 of 6 — API / Interface</div>
       <h2>API design</h2>
-      <p style="font-size:13px;color:#999;margin-bottom:0.75rem">Two operator-facing endpoints (seed submission, page lookup), one policy lookup, and one internal claim endpoint the fetcher fleet uses to pull work — the fleet never talks to the frontier directly over a public API.</p>
+      <ul style="font-size:13px;color:#999;margin:0 0 0.75rem;padding-left:1.1rem">
+        <li>Two operator endpoints: <strong>seed submission</strong>, <strong>page lookup</strong>.</li>
+        <li>One policy lookup + one internal <strong>claim endpoint</strong> for fetchers.</li>
+        <li>The fleet never hits the frontier over a public API.</li>
+      </ul>
 
       <div class="api-card">
         <div class="api-line"><span class="api-method post">POST</span><span class="api-path">/api/v1/seeds</span><span class="api-auth">Auth: required (operator)</span></div>
@@ -415,7 +421,11 @@
 
     <section id="step6-deepdive-recrawl">
       <h2>Deep dive: recrawl scheduling and freshness</h2>
-      <p style="font-size:13px;color:#999;margin-bottom:0.75rem">Not every page deserves the same recrawl cadence — a news homepage that changes hourly and a static documentation page that hasn't changed in a year are wasting the same fetch budget if polled identically.</p>
+      <ul style="font-size:13px;color:#999;margin:0 0 0.75rem;padding-left:1.1rem">
+        <li>Pages don't deserve equal recrawl cadence.</li>
+        <li>News homepage changes hourly; static docs change yearly.</li>
+        <li>Identical polling wastes the fetch budget on both.</li>
+      </ul>
 
       <div class="diagram-wrap">
         <svg viewBox="0 0 700 200" xmlns="http://www.w3.org/2000/svg">

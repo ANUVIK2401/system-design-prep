@@ -4,6 +4,8 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Design Top-K Trending Videos (YouTube) — SD Prep</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link rel="stylesheet" href="../../assets/style.css">
 </head>
 <body>
@@ -412,7 +414,11 @@
 
     <section id="step6-deepdive-heavyhitters">
       <h2>Deep dive: heavy hitters — exact vs approximate top-K</h2>
-      <p style="font-size:13px;color:#999;margin-bottom:0.75rem">Exact top-K needs a full count per distinct video and a full sort (or a global atomic counter per video) — both fall apart at hundreds of millions of videos. Approximate top-K bounds memory to a fixed sketch size plus a fixed-size heap.</p>
+      <ul style="font-size:13px;color:#999;margin:0 0 0.75rem;padding-left:1.1rem">
+        <li><strong>Exact top-K</strong>: full count per video + full sort.</li>
+        <li>Falls apart at hundreds of millions of videos.</li>
+        <li><strong>Approximate</strong>: fixed sketch size + fixed-size heap — bounded memory.</li>
+      </ul>
 
       <div class="compare-grid">
         <div class="compare-card bad">

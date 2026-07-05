@@ -4,6 +4,8 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Design a Distributed Job Scheduler — SD Prep</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link rel="stylesheet" href="../../assets/style.css">
 </head>
 <body>
@@ -142,7 +144,10 @@
     <section id="step3-api">
       <div class="step-pill">Step 3 of 6 — API / Interface</div>
       <h2>API design</h2>
-      <p style="font-size:13px;color:#999;margin-bottom:0.75rem">Job management is plain REST — creation, inspection, and deletion are low-frequency, latency-tolerant operations. The interesting guarantees live behind the scenes in dispatch, not in this API surface.</p>
+      <ul style="font-size:13px;color:#999;margin:0 0 0.75rem;padding-left:1.1rem">
+        <li>Job management is plain <strong>REST</strong> — low-frequency, latency-tolerant.</li>
+        <li>The interesting guarantees live in dispatch, not this API surface.</li>
+      </ul>
 
       <div class="api-card">
         <div class="api-line"><span class="api-method post">POST</span><span class="api-path">/api/v1/jobs</span><span class="api-auth">Auth: required (service)</span></div>
@@ -366,7 +371,10 @@
 
     <section id="step6-deepdive-dispatch">
       <h2>Deep dive: exactly-once dispatch via conditional claim</h2>
-      <p style="font-size:13px;color:#999;margin-bottom:0.75rem">Even with leader election, a brief dual-leader window can happen during failover (the old leader hasn't noticed its lease lapsed yet). The real double-dispatch guard is a compare-and-swap claim on the job row itself.</p>
+      <ul style="font-size:13px;color:#999;margin:0 0 0.75rem;padding-left:1.1rem">
+        <li>Failover can briefly produce <strong>two leaders</strong> (lapsed lease unnoticed).</li>
+        <li>Real guard: <strong>compare-and-swap claim</strong> on the job row itself.</li>
+      </ul>
 
       <div class="diagram-wrap">
         <svg viewBox="0 0 720 260" xmlns="http://www.w3.org/2000/svg">
@@ -412,7 +420,11 @@
 
     <section id="step6-deepdive-catchup">
       <h2>Deep dive: scheduler drift and catch-up</h2>
-      <p style="font-size:13px;color:#999;margin-bottom:0.75rem">If the entire scheduler tier is down for an extended window, jobs accumulate a backlog of missed runs. The durable next_run_time index means catch-up never replays full history — just decides a policy for what's overdue.</p>
+      <ul style="font-size:13px;color:#999;margin:0 0 0.75rem;padding-left:1.1rem">
+        <li>Extended scheduler outage → backlog of missed runs.</li>
+        <li>Durable <code>next_run_time</code> index means no full-history replay.</li>
+        <li>Catch-up is just a policy decision for what's overdue.</li>
+      </ul>
 
       <div class="diagram-wrap">
         <svg viewBox="0 0 740 260" xmlns="http://www.w3.org/2000/svg">

@@ -4,6 +4,8 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Design a Rate Limiter — SD Prep</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link rel="stylesheet" href="../../assets/style.css">
 </head>
 <body>
@@ -402,7 +404,14 @@
         </div>
       </div>
 
-      <p style="font-size:13px;color:#999;margin:0.75rem 0">Implementation: a Redis sorted set per identifier, score = request timestamp. Each check does <code>ZREMRANGEBYSCORE</code> (drop entries older than the window) then <code>ZCARD</code> (count what's left) then <code>ZADD</code> (record this request) — all in one Lua script for atomicity. Cost: O(log n) per op and one sorted-set entry per request in the window, vs a single integer for fixed window — real memory tradeoff at high per-user limits.</p>
+      <ul style="font-size:13px;color:#999;margin:0.75rem 0;padding-left:1.1rem">
+        <li>One Redis <strong>sorted set</strong> per identifier, score = request timestamp.</li>
+        <li><code>ZREMRANGEBYSCORE</code> drops entries older than the window.</li>
+        <li><code>ZCARD</code> counts survivors; <code>ZADD</code> records this request.</li>
+        <li>All three in one <strong>Lua script</strong> for atomicity.</li>
+        <li>Cost: O(log n) per op, one entry per request.</li>
+        <li>Fixed window is a single integer — real memory tradeoff.</li>
+      </ul>
 
       <table class="grid-table">
         <thead><tr><th>Scenario</th><th>User impact</th><th>Detection signal</th><th>Mitigation</th></tr></thead>
