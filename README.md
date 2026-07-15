@@ -1,6 +1,10 @@
 # System Design Prep
 
-### **[→ Open the live site](https://anuvik2401.github.io/system-design-prep/)**
+### 🔗 Live site: **[anuvik2401.github.io/system-design-prep](https://anuvik2401.github.io/system-design-prep/)**
+
+```
+https://anuvik2401.github.io/system-design-prep/
+```
 
 A self-contained system design interview prep site — no fluff, no theory for theory's sake. 57 pages: 6 foundation pages, 7 core patterns, 9 key technologies, 4 advanced topics, and 30 full question breakdowns (Uber, WhatsApp, Google Docs, rate limiter, and more), each walked through requirements → entities → API → data flow → high-level design → deep dive, with interview moves you can say out loud.
 
