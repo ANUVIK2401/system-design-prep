@@ -18,7 +18,11 @@
   --purple:   #c084fc;
   --cyan:     #67e8f9;
   --white:    #e2e8f0;
-  --sidebar:  240px;
+  --sidebar:  clamp(220px, 17vw, 320px);
+  /* Reading measure of the content column. Scales with viewport so a 27" display
+     doesn't leave a 1000px void to the right of an 800px-locked column. */
+  --measure:  clamp(720px, 68vw, 1320px);
+  --gutter:   clamp(1.25rem, 3.2vw, 4rem);
 }
 
 html { scroll-behavior: smooth; }
@@ -251,12 +255,18 @@ body {
 
 /* ── Main ── */
 main {
-  flex: 1;
-  max-width: 800px;
-  padding: 2.5rem 3rem 4rem;
+  flex: 1 1 auto;
+  /* flex:1 + a hard max-width left the leftover track empty; centering the column
+     inside the full remaining width keeps wide displays balanced. */
+  width: 100%;
+  max-width: none;
+  padding: 2.5rem var(--gutter) 4rem;
   min-width: 0;
 }
-main p { max-width: 68ch; }
+main > * { max-width: var(--measure); margin-inline: auto; }
+/* Prose stays at a readable measure even when the column is wide; diagrams,
+   grids and tables get the full column. */
+main p, main li { max-width: min(72ch, 100%); }
 
 /* ── Page header ── */
 .page-head { margin-bottom: 2rem; }
@@ -476,11 +486,22 @@ section.collapsed .sec-body {
   border-radius: 10px;
   padding: 1.25rem;
   margin-bottom: 1.25rem;
-  min-height: 280px;
-  overflow-x: auto;
+  touch-action: manipulation;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+}
+/* No min-height: a 760x110 viewBox scaled to a 1080px column is only ~156px tall,
+   so a fixed 280px floor left dead gridded space under every wide diagram.
+   max-width caps upscaling so short-aspect diagrams don't blow out on a 27" display. */
+.diagram-wrap svg {
+  display: block;
+  width: 100%;
+  max-width: 900px;
+  margin-inline: auto;
+  height: auto;
   touch-action: manipulation;
 }
-.diagram-wrap svg { display: block; min-width: 480px; width: 100%; height: auto; touch-action: manipulation; }
 .diag-box {
   fill: var(--surface2);
   stroke: var(--border2);
@@ -937,6 +958,11 @@ code {
   z-index: 99;
 }
 
+/* ── Responsive: small laptop + iPad landscape (sidebar stays persistent) ── */
+@media (max-width: 1400px) and (min-width: 1025px) {
+  :root { --measure: clamp(680px, 74vw, 900px); --gutter: clamp(1.5rem, 3vw, 2.5rem); }
+}
+
 /* ── Responsive: iPad + phone (sidebar becomes overlay drawer) ── */
 @media (max-width: 1024px) {
   body { display: block; font-size: 15px; }
@@ -953,14 +979,15 @@ code {
   #sidebar.open { left: 0; }
   .sb-overlay.active { display: block; }
   #hamburger { display: flex; }
-  main { padding: 4rem 1.25rem 3rem; max-width: 100%; }
+  main { padding: 4rem 1.25rem 3rem; }
+  main > * { max-width: 100%; }
   .compare-grid { grid-template-columns: 1fr; }
   .entity-grid { grid-template-columns: 1fr; }
   .stat-grid { grid-template-columns: repeat(2, 1fr); }
   .stat-val { font-size: 32px; }
   .flow { gap: 4px; }
   .diagram-wrap { padding: 0.85rem; -webkit-overflow-scrolling: touch; }
-  .diagram-wrap svg { min-width: 0; }
+  .diagram-wrap svg { max-width: none; }
   .diag-label { font-size: 10.5px; }
   .diag-sublabel { font-size: 8.5px; }
   .latency-name { width: 92px; font-size: 11px; }
@@ -1045,7 +1072,7 @@ code {
   transition: opacity 0.12s ease, transform 0.12s ease;
 }
 .diag-tip.show { opacity: 1; transform: translate(-50%, -10px); }
-.diagram-wrap { position: relative; overflow: hidden; }
+.diagram-wrap { position: relative; overflow: visible; }
 
 /* ── Slide-in component detail panel (click a diagram box) ── */
 .diag-detail-panel {
