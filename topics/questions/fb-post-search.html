@@ -7,7 +7,7 @@
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link rel="stylesheet" href="../../assets/style.css">
-        <!-- site-head -->
+          <!-- site-head -->
   <meta name="description" content="Tests whether you can build a near-real-time search index while enforcing per-viewer privacy — the hard part isn&#x27;t full-text search, it&#x27;s never showing a post to someone who can&#x27;t see it.">
   <meta name="theme-color" content="#0B1F3F">
   <link rel="canonical" href="https://anuvik2401.github.io/system-design-prep/topics/questions/fb-post-search.html">
@@ -112,7 +112,7 @@
     <section id="step2-entities">
       <div class="step-pill">Step 2 of 6 — Core Entities</div>
       <h2>Core entities</h2>
-      <p style="font-size:13px;color:#4A5873;margin-bottom:0.75rem">Three entities: the source-of-truth post, the search-optimized index entry, and the privacy scope that gates every query.</p>
+      <p style="font-size:15.5px;color:#0F1114;margin-bottom:0.75rem">Three entities: the source-of-truth post, the search-optimized index entry, and the privacy scope that gates every query.</p>
 
       <div class="entity-grid">
         <div class="entity-box">
@@ -156,7 +156,7 @@
     <section id="step3-api">
       <div class="step-pill">Step 3 of 6 — API / Interface</div>
       <h2>API design</h2>
-      <p style="font-size:13px;color:#4A5873;margin-bottom:0.75rem">Three endpoints — create, search, and delete. Indexing itself is never a direct API call; it's driven by events.</p>
+      <p style="font-size:15.5px;color:#0F1114;margin-bottom:0.75rem">Three endpoints — create, search, and delete. Indexing itself is never a direct API call; it's driven by events.</p>
 
       <div class="api-card">
         <div class="api-line"><span class="api-method post">POST</span><span class="api-path">/api/v1/posts</span><span class="api-auth">Auth: required</span></div>
@@ -194,7 +194,7 @@
     <section id="step4-dataflow">
       <div class="step-pill">Step 4 of 6 — Data Flow</div>
       <h2>Data flow</h2>
-      <p style="font-size:13px;color:#4A5873;margin-bottom:0.75rem">Write path (blue) — post created and streamed to the indexer — and read path (mint) — a search query filtered by privacy before ranking.</p>
+      <p style="font-size:15.5px;color:#0F1114;margin-bottom:0.75rem">Write path (blue) — post created and streamed to the indexer — and read path (mint) — a search query filtered by privacy before ranking.</p>
 
       <div class="diagram-wrap" data-paths='{"write":{"boxes":["w-client","w-svc","w-db","w-kafka","w-worker","w-es"],"arrows":["w1","w2","w3","w4","w5"]},"read":{"boxes":["r-client","r-svc","r-privacy","r-es"],"arrows":["r1","r2","r3"]}}'>
         <svg viewBox="0 0 740 220" xmlns="http://www.w3.org/2000/svg">
@@ -249,7 +249,7 @@
     <section id="step5-hld">
       <div class="step-pill">Step 5 of 6 — High-Level Design</div>
       <h2>High-level design</h2>
-      <p style="font-size:13px;color:#4A5873;margin-bottom:0.75rem">Full system: post creation, the async indexing pipeline, and privacy-filtered search together with every supporting component.</p>
+      <p style="font-size:15.5px;color:#0F1114;margin-bottom:0.75rem">Full system: post creation, the async indexing pipeline, and privacy-filtered search together with every supporting component.</p>
 
       <div class="diagram-wrap">
         <svg viewBox="0 0 780 300" xmlns="http://www.w3.org/2000/svg">
@@ -331,7 +331,7 @@
     <section id="step6-deepdive-invindex">
       <div class="step-pill">Step 6 of 6 — Deep Dives</div>
       <h2>Deep dive: the inverted index</h2>
-      <p style="font-size:13px;color:#4A5873;margin-bottom:0.75rem">The data structure that makes "find every post containing this word" fast instead of a full scan across 10B rows.</p>
+      <p style="font-size:15.5px;color:#0F1114;margin-bottom:0.75rem">The data structure that makes "find every post containing this word" fast instead of a full scan across 10B rows.</p>
 
       <div class="diagram-wrap">
         <svg viewBox="0 0 700 210" xmlns="http://www.w3.org/2000/svg">
@@ -371,12 +371,12 @@
 
     <section id="step6-deepdive-privacy">
       <h2>Deep dive: privacy filtering — index time vs query time</h2>
-      <p style="font-size:13px;color:#4A5873;margin-bottom:0.75rem">Where you enforce "who can see this post" changes the entire correctness/latency tradeoff of the system.</p>
+      <p style="font-size:15.5px;color:#0F1114;margin-bottom:0.75rem">Where you enforce "who can see this post" changes the entire correctness/latency tradeoff of the system.</p>
 
       <div class="flow-cmp-grid">
         <div class="flow-cmp-col miss">
           <div class="flow-cmp-title">Filter at index time</div>
-          <p style="font-size:12.5px;color:#4A5873;line-height:1.6">Each document stores a denormalized <code>visible_to</code> list computed when it's indexed. Queries filter against it directly — fast, no extra hop.</p>
+          <p style="font-size:15.5px;color:#0F1114;line-height:1.6">Each document stores a denormalized <code>visible_to</code> list computed when it's indexed. Queries filter against it directly — fast, no extra hop.</p>
           <ul style="font-size:12.5px;color:var(--amber);line-height:1.6;margin:0;padding-left:1.1rem">
             <li><strong>Risk:</strong> audience shrinks after indexing (unfriend, visibility change).</li>
             <li>Stale <code>visible_to</code> keeps serving the post — privacy leak.</li>
@@ -385,7 +385,7 @@
         </div>
         <div class="flow-cmp-col hit">
           <div class="flow-cmp-title">Filter at query time</div>
-          <p style="font-size:12.5px;color:#4A5873;line-height:1.6">Every search resolves the viewer's live audience (friend/block sets) and intersects it with matched posts at query time — always reflects the current ACL state.</p>
+          <p style="font-size:15.5px;color:#0F1114;line-height:1.6">Every search resolves the viewer's live audience (friend/block sets) and intersects it with matched posts at query time — always reflects the current ACL state.</p>
           <p style="font-size:12.5px;color:var(--accent);line-height:1.6"><strong>Cost:</strong> an extra Redis (or graph-DB) round trip per query, and the intersection itself adds compute versus a pre-baked field. This is the safer default for a "zero leaks" requirement.</p>
         </div>
       </div>

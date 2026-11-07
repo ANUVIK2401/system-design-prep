@@ -7,7 +7,7 @@
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link rel="stylesheet" href="../../assets/style.css">
-        <!-- site-head -->
+          <!-- site-head -->
   <meta name="description" content="Tests whether you treat recommendation as a geospatial + preference filter problem — narrow a city down to a few hundred candidates before any ranking model ever runs.">
   <meta name="theme-color" content="#0B1F3F">
   <link rel="canonical" href="https://anuvik2401.github.io/system-design-prep/topics/questions/tinder.html">
@@ -112,7 +112,7 @@
     <section id="step2-entities">
       <div class="step-pill">Step 2 of 6 — Core Entities</div>
       <h2>Core entities</h2>
-      <p style="font-size:13px;color:#4A5873;margin-bottom:0.75rem">Profile data is relational, location is geospatial, swipes are an append-heavy log — three access patterns, three stores.</p>
+      <p style="font-size:15.5px;color:#0F1114;margin-bottom:0.75rem">Profile data is relational, location is geospatial, swipes are an append-heavy log — three access patterns, three stores.</p>
 
       <div class="entity-grid">
         <div class="entity-box">
@@ -164,7 +164,7 @@
     <section id="step3-api">
       <div class="step-pill">Step 3 of 6 — API / Interface</div>
       <h2>API design</h2>
-      <p style="font-size:13px;color:#4A5873;margin-bottom:0.75rem">Deck fetch and swipe are REST; match notifications push over a persistent connection since a match must reach both users instantly.</p>
+      <p style="font-size:15.5px;color:#0F1114;margin-bottom:0.75rem">Deck fetch and swipe are REST; match notifications push over a persistent connection since a match must reach both users instantly.</p>
 
       <div class="api-card">
         <div class="api-line"><span class="api-method get">GET</span><span class="api-path">/api/v1/deck</span><span class="api-auth">Auth: required</span></div>
@@ -204,7 +204,7 @@
     <section id="step4-dataflow">
       <div class="step-pill">Step 4 of 6 — Data Flow</div>
       <h2>Data flow</h2>
-      <p style="font-size:13px;color:#4A5873;margin-bottom:0.75rem">Deck read path (mint) pulls from a precomputed candidate cache; swipe write path (blue) records the action and checks for a match inline.</p>
+      <p style="font-size:15.5px;color:#0F1114;margin-bottom:0.75rem">Deck read path (mint) pulls from a precomputed candidate cache; swipe write path (blue) records the action and checks for a match inline.</p>
 
       <div class="diagram-wrap" data-paths='{"read":{"boxes":["r-client","r-svc","r-cache","r-geo"],"arrows":["r1","r2","r3"]},"write":{"boxes":["w-client","w-svc","w-cass","w-match"],"arrows":["w1","w2","w3"]}}'>
         <svg viewBox="0 0 740 220" xmlns="http://www.w3.org/2000/svg">
@@ -252,7 +252,7 @@
     <section id="step5-hld">
       <div class="step-pill">Step 5 of 6 — High-Level Design</div>
       <h2>High-level design</h2>
-      <p style="font-size:13px;color:#4A5873;margin-bottom:0.75rem">Full system: deck serving, swipe/match, and the offline recommendation pipeline that fills the candidate cache.</p>
+      <p style="font-size:15.5px;color:#0F1114;margin-bottom:0.75rem">Full system: deck serving, swipe/match, and the offline recommendation pipeline that fills the candidate cache.</p>
 
       <div class="diagram-wrap">
         <svg viewBox="0 0 780 300" xmlns="http://www.w3.org/2000/svg">
@@ -335,7 +335,7 @@
     <section id="step6-deepdive-geohash">
       <div class="step-pill">Step 6 of 6 — Deep Dives</div>
       <h2>Deep dive: geo-filter before you rank</h2>
-      <p style="font-size:13px;color:#4A5873;margin-bottom:0.75rem">A city is divided into geohash cells. Candidate discovery filters by cell first, shrinking the pool to a few hundred rows — only then does a ranking model run.</p>
+      <p style="font-size:15.5px;color:#0F1114;margin-bottom:0.75rem">A city is divided into geohash cells. Candidate discovery filters by cell first, shrinking the pool to a few hundred rows — only then does a ranking model run.</p>
       <div class="diagram-wrap">
         <svg viewBox="0 0 480 320" xmlns="http://www.w3.org/2000/svg" id="tinderGeohashGrid">
           <defs><marker id="tinderGeoArrow" markerWidth="8" markerHeight="8" refX="6" refY="3" orient="auto"><path d="M0,0 L6,3 L0,6 Z" fill="var(--accent)"/></marker></defs>
@@ -428,7 +428,7 @@
 
     <section id="step6-deepdive-statemachine">
       <h2>Deep dive: swipe state machine and match race</h2>
-      <p style="font-size:13px;color:#4A5873;margin-bottom:0.75rem">Every profile a user sees moves through seen → liked/passed, and a match only fires when both directions resolve to "liked."</p>
+      <p style="font-size:15.5px;color:#0F1114;margin-bottom:0.75rem">Every profile a user sees moves through seen → liked/passed, and a match only fires when both directions resolve to "liked."</p>
       <div class="diagram-wrap">
         <svg viewBox="0 0 700 200" xmlns="http://www.w3.org/2000/svg">
           <defs>

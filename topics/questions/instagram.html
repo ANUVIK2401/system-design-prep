@@ -7,7 +7,7 @@
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link rel="stylesheet" href="../../assets/style.css">
-        <!-- site-head -->
+          <!-- site-head -->
   <meta name="description" content="Tests whether you split photo storage (write-once, read-many blob storage) from feed generation (a fan-out problem) instead of treating &quot;Instagram&quot; as one monolithic system.">
   <meta name="theme-color" content="#0B1F3F">
   <link rel="canonical" href="https://anuvik2401.github.io/system-design-prep/topics/questions/instagram.html">
@@ -112,7 +112,7 @@
     <section id="step2-entities">
       <div class="step-pill">Step 2 of 6 — Core Entities</div>
       <h2>Core entities</h2>
-      <p style="font-size:13px;color:#4A5873;margin-bottom:0.75rem">The photo blob and its metadata are split across two stores; the follow graph lives in a wide-column store built for adjacency lookups; the feed itself is a precomputed cache, not a live query.</p>
+      <p style="font-size:15.5px;color:#0F1114;margin-bottom:0.75rem">The photo blob and its metadata are split across two stores; the follow graph lives in a wide-column store built for adjacency lookups; the feed itself is a precomputed cache, not a live query.</p>
 
       <div class="entity-grid">
         <div class="entity-box">
@@ -156,7 +156,7 @@
     <section id="step3-api">
       <div class="step-pill">Step 3 of 6 — API / Interface</div>
       <h2>API design</h2>
-      <p style="font-size:13px;color:#4A5873;margin-bottom:0.75rem">Upload is a REST call that returns immediately — heavy lifting (thumbnailing, fan-out) happens after the response, off a queue.</p>
+      <p style="font-size:15.5px;color:#0F1114;margin-bottom:0.75rem">Upload is a REST call that returns immediately — heavy lifting (thumbnailing, fan-out) happens after the response, off a queue.</p>
 
       <div class="api-card">
         <div class="api-line"><span class="api-method post">POST</span><span class="api-path">/api/v1/photos</span><span class="api-auth">Auth: required</span></div>
@@ -196,7 +196,7 @@
     <section id="step4-dataflow">
       <div class="step-pill">Step 4 of 6 — Data Flow</div>
       <h2>Data flow</h2>
-      <p style="font-size:13px;color:#4A5873;margin-bottom:0.75rem">Upload writes (blue) hit S3 synchronously then hand off to async workers (amber); feed reads (mint) hit the precomputed feed cache, never the follow graph directly.</p>
+      <p style="font-size:15.5px;color:#0F1114;margin-bottom:0.75rem">Upload writes (blue) hit S3 synchronously then hand off to async workers (amber); feed reads (mint) hit the precomputed feed cache, never the follow graph directly.</p>
 
       <div class="diagram-wrap" data-paths='{"upload":{"boxes":["u-client","u-svc","u-s3","u-queue","u-thumb","u-cdn"],"arrows":["u1","u2","u3","u4","u5"]},"feed":{"boxes":["f-client","f-feedsvc","f-cache"],"arrows":["f1","f2"]}}'>
         <svg viewBox="0 0 760 240" xmlns="http://www.w3.org/2000/svg">
@@ -256,7 +256,7 @@
     <section id="step5-hld">
       <div class="step-pill">Step 5 of 6 — High-Level Design</div>
       <h2>High-level design</h2>
-      <p style="font-size:13px;color:#4A5873;margin-bottom:0.75rem">Upload path (top), feed generation path (middle), and follow graph (bottom) as three largely independent subsystems joined only at fan-out time.</p>
+      <p style="font-size:15.5px;color:#0F1114;margin-bottom:0.75rem">Upload path (top), feed generation path (middle), and follow graph (bottom) as three largely independent subsystems joined only at fan-out time.</p>
 
       <div class="diagram-wrap">
         <svg viewBox="0 0 800 340" xmlns="http://www.w3.org/2000/svg">
@@ -348,7 +348,7 @@
     <section id="step6-deepdive-upload">
       <div class="step-pill">Step 6 of 6 — Deep Dives</div>
       <h2>Deep dive: photo upload pipeline</h2>
-      <p style="font-size:13px;color:#4A5873;margin-bottom:0.75rem">The upload call is synchronous only up to the S3 write. Everything after that — thumbnailing, CDN propagation — is async, off a queue, and invisible to the client's latency budget.</p>
+      <p style="font-size:15.5px;color:#0F1114;margin-bottom:0.75rem">The upload call is synchronous only up to the S3 write. Everything after that — thumbnailing, CDN propagation — is async, off a queue, and invisible to the client's latency budget.</p>
 
       <div class="diagram-wrap">
         <svg viewBox="0 0 700 260" xmlns="http://www.w3.org/2000/svg">
@@ -410,7 +410,7 @@
 
     <section id="step6-deepdive-feedfanout">
       <h2>Deep dive: feed generation — push vs pull hybrid</h2>
-      <p style="font-size:13px;color:#4A5873;margin-bottom:0.75rem">Same pattern as the Facebook News Feed problem: fan-out-on-write for normal users, fan-out-on-read for celebrity accounts, merged at serve time.</p>
+      <p style="font-size:15.5px;color:#0F1114;margin-bottom:0.75rem">Same pattern as the Facebook News Feed problem: fan-out-on-write for normal users, fan-out-on-read for celebrity accounts, merged at serve time.</p>
 
       <div class="diagram-wrap">
         <svg viewBox="0 0 720 260" xmlns="http://www.w3.org/2000/svg">
@@ -461,7 +461,7 @@
 
     <section id="step6-deepdive-followgraph">
       <h2>Deep dive: follow graph storage</h2>
-      <p style="font-size:13px;color:#4A5873;margin-bottom:0.75rem">Modeled as an adjacency list in a wide-column store, not a relational join table — because the only query that matters at billions of edges is a fast single-partition lookup.</p>
+      <p style="font-size:15.5px;color:#0F1114;margin-bottom:0.75rem">Modeled as an adjacency list in a wide-column store, not a relational join table — because the only query that matters at billions of edges is a fast single-partition lookup.</p>
 
       <div class="diagram-wrap">
         <svg viewBox="0 0 640 220" xmlns="http://www.w3.org/2000/svg">

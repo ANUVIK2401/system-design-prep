@@ -7,7 +7,7 @@
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link rel="stylesheet" href="../../assets/style.css">
-        <!-- site-head -->
+          <!-- site-head -->
   <meta name="description" content="Tests whether you can fan a single comment out to millions of concurrent viewers in under a second — this is pub/sub at extreme scale, not a CRUD comments feature.">
   <meta name="theme-color" content="#0B1F3F">
   <link rel="canonical" href="https://anuvik2401.github.io/system-design-prep/topics/questions/fb-live-comments.html">
@@ -112,7 +112,7 @@
     <section id="step2-entities">
       <div class="step-pill">Step 2 of 6 — Core Entities</div>
       <h2>Core entities</h2>
-      <p style="font-size:13px;color:#4A5873;margin-bottom:0.75rem">Three entities across two stores, split by access pattern — durable comment history is a different shape than in-memory viewer routing.</p>
+      <p style="font-size:15.5px;color:#0F1114;margin-bottom:0.75rem">Three entities across two stores, split by access pattern — durable comment history is a different shape than in-memory viewer routing.</p>
 
       <div class="entity-grid">
         <div class="entity-box">
@@ -155,7 +155,7 @@
     <section id="step3-api">
       <div class="step-pill">Step 3 of 6 — API / Interface</div>
       <h2>API design</h2>
-      <p style="font-size:13px;color:#4A5873;margin-bottom:0.75rem">Posting a comment and joining a stream are REST; the live comment feed itself pushes over a persistent WebSocket — polling can't hit sub-second fan-out at this scale.</p>
+      <p style="font-size:15.5px;color:#0F1114;margin-bottom:0.75rem">Posting a comment and joining a stream are REST; the live comment feed itself pushes over a persistent WebSocket — polling can't hit sub-second fan-out at this scale.</p>
 
       <div class="api-card">
         <div class="api-line"><span class="api-method post">POST</span><span class="api-path">/api/v1/streams/{stream_id}/comments</span><span class="api-auth">Auth: required</span></div>
@@ -193,7 +193,7 @@
     <section id="step4-dataflow">
       <div class="step-pill">Step 4 of 6 — Data Flow</div>
       <h2>Data flow</h2>
-      <p style="font-size:13px;color:#4A5873;margin-bottom:0.75rem">Write path (blue) — post a comment. Read/fan-out path (mint) — that comment delivered to every viewer's open socket.</p>
+      <p style="font-size:15.5px;color:#0F1114;margin-bottom:0.75rem">Write path (blue) — post a comment. Read/fan-out path (mint) — that comment delivered to every viewer's open socket.</p>
 
       <div class="diagram-wrap" data-paths='{"write":{"boxes":["w-client","w-ingest","w-kafka","w-store"],"arrows":["w1","w2","w3"]},"read":{"boxes":["r-kafka","r-fanout","r-conn","r-viewer"],"arrows":["r1","r2","r3"]}}'>
         <svg viewBox="0 0 740 220" xmlns="http://www.w3.org/2000/svg">
@@ -244,7 +244,7 @@
     <section id="step5-hld">
       <div class="step-pill">Step 5 of 6 — High-Level Design</div>
       <h2>High-level design</h2>
-      <p style="font-size:13px;color:#4A5873;margin-bottom:0.75rem">Full system: ingestion, ordered fan-out, and the connection server pool that actually holds the millions of open sockets.</p>
+      <p style="font-size:15.5px;color:#0F1114;margin-bottom:0.75rem">Full system: ingestion, ordered fan-out, and the connection server pool that actually holds the millions of open sockets.</p>
 
       <div class="diagram-wrap">
         <svg viewBox="0 0 780 300" xmlns="http://www.w3.org/2000/svg">
@@ -331,7 +331,7 @@
     <section id="step6-deepdive-connservers">
       <div class="step-pill">Step 6 of 6 — Deep Dives</div>
       <h2>Deep dive: connection server architecture</h2>
-      <p style="font-size:13px;color:#4A5873;margin-bottom:0.75rem">Millions of long-lived WebSockets can't live on one box — the pool is sharded, and Redis is the map from stream to shard.</p>
+      <p style="font-size:15.5px;color:#0F1114;margin-bottom:0.75rem">Millions of long-lived WebSockets can't live on one box — the pool is sharded, and Redis is the map from stream to shard.</p>
 
       <div class="diagram-wrap">
         <svg viewBox="0 0 740 220" xmlns="http://www.w3.org/2000/svg">
@@ -377,7 +377,7 @@
 
     <section id="step6-deepdive-partitioning">
       <h2>Deep dive: Kafka partition strategy</h2>
-      <p style="font-size:13px;color:#4A5873;margin-bottom:0.75rem">Partitioning by stream_id is what makes "every viewer sees comments in the same order" possible without a distributed sort.</p>
+      <p style="font-size:15.5px;color:#0F1114;margin-bottom:0.75rem">Partitioning by stream_id is what makes "every viewer sees comments in the same order" possible without a distributed sort.</p>
 
       <div class="diagram-wrap">
         <svg viewBox="0 0 740 200" xmlns="http://www.w3.org/2000/svg">

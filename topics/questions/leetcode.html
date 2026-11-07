@@ -7,7 +7,7 @@
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link rel="stylesheet" href="../../assets/style.css">
-        <!-- site-head -->
+          <!-- site-head -->
   <meta name="description" content="Tests whether you can safely run untrusted user code at scale — sandboxing is the actual system design problem, the CRUD around it is a distraction.">
   <meta name="theme-color" content="#0B1F3F">
   <link rel="canonical" href="https://anuvik2401.github.io/system-design-prep/topics/questions/leetcode.html">
@@ -112,7 +112,7 @@
     <section id="step2-entities">
       <div class="step-pill">Step 2 of 6 — Core Entities</div>
       <h2>Core entities</h2>
-      <p style="font-size:13px;color:#4A5873;margin-bottom:0.75rem">Four entities — problem definition is relatively static and relational; submissions and their per-test-case results are high-write and split by access pattern.</p>
+      <p style="font-size:15.5px;color:#0F1114;margin-bottom:0.75rem">Four entities — problem definition is relatively static and relational; submissions and their per-test-case results are high-write and split by access pattern.</p>
 
       <div class="entity-grid">
         <div class="entity-box">
@@ -168,7 +168,7 @@
     <section id="step3-api">
       <div class="step-pill">Step 3 of 6 — API / Interface</div>
       <h2>API design</h2>
-      <p style="font-size:13px;color:#4A5873;margin-bottom:0.75rem">Submit and fetch-problem are REST; live grading status is a WebSocket push — polling for a job that takes seconds wastes both client and server cycles.</p>
+      <p style="font-size:15.5px;color:#0F1114;margin-bottom:0.75rem">Submit and fetch-problem are REST; live grading status is a WebSocket push — polling for a job that takes seconds wastes both client and server cycles.</p>
 
       <div class="api-card">
         <div class="api-line"><span class="api-method get">GET</span><span class="api-path">/api/v1/problems/{problem_id}</span><span class="api-auth">Auth: optional</span></div>
@@ -208,7 +208,7 @@
     <section id="step4-dataflow">
       <div class="step-pill">Step 4 of 6 — Data Flow</div>
       <h2>Data flow</h2>
-      <p style="font-size:13px;color:#4A5873;margin-bottom:0.75rem">Write path (blue) queues the job and returns immediately; read path (mint) is the async judge execution that pushes results back over the open socket.</p>
+      <p style="font-size:15.5px;color:#0F1114;margin-bottom:0.75rem">Write path (blue) queues the job and returns immediately; read path (mint) is the async judge execution that pushes results back over the open socket.</p>
 
       <div class="diagram-wrap" data-paths='{"write":{"boxes":["w-client","w-svc","w-s3","w-queue"],"arrows":["w1","w2","w3"]},"read":{"boxes":["r-queue","r-worker","r-sandbox","r-result","r-ws"],"arrows":["r1","r2","r3","r4"]}}'>
         <svg viewBox="0 0 740 220" xmlns="http://www.w3.org/2000/svg">
@@ -257,7 +257,7 @@
     <section id="step5-hld">
       <div class="step-pill">Step 5 of 6 — High-Level Design</div>
       <h2>High-level design</h2>
-      <p style="font-size:13px;color:#4A5873;margin-bottom:0.75rem">Full system: submission intake, the queue that absorbs bursts, the judge worker fleet, and result delivery back to the browser.</p>
+      <p style="font-size:15.5px;color:#0F1114;margin-bottom:0.75rem">Full system: submission intake, the queue that absorbs bursts, the judge worker fleet, and result delivery back to the browser.</p>
 
       <div class="diagram-wrap">
         <svg viewBox="0 0 780 300" xmlns="http://www.w3.org/2000/svg">
@@ -337,7 +337,7 @@
     <section id="step6-deepdive-sandbox">
       <div class="step-pill">Step 6 of 6 — Deep Dives</div>
       <h2>Deep dive: sandbox isolation layers</h2>
-      <p style="font-size:13px;color:#4A5873;margin-bottom:0.75rem">Untrusted code gets four stacked layers of containment — any single layer failing shouldn't compromise the host.</p>
+      <p style="font-size:15.5px;color:#0F1114;margin-bottom:0.75rem">Untrusted code gets four stacked layers of containment — any single layer failing shouldn't compromise the host.</p>
 
       <div class="diagram-wrap">
         <svg viewBox="0 0 700 260" xmlns="http://www.w3.org/2000/svg">
@@ -368,7 +368,7 @@
 
     <section id="step6-deepdive-parallelism">
       <h2>Deep dive: test case runner parallelism</h2>
-      <p style="font-size:13px;color:#4A5873;margin-bottom:0.75rem">A single submission with 100 test cases can't run them serially against a 10s p99 target — they fan out to independent sandboxes and results aggregate back.</p>
+      <p style="font-size:15.5px;color:#0F1114;margin-bottom:0.75rem">A single submission with 100 test cases can't run them serially against a 10s p99 target — they fan out to independent sandboxes and results aggregate back.</p>
 
       <ol class="flow-steps-list">
         <li><span>Judge worker claims the job</span> — reads the test case bundle manifest for the problem (count, inputs, expected outputs)</li>

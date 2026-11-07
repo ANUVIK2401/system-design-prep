@@ -7,7 +7,7 @@
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link rel="stylesheet" href="../../assets/style.css">
-        <!-- site-head -->
+          <!-- site-head -->
   <meta name="description" content="Tests whether you understand that rate limiting is fundamentally a distributed counting problem — get the shared-state model wrong and every instance silently multiplies the real limit.">
   <meta name="theme-color" content="#0B1F3F">
   <link rel="canonical" href="https://anuvik2401.github.io/system-design-prep/topics/questions/rate-limiter.html">
@@ -112,7 +112,7 @@
     <section id="step2-entities">
       <div class="step-pill">Step 2 of 6 — Core Entities</div>
       <h2>Core entities</h2>
-      <p style="font-size:13px;color:#4A5873;margin-bottom:0.75rem">Three entities — the rule config is cold and relational, the live counters are hot and ephemeral, so they live in different stores by access pattern.</p>
+      <p style="font-size:15.5px;color:#0F1114;margin-bottom:0.75rem">Three entities — the rule config is cold and relational, the live counters are hot and ephemeral, so they live in different stores by access pattern.</p>
 
       <div class="entity-grid">
         <div class="entity-box">
@@ -154,7 +154,7 @@
     <section id="step3-api">
       <div class="step-pill">Step 3 of 6 — API / Interface</div>
       <h2>API design</h2>
-      <p style="font-size:13px;color:#4A5873;margin-bottom:0.75rem">The rate limiter is usually a middleware/sidecar, not a public API — but it still needs an internal check endpoint plus admin CRUD for rules.</p>
+      <p style="font-size:15.5px;color:#0F1114;margin-bottom:0.75rem">The rate limiter is usually a middleware/sidecar, not a public API — but it still needs an internal check endpoint plus admin CRUD for rules.</p>
 
       <div class="api-card">
         <div class="api-line"><span class="api-method post">POST</span><span class="api-path">/internal/v1/check</span><span class="api-auth">Auth: service-to-service</span></div>
@@ -192,7 +192,7 @@
     <section id="step4-dataflow">
       <div class="step-pill">Step 4 of 6 — Data Flow</div>
       <h2>Data flow</h2>
-      <p style="font-size:13px;color:#4A5873;margin-bottom:0.75rem">Two outcomes for the same path — the ALLOW row (mint) and the DENY row (amber) — both hit Redis, they just diverge on the response.</p>
+      <p style="font-size:15.5px;color:#0F1114;margin-bottom:0.75rem">Two outcomes for the same path — the ALLOW row (mint) and the DENY row (amber) — both hit Redis, they just diverge on the response.</p>
 
       <div class="diagram-wrap" data-paths='{"allow":{"boxes":["a-client","a-gw","a-mw","a-redis","a-svc"],"arrows":["a1","a2","a3","a4"]},"deny":{"boxes":["d-client","d-gw","d-mw","d-redis"],"arrows":["d1","d2","d3"]}}'>
         <svg viewBox="0 0 740 220" xmlns="http://www.w3.org/2000/svg">
@@ -246,7 +246,7 @@
     <section id="step5-hld">
       <div class="step-pill">Step 5 of 6 — High-Level Design</div>
       <h2>High-level design</h2>
-      <p style="font-size:13px;color:#4A5873;margin-bottom:0.75rem">Full system: gateway, rate-limit middleware, the Redis counter tier, and the cold config path together.</p>
+      <p style="font-size:15.5px;color:#0F1114;margin-bottom:0.75rem">Full system: gateway, rate-limit middleware, the Redis counter tier, and the cold config path together.</p>
 
       <div class="diagram-wrap">
         <svg viewBox="0 0 780 300" xmlns="http://www.w3.org/2000/svg">
@@ -321,7 +321,7 @@
     <section id="step6-deepdive-tokenbucket">
       <div class="step-pill">Step 6 of 6 — Deep Dives</div>
       <h2>Deep dive: token bucket algorithm</h2>
-      <p style="font-size:13px;color:#4A5873;margin-bottom:0.75rem">Tokens refill continuously into a fixed-capacity bucket; each request consumes one. This is what allows a client to burst up to the bucket size, then throttles to the steady refill rate.</p>
+      <p style="font-size:15.5px;color:#0F1114;margin-bottom:0.75rem">Tokens refill continuously into a fixed-capacity bucket; each request consumes one. This is what allows a client to burst up to the bucket size, then throttles to the steady refill rate.</p>
 
       <div class="diagram-wrap">
         <svg viewBox="0 0 500 170" xmlns="http://www.w3.org/2000/svg">
@@ -384,7 +384,7 @@
 
     <section id="step6-deepdive-window">
       <h2>Deep dive: fixed window boundary burst vs sliding window</h2>
-      <p style="font-size:13px;color:#4A5873;margin-bottom:0.75rem">Fixed windows are cheap (one INCR per key) but let a client burst up to 2x the limit right at the window edge. Sliding window log fixes it at the cost of storing a timestamp per request.</p>
+      <p style="font-size:15.5px;color:#0F1114;margin-bottom:0.75rem">Fixed windows are cheap (one INCR per key) but let a client burst up to 2x the limit right at the window edge. Sliding window log fixes it at the cost of storing a timestamp per request.</p>
 
       <div class="flow-cmp-grid">
         <div class="flow-cmp-col miss">
@@ -416,7 +416,7 @@
         </div>
       </div>
 
-      <ul style="font-size:13px;color:#4A5873;margin:0.75rem 0;padding-left:1.1rem">
+      <ul style="font-size:15.5px;color:#0F1114;margin:0.75rem 0;padding-left:1.1rem">
         <li>One Redis <strong>sorted set</strong> per identifier, score = request timestamp.</li>
         <li><code>ZREMRANGEBYSCORE</code> drops entries older than the window.</li>
         <li><code>ZCARD</code> counts survivors; <code>ZADD</code> records this request.</li>

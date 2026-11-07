@@ -7,7 +7,7 @@
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link rel="stylesheet" href="../../assets/style.css">
-        <!-- site-head -->
+          <!-- site-head -->
   <meta name="description" content="An in-memory data structure server — not just a cache. Strings, hashes, sorted sets, streams, persistence, and cluster sharding.">
   <meta name="theme-color" content="#0B1F3F">
   <link rel="canonical" href="https://anuvik2401.github.io/system-design-prep/topics/tech/redis.html">
@@ -68,7 +68,7 @@
       </table>
 
       <h3 style="font-size:13px;color:var(--text);margin:1.5rem 0 0.75rem;font-weight:600">Cache-aside: hit vs miss</h3>
-      <p style="font-size:13px;color:#4A5873;margin-bottom:0.75rem">The dominant Redis pattern in interviews. Watch both paths run side by side — the latency gap is the whole argument for caching.</p>
+      <p style="font-size:15.5px;color:#0F1114;margin-bottom:0.75rem">The dominant Redis pattern in interviews. Watch both paths run side by side — the latency gap is the whole argument for caching.</p>
       <div class="flow-cmp-grid">
         <div class="flow-cmp-col hit">
           <div class="flow-cmp-title">✓ Cache hit — ~1ms</div>
@@ -142,7 +142,7 @@
       </script>
 
       <h3 style="font-size:13px;color:var(--text);margin:1.5rem 0 0.75rem;font-weight:600">Eviction policies</h3>
-      <p style="font-size:13px;color:#4A5873;margin-bottom:0.75rem">When Redis hits <code>maxmemory</code>, the eviction policy decides what gets dropped.</p>
+      <p style="font-size:15.5px;color:#0F1114;margin-bottom:0.75rem">When Redis hits <code>maxmemory</code>, the eviction policy decides what gets dropped.</p>
       <table class="def-table">
         <thead><tr><th>Policy</th><th>Behavior</th></tr></thead>
         <tbody>

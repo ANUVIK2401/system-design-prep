@@ -7,7 +7,7 @@
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link rel="stylesheet" href="../../assets/style.css">
-        <!-- site-head -->
+          <!-- site-head -->
   <meta name="description" content="Tests whether you treat &quot;search nearby businesses&quot; as a geo-indexing and ranking problem first, and reviews as ordinary CRUD second.">
   <meta name="theme-color" content="#0B1F3F">
   <link rel="canonical" href="https://anuvik2401.github.io/system-design-prep/topics/questions/yelp.html">
@@ -112,7 +112,7 @@
     <section id="step2-entities">
       <div class="step-pill">Step 2 of 6 — Core Entities</div>
       <h2>Core entities</h2>
-      <p style="font-size:13px;color:#4A5873;margin-bottom:0.75rem">Business profile and reviews are relational; the geo index is a separate derived structure optimized purely for radius queries.</p>
+      <p style="font-size:15.5px;color:#0F1114;margin-bottom:0.75rem">Business profile and reviews are relational; the geo index is a separate derived structure optimized purely for radius queries.</p>
 
       <div class="entity-grid">
         <div class="entity-box">
@@ -165,7 +165,7 @@
     <section id="step3-api">
       <div class="step-pill">Step 3 of 6 — API / Interface</div>
       <h2>API design</h2>
-      <p style="font-size:13px;color:#4A5873;margin-bottom:0.75rem">Four endpoints — search, profile read, review write, and business listing write. All request-response, no persistent connections needed.</p>
+      <p style="font-size:15.5px;color:#0F1114;margin-bottom:0.75rem">Four endpoints — search, profile read, review write, and business listing write. All request-response, no persistent connections needed.</p>
 
       <div class="api-card">
         <div class="api-line"><span class="api-method get">GET</span><span class="api-path">/api/v1/search?lat&amp;lng&amp;q&amp;category&amp;radius_km</span><span class="api-auth">Auth: optional</span></div>
@@ -203,7 +203,7 @@
     <section id="step4-dataflow">
       <div class="step-pill">Step 4 of 6 — Data Flow</div>
       <h2>Data flow</h2>
-      <p style="font-size:13px;color:#4A5873;margin-bottom:0.75rem">Search reads (mint) hit the geo index directly; business/review writes (blue) land in Postgres first, then propagate to the index async.</p>
+      <p style="font-size:15.5px;color:#0F1114;margin-bottom:0.75rem">Search reads (mint) hit the geo index directly; business/review writes (blue) land in Postgres first, then propagate to the index async.</p>
 
       <div class="diagram-wrap" data-paths='{"read":{"boxes":["r-client","r-svc","r-cache","r-geo"],"arrows":["r1","r2","r3"]},"write":{"boxes":["w-client","w-svc","w-db","w-queue","w-geo"],"arrows":["w1","w2","w3","w4"]}}'>
         <svg viewBox="0 0 740 220" xmlns="http://www.w3.org/2000/svg">
@@ -253,7 +253,7 @@
     <section id="step5-hld">
       <div class="step-pill">Step 5 of 6 — High-Level Design</div>
       <h2>High-level design</h2>
-      <p style="font-size:13px;color:#4A5873;margin-bottom:0.75rem">Full system: search, profile, and review flows together with the async reindexing pipeline that keeps them in sync.</p>
+      <p style="font-size:15.5px;color:#0F1114;margin-bottom:0.75rem">Full system: search, profile, and review flows together with the async reindexing pipeline that keeps them in sync.</p>
 
       <div class="diagram-wrap">
         <svg viewBox="0 0 780 300" xmlns="http://www.w3.org/2000/svg">
@@ -332,7 +332,7 @@
     <section id="step6-deepdive-geoindex">
       <div class="step-pill">Step 6 of 6 — Deep Dives</div>
       <h2>Deep dive: quadtree vs geohash for the geo index</h2>
-      <p style="font-size:13px;color:#4A5873;margin-bottom:0.75rem">Both turn a 2D radius query into a fast lookup — they differ in how they handle uneven business density across a city.</p>
+      <p style="font-size:15.5px;color:#0F1114;margin-bottom:0.75rem">Both turn a 2D radius query into a fast lookup — they differ in how they handle uneven business density across a city.</p>
 
       <div class="flow-cmp-grid">
         <div class="flow-cmp-col hit">
@@ -470,7 +470,7 @@
 
     <section id="step6-deepdive-ranking">
       <h2>Deep dive: search ranking signals</h2>
-      <p style="font-size:13px;color:#4A5873;margin-bottom:0.75rem">Distance alone produces bad results — a 4.8-star cafe 400m away should usually beat a 2.1-star cafe 150m away. Ranking blends four signals into one score.</p>
+      <p style="font-size:15.5px;color:#0F1114;margin-bottom:0.75rem">Distance alone produces bad results — a 4.8-star cafe 400m away should usually beat a 2.1-star cafe 150m away. Ranking blends four signals into one score.</p>
 
       <ol class="flow-steps-list">
         <li><span>Geo filter narrows the candidate set</span> — Elasticsearch geo-radius query returns everything within the search radius first, typically a few hundred to a few thousand businesses</li>

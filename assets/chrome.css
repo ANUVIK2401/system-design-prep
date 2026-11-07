@@ -156,7 +156,7 @@ section h2 { text-transform: none; letter-spacing: -0.01em; color: var(--text); 
 
 /* More gold, stronger reading contrast across every page */
 body { font-size: 16px; line-height: 1.65; }
-main p, main li { color: var(--text); }
+
 .page-head h1 { padding-bottom: .5rem; border-bottom: 3px solid var(--gold-deep); }
 section h2 { font-size: 1.5rem; padding-bottom: 10px; border-bottom: 2px solid var(--gold-deep); }
 section h2::after { display: none; }
@@ -235,3 +235,19 @@ main .sheet-list li { max-width: none; margin-bottom: 4px; font-size: 14.5px; }
 @media (prefers-reduced-motion: reduce) {
   .view-tabs button, .sheet-diagram { transition: none; }
 }
+
+/* Reading comfort: near-black text everywhere in the content column.
+   Sidebar and navbar keep their own light-on-navy tokens. */
+:root { --text: #0F1114; --muted: #1A1D23; --faint: #3A3F47; }
+body { font-size: 17px; line-height: 1.7; }
+main { color: var(--text); }
+main p, main li, main td { color: var(--text); font-weight: 450; }
+main p, main li { max-width: min(82ch, 100%); }
+.page-head h1, section h2, .sheet-heading { color: #000; }
+.page-head .sub { font-size: 1.1rem; }
+.analogy-block { font-style: normal; font-size: 1.05rem; color: var(--text); border-left-color: var(--gold-deep); }
+.flash-card li, .flow-steps-list li, .compare-card li, .qa-a, .entity-why, .callout, .scenario-row { font-size: 16px; color: var(--text); }
+.grid-table, .def-table, .sheet-table, main .sheet-list li { font-size: 15.5px; }
+.def-table td:first-child { color: #000; font-weight: 600; }
+.sheet-table th, .grid-table th, .def-table th { font-size: 14px; }
+.callout.info, .callout.warn, .callout.good, .callout.danger { color: var(--text); }

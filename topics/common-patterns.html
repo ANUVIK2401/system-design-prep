@@ -7,7 +7,7 @@
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link rel="stylesheet" href="../assets/style.css">
-        <!-- site-head -->
+          <!-- site-head -->
   <meta name="description" content="The 8 recurring architectural patterns that appear across almost every system design question.">
   <meta name="theme-color" content="#0B1F3F">
   <link rel="canonical" href="https://anuvik2401.github.io/system-design-prep/topics/common-patterns.html">
@@ -72,7 +72,7 @@
 
     <section id="read-heavy">
       <h2>Pattern 1 — Read-heavy system</h2>
-      <p style="font-size:13px;color:#33415C;margin-bottom:1rem">Triggered by: news feed, product catalog, URL redirect, DNS, CDN</p>
+      <p style="font-size:15.5px;color:#0F1114;margin-bottom:1rem">Triggered by: news feed, product catalog, URL redirect, DNS, CDN</p>
       <div class="diagram-wrap" data-paths='{"client":{"boxes":["client","cache","replica"],"arrows":["a1","a2"]}}'>
         <svg viewBox="0 0 700 130" xmlns="http://www.w3.org/2000/svg">
           <defs><marker id="rh1" markerWidth="8" markerHeight="8" refX="6" refY="3" orient="auto"><path d="M0,0 L6,3 L0,6 Z" fill="var(--border2)"/></marker></defs>
@@ -101,7 +101,7 @@
 
     <section id="write-heavy">
       <h2>Pattern 2 — Write-heavy system</h2>
-      <p style="font-size:13px;color:#33415C;margin-bottom:1rem">Triggered by: metrics ingestion, log collection, IoT telemetry, click tracking</p>
+      <p style="font-size:15.5px;color:#0F1114;margin-bottom:1rem">Triggered by: metrics ingestion, log collection, IoT telemetry, click tracking</p>
       <div class="diagram-wrap">
         <svg viewBox="0 0 700 110" xmlns="http://www.w3.org/2000/svg">
           <defs><marker id="wh1" markerWidth="8" markerHeight="8" refX="6" refY="3" orient="auto"><path d="M0,0 L6,3 L0,6 Z" fill="var(--border2)"/></marker></defs>
@@ -120,7 +120,7 @@
 
     <section id="fan-out">
       <h2>Pattern 3 — Fan-out (notification / feed)</h2>
-      <p style="font-size:13px;color:#33415C;margin-bottom:1rem">Triggered by: Twitter-style feed, notification system, group chat</p>
+      <p style="font-size:15.5px;color:#0F1114;margin-bottom:1rem">Triggered by: Twitter-style feed, notification system, group chat</p>
       <div class="compare-grid">
         <div class="compare-card good">
           <div class="compare-label">Fan-out on write (push)</div>
@@ -146,7 +146,7 @@
 
     <section id="saga">
       <h2>Pattern 4 — Saga (distributed transactions)</h2>
-      <p style="font-size:13px;color:#33415C;margin-bottom:1rem">Triggered by: payment + inventory + order all needing to succeed or all roll back</p>
+      <p style="font-size:15.5px;color:#0F1114;margin-bottom:1rem">Triggered by: payment + inventory + order all needing to succeed or all roll back</p>
       <div class="diagram-wrap">
         <svg viewBox="0 0 700 130" xmlns="http://www.w3.org/2000/svg">
           <defs><marker id="sg1" markerWidth="8" markerHeight="8" refX="6" refY="3" orient="auto"><path d="M0,0 L6,3 L0,6 Z" fill="var(--border2)"/></marker></defs>
@@ -171,7 +171,7 @@
 
     <section id="cqrs">
       <h2>Pattern 5 — CQRS (Command Query Responsibility Segregation)</h2>
-      <p style="font-size:13px;color:#33415C;margin-bottom:1rem">Triggered by: write and read shapes are very different; scale needs differ between reads and writes</p>
+      <p style="font-size:15.5px;color:#0F1114;margin-bottom:1rem">Triggered by: write and read shapes are very different; scale needs differ between reads and writes</p>
       <div class="diagram-wrap">
         <svg viewBox="0 0 700 110" xmlns="http://www.w3.org/2000/svg">
           <defs><marker id="cq1" markerWidth="8" markerHeight="8" refX="6" refY="3" orient="auto"><path d="M0,0 L6,3 L0,6 Z" fill="var(--border2)"/></marker></defs>
@@ -191,7 +191,7 @@
 
     <section id="event-sourcing">
       <h2>Pattern 6 — Event sourcing</h2>
-      <p style="font-size:13px;color:#33415C;margin-bottom:1rem">Triggered by: audit log required, need to replay state, financial ledger</p>
+      <p style="font-size:15.5px;color:#0F1114;margin-bottom:1rem">Triggered by: audit log required, need to replay state, financial ledger</p>
       <table class="def-table">
         <thead><tr><th>Concept</th><th>Description</th></tr></thead>
         <tbody>
@@ -206,7 +206,7 @@
 
     <section id="outbox">
       <h2>Pattern 7 — Transactional outbox</h2>
-      <p style="font-size:13px;color:#33415C;margin-bottom:1rem">Triggered by: must publish a message to Kafka reliably after a DB write — without dual-write risk</p>
+      <p style="font-size:15.5px;color:#0F1114;margin-bottom:1rem">Triggered by: must publish a message to Kafka reliably after a DB write — without dual-write risk</p>
       <div class="diagram-wrap">
         <svg viewBox="0 0 700 150" xmlns="http://www.w3.org/2000/svg">
           <defs><marker id="ob1" markerWidth="8" markerHeight="8" refX="6" refY="3" orient="auto"><path d="M0,0 L6,3 L0,6 Z" fill="var(--border2)"/></marker></defs>
@@ -227,7 +227,7 @@
 
     <section id="tradeoffs">
       <h2>Pattern 8 — Consistent hashing</h2>
-      <p style="font-size:13px;color:#33415C;margin-bottom:1rem">Triggered by: distributing keys across a cache cluster or sharded DB</p>
+      <p style="font-size:15.5px;color:#0F1114;margin-bottom:1rem">Triggered by: distributing keys across a cache cluster or sharded DB</p>
       <div class="diagram-wrap hash-ring-wrap">
         <div id="patterns-hash-ring"></div>
         <div class="hash-ring-controls">

@@ -7,7 +7,7 @@
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link rel="stylesheet" href="../../assets/style.css">
-        <!-- site-head -->
+          <!-- site-head -->
   <meta name="description" content="Tests whether you recognize this as a GPU-capacity-and-scheduling problem, not a CRUD problem. The scarce resource is GPU compute — batching, streaming, and context management all exist to squeeze more out of it.">
   <meta name="theme-color" content="#0B1F3F">
   <link rel="canonical" href="https://anuvik2401.github.io/system-design-prep/topics/questions/chatgpt.html">
@@ -111,7 +111,7 @@
     <section id="step2-entities">
       <div class="step-pill">Step 2 of 6 — Core Entities</div>
       <h2>Core entities</h2>
-      <p style="font-size:13px;color:#4A5873;margin-bottom:0.75rem">Conversation and Message are durable records in a relational store; InferenceRequest is ephemeral in-flight scheduler state that only exists for the seconds a generation is running.</p>
+      <p style="font-size:15.5px;color:#0F1114;margin-bottom:0.75rem">Conversation and Message are durable records in a relational store; InferenceRequest is ephemeral in-flight scheduler state that only exists for the seconds a generation is running.</p>
 
       <div class="entity-grid">
         <div class="entity-box">
@@ -157,7 +157,7 @@
     <section id="step3-api">
       <div class="step-pill">Step 3 of 6 — API / Interface</div>
       <h2>API design</h2>
-      <p style="font-size:13px;color:#4A5873;margin-bottom:0.75rem">Sending a message returns a streamed response over SSE so the client can render tokens as they arrive; everything else is plain REST since it's low-frequency metadata access.</p>
+      <p style="font-size:15.5px;color:#0F1114;margin-bottom:0.75rem">Sending a message returns a streamed response over SSE so the client can render tokens as they arrive; everything else is plain REST since it's low-frequency metadata access.</p>
 
       <div class="api-card">
         <div class="api-line"><span class="api-method post">POST</span><span class="api-path">/api/v1/conversations/{id}/messages</span><span class="api-auth">Auth: required — SSE streaming response</span></div>
@@ -197,7 +197,7 @@
     <section id="step4-dataflow">
       <div class="step-pill">Step 4 of 6 — Data Flow</div>
       <h2>Data flow</h2>
-      <p style="font-size:13px;color:#4A5873;margin-bottom:0.75rem">A new message triggers a write/batch path (blue write, amber async batching) that queues the request for GPU inference, and a read path (mint) that streams generated tokens back as they're produced.</p>
+      <p style="font-size:15.5px;color:#0F1114;margin-bottom:0.75rem">A new message triggers a write/batch path (blue write, amber async batching) that queues the request for GPU inference, and a read path (mint) that streams generated tokens back as they're produced.</p>
 
       <div class="diagram-wrap" data-paths='{"write":{"boxes":["w-client","w-mod","w-store","w-sched"],"arrows":["w1","w2","w3"]},"stream":{"boxes":["s-gpu","s-router","s-client"],"arrows":["s1","s2"]}}'>
         <svg viewBox="0 0 760 220" xmlns="http://www.w3.org/2000/svg">
@@ -244,7 +244,7 @@
     <section id="step5-hld">
       <div class="step-pill">Step 5 of 6 — High-Level Design</div>
       <h2>High-level design</h2>
-      <p style="font-size:13px;color:#4A5873;margin-bottom:0.75rem">Everything upstream of the GPU fleet exists to keep GPUs fed with work and to get tokens back to the client the instant they exist — that's the entire design philosophy.</p>
+      <p style="font-size:15.5px;color:#0F1114;margin-bottom:0.75rem">Everything upstream of the GPU fleet exists to keep GPUs fed with work and to get tokens back to the client the instant they exist — that's the entire design philosophy.</p>
 
       <div class="diagram-wrap">
         <svg viewBox="0 0 800 320" xmlns="http://www.w3.org/2000/svg">
@@ -328,7 +328,7 @@
     <section id="step6-deepdive-batching">
       <div class="step-pill">Step 6 of 6 — Deep Dives</div>
       <h2>Deep dive: continuous batching for GPU efficiency</h2>
-      <p style="font-size:13px;color:#4A5873;margin-bottom:0.75rem">A naive one-request-per-GPU-call model wastes most of the GPU's capacity, because each forward pass can process many requests' tokens at once for nearly the same cost as one.</p>
+      <p style="font-size:15.5px;color:#0F1114;margin-bottom:0.75rem">A naive one-request-per-GPU-call model wastes most of the GPU's capacity, because each forward pass can process many requests' tokens at once for nearly the same cost as one.</p>
 
       <div class="diagram-wrap">
         <svg viewBox="0 0 760 260" xmlns="http://www.w3.org/2000/svg">
@@ -362,7 +362,7 @@
 
     <section id="step6-deepdive-streaming">
       <h2>Deep dive: token streaming to the client</h2>
-      <p style="font-size:13px;color:#4A5873;margin-bottom:0.75rem">Full generation can take several seconds, but the user should see the first token in well under a second — streaming decouples perceived latency from total generation time.</p>
+      <p style="font-size:15.5px;color:#0F1114;margin-bottom:0.75rem">Full generation can take several seconds, but the user should see the first token in well under a second — streaming decouples perceived latency from total generation time.</p>
 
       <div class="diagram-wrap">
         <svg viewBox="0 0 740 280" xmlns="http://www.w3.org/2000/svg">
@@ -404,7 +404,7 @@
 
     <section id="step6-deepdive-context">
       <h2>Deep dive: conversation context management</h2>
-      <p style="font-size:13px;color:#4A5873;margin-bottom:0.75rem">Every new turn needs the prior conversation as context, but the model has a fixed context window — once a conversation grows past it, something has to give.</p>
+      <p style="font-size:15.5px;color:#0F1114;margin-bottom:0.75rem">Every new turn needs the prior conversation as context, but the model has a fixed context window — once a conversation grows past it, something has to give.</p>
 
       <div class="diagram-wrap">
         <svg viewBox="0 0 760 260" xmlns="http://www.w3.org/2000/svg">

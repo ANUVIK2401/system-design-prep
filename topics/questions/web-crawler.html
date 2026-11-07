@@ -7,7 +7,7 @@
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link rel="stylesheet" href="../../assets/style.css">
-        <!-- site-head -->
+          <!-- site-head -->
   <meta name="description" content="Tests whether you treat the URL frontier and dedup index as the hard distributed-systems problems they are, instead of hand-waving &quot;we just fetch pages with HTTP.&quot;">
   <meta name="theme-color" content="#0B1F3F">
   <link rel="canonical" href="https://anuvik2401.github.io/system-design-prep/topics/questions/web-crawler.html">
@@ -111,7 +111,7 @@
     <section id="step2-entities">
       <div class="step-pill">Step 2 of 6 — Core Entities</div>
       <h2>Core entities</h2>
-      <p style="font-size:13px;color:#4A5873;margin-bottom:0.75rem">Three entities split by access pattern: the frontier is a hot, constantly-reordered queue; crawled content is write-once and huge; domain policy is small, cached, and read on every single fetch.</p>
+      <p style="font-size:15.5px;color:#0F1114;margin-bottom:0.75rem">Three entities split by access pattern: the frontier is a hot, constantly-reordered queue; crawled content is write-once and huge; domain policy is small, cached, and read on every single fetch.</p>
 
       <div class="entity-grid">
         <div class="entity-box">
@@ -156,7 +156,7 @@
     <section id="step3-api">
       <div class="step-pill">Step 3 of 6 — API / Interface</div>
       <h2>API design</h2>
-      <ul style="font-size:13px;color:#4A5873;margin:0 0 0.75rem;padding-left:1.1rem">
+      <ul style="font-size:15.5px;color:#0F1114;margin:0 0 0.75rem;padding-left:1.1rem">
         <li>Two operator endpoints: <strong>seed submission</strong>, <strong>page lookup</strong>.</li>
         <li>One policy lookup + one internal <strong>claim endpoint</strong> for fetchers.</li>
         <li>The fleet never hits the frontier over a public API.</li>
@@ -200,7 +200,7 @@
     <section id="step4-dataflow">
       <div class="step-pill">Step 4 of 6 — Data Flow</div>
       <h2>Data flow</h2>
-      <p style="font-size:13px;color:#4A5873;margin-bottom:0.75rem">Write path (blue) is a fetch-and-parse cycle that feeds itself — new links flow back into the frontier (amber). Read path (mint) is a page lookup, fully decoupled from crawling.</p>
+      <p style="font-size:15.5px;color:#0F1114;margin-bottom:0.75rem">Write path (blue) is a fetch-and-parse cycle that feeds itself — new links flow back into the frontier (amber). Read path (mint) is a page lookup, fully decoupled from crawling.</p>
 
       <div class="diagram-wrap" data-paths='{"write":{"boxes":["w-frontier","w-fetcher","w-parser","w-store"],"arrows":["w1","w2","w3"]},"async":{"boxes":["w-parser","w-frontier"],"arrows":["a1"]},"read":{"boxes":["r-client","r-svc","r-db"],"arrows":["r1","r2"]}}'>
         <svg viewBox="0 0 740 230" xmlns="http://www.w3.org/2000/svg">
@@ -252,7 +252,7 @@
     <section id="step5-hld">
       <div class="step-pill">Step 5 of 6 — High-Level Design</div>
       <h2>High-level design</h2>
-      <p style="font-size:13px;color:#4A5873;margin-bottom:0.75rem">Seeds enter the frontier, DNS is resolved and cached ahead of fetch time, a distributed fetcher pool respects politeness, and a dedup service gates what re-enters the frontier at all.</p>
+      <p style="font-size:15.5px;color:#0F1114;margin-bottom:0.75rem">Seeds enter the frontier, DNS is resolved and cached ahead of fetch time, a distributed fetcher pool respects politeness, and a dedup service gates what re-enters the frontier at all.</p>
 
       <div class="diagram-wrap">
         <svg viewBox="0 0 800 320" xmlns="http://www.w3.org/2000/svg">
@@ -342,7 +342,7 @@
     <section id="step6-deepdive-frontier">
       <div class="step-pill">Step 6 of 6 — Deep Dives</div>
       <h2>Deep dive: URL frontier and politeness</h2>
-      <p style="font-size:13px;color:#4A5873;margin-bottom:0.75rem">The frontier isn't one global queue — it's effectively one priority queue per domain, and the scheduler will only ever pop from a domain that's past its politeness delay.</p>
+      <p style="font-size:15.5px;color:#0F1114;margin-bottom:0.75rem">The frontier isn't one global queue — it's effectively one priority queue per domain, and the scheduler will only ever pop from a domain that's past its politeness delay.</p>
 
       <div class="diagram-wrap">
         <svg viewBox="0 0 720 260" xmlns="http://www.w3.org/2000/svg">
@@ -385,7 +385,7 @@
 
     <section id="step6-deepdive-bloom">
       <h2>Deep dive: dedup at scale with Bloom filters</h2>
-      <p style="font-size:13px;color:#4A5873;margin-bottom:0.75rem">A naive hash-set of 10B seen URLs at ~64 bytes/entry (hash + overhead) is well over half a terabyte — too large to keep resident for a sub-millisecond membership check on every discovered link.</p>
+      <p style="font-size:15.5px;color:#0F1114;margin-bottom:0.75rem">A naive hash-set of 10B seen URLs at ~64 bytes/entry (hash + overhead) is well over half a terabyte — too large to keep resident for a sub-millisecond membership check on every discovered link.</p>
 
       <div class="stat-grid">
         <div class="stat-card"><div class="stat-val">10B</div><div class="stat-label">expected inserted URLs (n)</div></div>
@@ -394,8 +394,8 @@
         <div class="stat-card"><div class="stat-val">0.1%</div><div class="stat-label">target false-positive rate (p)</div></div>
       </div>
 
-      <p style="font-size:13px;color:#33415C;margin-bottom:0.5rem">Sized from the standard formulas <code>m = -(n · ln p) / (ln 2)²</code> and <code>k = (m/n) · ln 2</code>. At n=10B and p=0.1%, that's <code>m ≈ 1.44×10¹¹ bits ≈ 18GB</code>.</p>
-      <p style="font-size:13px;color:#33415C;margin:0 0 0.75rem">Versus roughly 640GB to store 10B full 64-byte hash-set entries — close to a 35x memory reduction for a 1-in-1000 false-positive chance.</p>
+      <p style="font-size:15.5px;color:#0F1114;margin-bottom:0.5rem">Sized from the standard formulas <code>m = -(n · ln p) / (ln 2)²</code> and <code>k = (m/n) · ln 2</code>. At n=10B and p=0.1%, that's <code>m ≈ 1.44×10¹¹ bits ≈ 18GB</code>.</p>
+      <p style="font-size:15.5px;color:#0F1114;margin:0 0 0.75rem">Versus roughly 640GB to store 10B full 64-byte hash-set entries — close to a 35x memory reduction for a 1-in-1000 false-positive chance.</p>
 
       <div class="diagram-wrap">
         <svg viewBox="0 0 700 190" xmlns="http://www.w3.org/2000/svg">
@@ -433,7 +433,7 @@
 
     <section id="step6-deepdive-recrawl">
       <h2>Deep dive: recrawl scheduling and freshness</h2>
-      <ul style="font-size:13px;color:#4A5873;margin:0 0 0.75rem;padding-left:1.1rem">
+      <ul style="font-size:15.5px;color:#0F1114;margin:0 0 0.75rem;padding-left:1.1rem">
         <li>Pages don't deserve equal recrawl cadence.</li>
         <li>News homepage changes hourly; static docs change yearly.</li>
         <li>Identical polling wastes the fetch budget on both.</li>
