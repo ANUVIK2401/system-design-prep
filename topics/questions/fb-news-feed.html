@@ -7,6 +7,18 @@
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link rel="stylesheet" href="../../assets/style.css">
+        <!-- site-head -->
+  <meta name="description" content="Tests whether you can reason about fan-out on write vs read at the tail of the follower-count distribution — one design breaks the moment a celebrity posts.">
+  <meta name="theme-color" content="#0B1F3F">
+  <link rel="canonical" href="https://anuvik2401.github.io/system-design-prep/topics/questions/fb-news-feed.html">
+  <link rel="icon" href="../../assets/favicon.svg" type="image/svg+xml">
+  <meta property="og:type" content="website">
+  <meta property="og:title" content="Design Facebook News Feed — SD Prep">
+  <meta property="og:description" content="Tests whether you can reason about fan-out on write vs read at the tail of the follower-count distribution — one design breaks the moment a celebrity posts.">
+  <meta property="og:url" content="https://anuvik2401.github.io/system-design-prep/topics/questions/fb-news-feed.html">
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,600;12..96,700&amp;family=IBM+Plex+Mono:wght@500&amp;family=IBM+Plex+Sans:wght@400;500;600&amp;display=swap">
+  <link rel="stylesheet" href="../../assets/chrome.css">
+  <!-- /site-head -->
 </head>
 <body>
   <aside id="sidebar"></aside>
@@ -100,7 +112,7 @@
     <section id="step2-entities">
       <div class="step-pill">Step 2 of 6 — Core Entities</div>
       <h2>Core entities</h2>
-      <p style="font-size:13px;color:#999;margin-bottom:0.75rem">Four entities across three stores, split by access pattern — the feed itself is a derived cache, not a queryable table.</p>
+      <p style="font-size:13px;color:#4A5873;margin-bottom:0.75rem">Four entities across three stores, split by access pattern — the feed itself is a derived cache, not a queryable table.</p>
 
       <div class="entity-grid">
         <div class="entity-box">
@@ -153,7 +165,7 @@
     <section id="step3-api">
       <div class="step-pill">Step 3 of 6 — API / Interface</div>
       <h2>API design</h2>
-      <p style="font-size:13px;color:#999;margin-bottom:0.75rem">Three endpoints — publish, fetch feed, and engage. Feed fetch is the hottest and most latency-sensitive.</p>
+      <p style="font-size:13px;color:#4A5873;margin-bottom:0.75rem">Three endpoints — publish, fetch feed, and engage. Feed fetch is the hottest and most latency-sensitive.</p>
 
       <div class="api-card">
         <div class="api-line"><span class="api-method post">POST</span><span class="api-path">/api/v1/posts</span><span class="api-auth">Auth: required</span></div>
@@ -191,7 +203,7 @@
     <section id="step4-dataflow">
       <div class="step-pill">Step 4 of 6 — Data Flow</div>
       <h2>Data flow</h2>
-      <p style="font-size:13px;color:#999;margin-bottom:0.75rem">Write path (blue) fans a post out to followers asynchronously; read path (mint) merges the precomputed feed with a live pull for celebrity authors.</p>
+      <p style="font-size:13px;color:#4A5873;margin-bottom:0.75rem">Write path (blue) fans a post out to followers asynchronously; read path (mint) merges the precomputed feed with a live pull for celebrity authors.</p>
 
       <div class="diagram-wrap" data-paths='{"read":{"boxes":["r-client","r-svc","r-cache","r-pull","r-db"],"arrows":["r1","r2","r3","r4"]},"write":{"boxes":["w-client","w-svc","w-db","w-fanout","w-cache"],"arrows":["w1","w2","w3","w4"]}}'>
         <svg viewBox="0 0 740 220" xmlns="http://www.w3.org/2000/svg">
@@ -246,7 +258,7 @@
     <section id="step5-hld">
       <div class="step-pill">Step 5 of 6 — High-Level Design</div>
       <h2>High-level design</h2>
-      <p style="font-size:13px;color:#999;margin-bottom:0.75rem">Full system: publish, hybrid fan-out, ranking signal collection, and feed serving together with every supporting component.</p>
+      <p style="font-size:13px;color:#4A5873;margin-bottom:0.75rem">Full system: publish, hybrid fan-out, ranking signal collection, and feed serving together with every supporting component.</p>
 
       <div class="diagram-wrap">
         <svg viewBox="0 0 780 300" xmlns="http://www.w3.org/2000/svg">
@@ -334,7 +346,7 @@
     <section id="step6-deepdive-fanout">
       <div class="step-pill">Step 6 of 6 — Deep Dives</div>
       <h2>Deep dive: fan-out write amplification and the hybrid model</h2>
-      <p style="font-size:13px;color:#999;margin-bottom:0.75rem">Pure push fan-out is simple and fast to read — until a single post has to write into 10 million sorted sets.</p>
+      <p style="font-size:13px;color:#4A5873;margin-bottom:0.75rem">Pure push fan-out is simple and fast to read — until a single post has to write into 10 million sorted sets.</p>
 
       <div class="stat-grid">
         <div class="stat-card"><div class="stat-val">1 post</div><div class="stat-label">published by a celebrity</div></div>
@@ -419,7 +431,7 @@
 
     <section id="step6-deepdive-ranking">
       <h2>Deep dive: feed ranking signal pipeline</h2>
-      <p style="font-size:13px;color:#999;margin-bottom:0.75rem">Every candidate post gets a rank_score before it's written into (or merged into) a feed — recency alone produces a feed nobody wants to scroll.</p>
+      <p style="font-size:13px;color:#4A5873;margin-bottom:0.75rem">Every candidate post gets a rank_score before it's written into (or merged into) a feed — recency alone produces a feed nobody wants to scroll.</p>
 
       <div class="diagram-wrap">
         <svg viewBox="0 0 700 160" xmlns="http://www.w3.org/2000/svg">
@@ -511,6 +523,8 @@
 
   </main>
   <script src="../../assets/nav.js"></script>
+  <script src="../../assets/chrome.js"></script>
+  <script src="../../assets/sheet.js"></script>
   <script src="../../assets/mindmap.js"></script>
 </body>
 </html>

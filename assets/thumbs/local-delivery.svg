@@ -1,0 +1,32 @@
+<svg viewBox="0 0 780 300" xmlns="http://www.w3.org/2000/svg"><style>
+text{font-family:'IBM Plex Sans',system-ui,sans-serif;fill:#0B1F3F;text-anchor:middle;dominant-baseline:middle}
+.diag-label{font-size:12px;font-weight:600}.diag-sublabel,.diag-arrow-label{font-size:9.5px;fill:#4A5873}
+.diag-box{fill:#fff;stroke:#0B1F3F;stroke-width:1.5;rx:7px}.role-cache{fill:#FBF5E6;stroke:#B8892B}
+.role-async,.role-queue{fill:#FBF5E6;stroke:#9A5B13}.role-db{fill:#EEF2F9;stroke:#4A5873}
+.diag-arrow-path{fill:none;stroke:#66728A;stroke-width:1.5}
+</style>
+          <defs><marker id="ldHldArrow" markerWidth="8" markerHeight="8" refX="6" refY="3" orient="auto"><path d="M0,0 L6,3 L0,6 Z" fill="#8A6514"/></marker></defs>
+
+          <g><rect class="diag-box role-client" x="10" y="20" width="120" height="46"/><text class="diag-label" x="70" y="47" style="font-size:11px">Customer App</text></g>
+          <g><rect class="diag-box role-client" x="10" y="80" width="120" height="46"/><text class="diag-label" x="70" y="107" style="font-size:11px">Driver App</text></g>
+
+          <path class="diag-arrow-path" d="M130,43 L165,80" marker-end="url(#ldHldArrow)"/>
+          <path class="diag-arrow-path" d="M130,103 L165,103" marker-end="url(#ldHldArrow)"/>
+          <g><rect class="diag-box" x="165" y="60" width="140" height="50"/><text class="diag-label" x="235" y="82" style="font-size:11px">Order Service</text><text class="diag-sublabel" x="235" y="98" style="font-size:8.5px">state machine</text></g>
+          <path class="diag-arrow-path" d="M305,85 L340,85" marker-end="url(#ldHldArrow)"/>
+          <g><rect class="diag-box role-db" x="340" y="60" width="120" height="50"/><text class="diag-label" x="400" y="88" style="font-size:11px">Order DB</text></g>
+
+          <path class="diag-arrow-path" d="M235,110 L235,150" marker-end="url(#ldHldArrow)"/>
+          <g><rect class="diag-box" x="165" y="150" width="140" height="46"/><text class="diag-label" x="235" y="173" style="font-size:11px">Matching Svc</text></g>
+          <path class="diag-arrow-path" d="M305,173 L340,173" marker-end="url(#ldHldArrow)"/>
+          <g><rect class="diag-box role-cache" x="340" y="150" width="130" height="46"/><text class="diag-label" x="405" y="173" style="font-size:11px">Redis GEO</text></g>
+          <path class="diag-arrow-path" d="M130,103 L340,150" marker-end="url(#ldHldArrow)" stroke-dasharray="3 3"/>
+
+          <path class="diag-arrow-path" d="M470,173 L505,173" marker-end="url(#ldHldArrow)"/>
+          <g><rect class="diag-box role-async" x="505" y="150" width="120" height="46"/><text class="diag-label" x="565" y="173" style="font-size:11px">Kafka</text></g>
+          <path class="diag-arrow-path" d="M625,173 L660,173" marker-end="url(#ldHldArrow)"/>
+          <g><rect class="diag-box role-async" x="660" y="150" width="110" height="46"/><text class="diag-label" x="715" y="173" style="font-size:11px">ETA Svc</text></g>
+
+          <path class="diag-arrow-path" d="M235,60 L235,20 L500,20 L500,60" marker-end="url(#ldHldArrow)" stroke-dasharray="3 3"/>
+          <g><rect class="diag-box role-async" x="440" y="20" width="150" height="46"/><text class="diag-label" x="515" y="47" style="font-size:11px">Notification Svc</text></g>
+        </svg>

@@ -7,6 +7,18 @@
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link rel="stylesheet" href="../../assets/style.css">
+        <!-- site-head -->
+  <meta name="description" content="Tests whether you can build a real-time stream-aggregation pipeline with financial-grade exactly-once correctness at extreme write volume, not just a generic &quot;count things with Kafka&quot; answer.">
+  <meta name="theme-color" content="#0B1F3F">
+  <link rel="canonical" href="https://anuvik2401.github.io/system-design-prep/topics/questions/ad-click-aggregator.html">
+  <link rel="icon" href="../../assets/favicon.svg" type="image/svg+xml">
+  <meta property="og:type" content="website">
+  <meta property="og:title" content="Design an Ad Click Aggregator — SD Prep">
+  <meta property="og:description" content="Tests whether you can build a real-time stream-aggregation pipeline with financial-grade exactly-once correctness at extreme write volume, not just a generic &quot;count things with Kafka&quot; answer.">
+  <meta property="og:url" content="https://anuvik2401.github.io/system-design-prep/topics/questions/ad-click-aggregator.html">
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,600;12..96,700&amp;family=IBM+Plex+Mono:wght@500&amp;family=IBM+Plex+Sans:wght@400;500;600&amp;display=swap">
+  <link rel="stylesheet" href="../../assets/chrome.css">
+  <!-- /site-head -->
 </head>
 <body>
   <aside id="sidebar"></aside>
@@ -99,7 +111,7 @@
     <section id="step2-entities">
       <div class="step-pill">Step 2 of 6 — Core Entities</div>
       <h2>Core entities</h2>
-      <p style="font-size:13px;color:#999;margin-bottom:0.75rem">Raw events are an immutable append-only log — the source of truth. Aggregates are derived, rebuildable state that can always be recomputed from the log.</p>
+      <p style="font-size:13px;color:#4A5873;margin-bottom:0.75rem">Raw events are an immutable append-only log — the source of truth. Aggregates are derived, rebuildable state that can always be recomputed from the log.</p>
 
       <div class="entity-grid">
         <div class="entity-box">
@@ -145,7 +157,7 @@
     <section id="step3-api">
       <div class="step-pill">Step 3 of 6 — API / Interface</div>
       <h2>API design</h2>
-      <p style="font-size:13px;color:#999;margin-bottom:0.75rem">Event ingestion is a Kafka produce call, not REST — it's a fire-and-forget high-frequency write. Stats queries are REST; live dashboard updates use a WebSocket push.</p>
+      <p style="font-size:13px;color:#4A5873;margin-bottom:0.75rem">Event ingestion is a Kafka produce call, not REST — it's a fire-and-forget high-frequency write. Stats queries are REST; live dashboard updates use a WebSocket push.</p>
 
       <div class="api-card">
         <div class="api-line"><span class="api-method post">PRODUCE</span><span class="api-path">kafka: topic=ad-events, key=ad_id</span><span class="api-auth">Auth: signed ad-server client</span></div>
@@ -185,7 +197,7 @@
     <section id="step4-dataflow">
       <div class="step-pill">Step 4 of 6 — Data Flow</div>
       <h2>Data flow</h2>
-      <p style="font-size:13px;color:#999;margin-bottom:0.75rem">Ingestion (amber, async) and dashboard reads (mint) share the aggregate store but are otherwise independent — one writes continuously, the other reads on demand.</p>
+      <p style="font-size:13px;color:#4A5873;margin-bottom:0.75rem">Ingestion (amber, async) and dashboard reads (mint) share the aggregate store but are otherwise independent — one writes continuously, the other reads on demand.</p>
 
       <div class="diagram-wrap" data-paths='{"ingest":{"boxes":["i-adserver","i-kafka","i-flink","i-store"],"arrows":["i1","i2","i3"]},"read":{"boxes":["r-dash","r-query","i-store"],"arrows":["r1","r2"]}}'>
         <svg viewBox="0 0 760 230" xmlns="http://www.w3.org/2000/svg">
@@ -230,7 +242,7 @@
     <section id="step5-hld">
       <div class="step-pill">Step 5 of 6 — High-Level Design</div>
       <h2>High-level design</h2>
-      <p style="font-size:13px;color:#999;margin-bottom:0.75rem">Streaming gives fast approximate numbers; a batch job reads the immutable raw log and overwrites each window with the exact, reconciled value.</p>
+      <p style="font-size:13px;color:#4A5873;margin-bottom:0.75rem">Streaming gives fast approximate numbers; a batch job reads the immutable raw log and overwrites each window with the exact, reconciled value.</p>
 
       <div class="diagram-wrap">
         <svg viewBox="0 0 800 320" xmlns="http://www.w3.org/2000/svg">
@@ -310,7 +322,7 @@
     <section id="step6-deepdive-exactlyonce">
       <div class="step-pill">Step 6 of 6 — Deep Dives</div>
       <h2>Deep dive: exactly-once stream aggregation</h2>
-      <ul style="font-size:13px;color:#999;margin:0 0 0.75rem;padding-left:1.1rem">
+      <ul style="font-size:13px;color:#4A5873;margin:0 0 0.75rem;padding-left:1.1rem">
         <li><strong>Kafka</strong> is at-least-once — retries and rebalances redeliver events.</li>
         <li>Correctness = idempotent aggregation, not eliminating redelivery.</li>
       </ul>
@@ -360,7 +372,7 @@
 
     <section id="step6-deepdive-windowing">
       <h2>Deep dive: windowed aggregation and watermarks</h2>
-      <ul style="font-size:13px;color:#999;margin:0 0 0.75rem;padding-left:1.1rem">
+      <ul style="font-size:13px;color:#4A5873;margin:0 0 0.75rem;padding-left:1.1rem">
         <li>Events group into fixed <strong>1-minute tumbling windows</strong>.</li>
         <li><strong>Watermark</strong> tracks how far event-time has progressed.</li>
         <li><strong>Grace period</strong> holds windows open for stragglers, then finalizes.</li>
@@ -416,7 +428,7 @@
 
     <section id="step6-deepdive-reconciliation">
       <h2>Deep dive: streaming vs batch reconciliation</h2>
-      <ul style="font-size:13px;color:#999;margin:0 0 0.75rem;padding-left:1.1rem">
+      <ul style="font-size:13px;color:#4A5873;margin:0 0 0.75rem;padding-left:1.1rem">
         <li>Two paths compute the same numbers on different timelines.</li>
         <li><strong>Streaming</strong>: fast, but drifts under replay or dedup edge cases.</li>
         <li><strong>Batch</strong>: slow, reads the immutable log — always exact.</li>
@@ -513,6 +525,8 @@
 
   </main>
   <script src="../../assets/nav.js"></script>
+  <script src="../../assets/chrome.js"></script>
+  <script src="../../assets/sheet.js"></script>
   <script src="../../assets/mindmap.js"></script>
 </body>
 </html>

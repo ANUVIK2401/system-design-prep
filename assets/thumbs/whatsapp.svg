@@ -1,0 +1,33 @@
+<svg viewBox="0 0 780 300" xmlns="http://www.w3.org/2000/svg"><style>
+text{font-family:'IBM Plex Sans',system-ui,sans-serif;fill:#0B1F3F;text-anchor:middle;dominant-baseline:middle}
+.diag-label{font-size:12px;font-weight:600}.diag-sublabel,.diag-arrow-label{font-size:9.5px;fill:#4A5873}
+.diag-box{fill:#fff;stroke:#0B1F3F;stroke-width:1.5;rx:7px}.role-cache{fill:#FBF5E6;stroke:#B8892B}
+.role-async,.role-queue{fill:#FBF5E6;stroke:#9A5B13}.role-db{fill:#EEF2F9;stroke:#4A5873}
+.diag-arrow-path{fill:none;stroke:#66728A;stroke-width:1.5}
+</style>
+          <defs><marker id="waHldArrow" markerWidth="8" markerHeight="8" refX="6" refY="3" orient="auto"><path d="M0,0 L6,3 L0,6 Z" fill="#8A6514"/></marker></defs>
+          <g><rect class="diag-box role-client" x="10" y="20" width="120" height="50"/><text class="diag-label" x="70" y="50" style="font-size:11px">Client Devices</text></g>
+          <path class="diag-arrow-path" d="M130,45 L165,45" marker-end="url(#waHldArrow)"/>
+          <g><rect class="diag-box role-client" x="165" y="20" width="120" height="50"/><text class="diag-label" x="225" y="50" style="font-size:11px">Load Balancer</text></g>
+
+          <path class="diag-arrow-path" d="M225,70 L225,105" marker-end="url(#waHldArrow)"/>
+          <g><rect class="diag-box" x="160" y="105" width="150" height="46"/><text class="diag-label" x="235" y="128" style="font-size:11px">Connection Svc</text><text class="diag-sublabel" x="235" y="143" style="font-size:8.5px">stateful, in-memory</text></g>
+
+          <path class="diag-arrow-path" d="M310,128 L350,128" marker-end="url(#waHldArrow)"/>
+          <g><rect class="diag-box" x="350" y="105" width="140" height="46"/><text class="diag-label" x="420" y="128" style="font-size:11px">Message Svc</text><text class="diag-sublabel" x="420" y="143" style="font-size:8.5px">stateless</text></g>
+
+          <path class="diag-arrow-path" d="M420,151 L420,185" marker-end="url(#waHldArrow)"/>
+          <g><rect class="diag-box role-db" x="355" y="185" width="130" height="46"/><text class="diag-label" x="420" y="208" style="font-size:11px">Cassandra</text></g>
+
+          <path class="diag-arrow-path" d="M490,128 L525,128" marker-end="url(#waHldArrow)"/>
+          <g><rect class="diag-box role-cache" x="525" y="105" width="140" height="46"/><text class="diag-label" x="595" y="128" style="font-size:11px">Redis</text><text class="diag-sublabel" x="595" y="143" style="font-size:8.5px">sessions + offline queue</text></g>
+
+          <path class="diag-arrow-path" d="M595,151 L595,185" marker-end="url(#waHldArrow)" stroke-dasharray="3 3"/>
+          <g><rect class="diag-box role-async" x="530" y="185" width="130" height="46"/><text class="diag-label" x="595" y="208" style="font-size:11px">Push Notif Svc</text></g>
+
+          <path class="diag-arrow-path" d="M160,128 L100,128 L100,185" marker-end="url(#waHldArrow)" stroke-dasharray="3 3"/>
+          <g><rect class="diag-box role-db" x="30" y="185" width="140" height="46"/><text class="diag-label" x="100" y="208" style="font-size:11px">Postgres</text><text class="diag-sublabel" x="100" y="223" style="font-size:8.5px">devices + sync cursors</text></g>
+
+          <path class="diag-arrow-path" d="M660,128 L700,128 L700,240" marker-end="url(#waHldArrow)"/>
+          <g><rect class="diag-box role-async" x="620" y="240" width="140" height="46"/><text class="diag-label" x="690" y="263" style="font-size:11px">APNs / FCM</text></g>
+        </svg>

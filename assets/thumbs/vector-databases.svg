@@ -1,0 +1,34 @@
+<svg viewBox="0 0 720 320" xmlns="http://www.w3.org/2000/svg"><style>
+text{font-family:'IBM Plex Sans',system-ui,sans-serif;fill:#0B1F3F;text-anchor:middle;dominant-baseline:middle}
+.diag-label{font-size:12px;font-weight:600}.diag-sublabel,.diag-arrow-label{font-size:9.5px;fill:#4A5873}
+.diag-box{fill:#fff;stroke:#0B1F3F;stroke-width:1.5;rx:7px}.role-cache{fill:#FBF5E6;stroke:#B8892B}
+.role-async,.role-queue{fill:#FBF5E6;stroke:#9A5B13}.role-db{fill:#EEF2F9;stroke:#4A5873}
+.diag-arrow-path{fill:none;stroke:#66728A;stroke-width:1.5}
+</style>
+          <defs>
+            <marker id="vdArrow" markerWidth="8" markerHeight="8" refX="6" refY="3" orient="auto"><path d="M0,0 L6,3 L0,6 Z" fill="#8A6514"/></marker>
+            <marker id="vdArrowG" markerWidth="8" markerHeight="8" refX="6" refY="3" orient="auto"><path d="M0,0 L6,3 L0,6 Z" fill="#8A6514"/></marker>
+          </defs>
+
+          <text class="diag-sublabel" x="160" y="16" style="font-size:10px;fill:#8A6514">INDEX BUILD (offline)</text>
+          <g><rect class="diag-box role-db" x="20" y="26" width="120" height="50"/><text class="diag-label" x="80" y="48" style="font-size:11px">Knowledge</text><text class="diag-sublabel" x="80" y="64">base docs</text></g>
+          <path class="diag-arrow-path" d="M140,51 L175,51" marker-end="url(#vdArrow)"/>
+          <g><rect class="diag-box role-async" x="175" y="26" width="130" height="50"/><text class="diag-label" x="240" y="48" style="font-size:11px">Embedding</text><text class="diag-sublabel" x="240" y="64">model</text></g>
+          <path class="diag-arrow-path" d="M305,51 L340,51" marker-end="url(#vdArrow)"/>
+          <g><rect class="diag-box role-cache" x="340" y="26" width="150" height="50"/><text class="diag-label" x="415" y="48" style="font-size:11px">HNSW index</text><text class="diag-sublabel" x="415" y="64">Pinecone/pgvector</text></g>
+
+          <text class="diag-sublabel" x="160" y="116" style="font-size:10px;fill:#8A6514">QUERY TIME (online)</text>
+          <g><rect class="diag-box role-client" x="20" y="126" width="120" height="50"/><text class="diag-label" x="80" y="148" style="font-size:11px">User query</text><text class="diag-sublabel" x="80" y="164">text</text></g>
+          <path class="diag-arrow-path" d="M140,151 L175,151" marker-end="url(#vdArrow)"/>
+          <g><rect class="diag-box role-async" x="175" y="126" width="130" height="50"/><text class="diag-label" x="240" y="148" style="font-size:11px">Embedding</text><text class="diag-sublabel" x="240" y="164">model</text></g>
+          <path class="diag-arrow-path" d="M305,151 L340,151" marker-end="url(#vdArrow)"/>
+          <g><rect class="diag-box role-cache" x="340" y="126" width="150" height="50"/><text class="diag-label" x="415" y="148" style="font-size:11px">HNSW search</text><text class="diag-sublabel" x="415" y="164">top-K ANN</text></g>
+          <path class="diag-arrow-path" d="M490,151 L525,151" marker-end="url(#vdArrow)"/>
+          <g><rect class="diag-box role-db" x="525" y="126" width="170" height="50"/><text class="diag-label" x="610" y="148" style="font-size:11px">Top-K chunks</text><text class="diag-sublabel" x="610" y="164">retrieved context</text></g>
+          <path class="diag-arrow-path" d="M610,176 C610,210 415,210 415,236" marker-end="url(#vdArrowG)"/>
+          <g><rect class="diag-box role-async" x="280" y="241" width="270" height="50"/><text class="diag-label" x="415" y="263" style="font-size:11px">Prompt assembly</text><text class="diag-sublabel" x="415" y="279">query + context → LLM</text></g>
+          <path class="diag-arrow-path" d="M550,266 L585,266" marker-end="url(#vdArrowG)"/>
+          <g><rect class="diag-box" x="585" y="241" width="115" height="50"/><text class="diag-label" x="642" y="263" style="font-size:11px">LLM</text><text class="diag-sublabel" x="642" y="279">answer</text></g>
+
+          <text class="diag-sublabel" x="415" y="106" style="font-size:9px;fill:#4A5873">HNSW: top layer = sparse, long jumps. bottom layer = dense, local refine.</text>
+        </svg>

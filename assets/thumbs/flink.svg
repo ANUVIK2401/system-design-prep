@@ -1,0 +1,45 @@
+<svg viewBox="0 0 740 220" xmlns="http://www.w3.org/2000/svg"><style>
+text{font-family:'IBM Plex Sans',system-ui,sans-serif;fill:#0B1F3F;text-anchor:middle;dominant-baseline:middle}
+.diag-label{font-size:12px;font-weight:600}.diag-sublabel,.diag-arrow-label{font-size:9.5px;fill:#4A5873}
+.diag-box{fill:#fff;stroke:#0B1F3F;stroke-width:1.5;rx:7px}.role-cache{fill:#FBF5E6;stroke:#B8892B}
+.role-async,.role-queue{fill:#FBF5E6;stroke:#9A5B13}.role-db{fill:#EEF2F9;stroke:#4A5873}
+.diag-arrow-path{fill:none;stroke:#66728A;stroke-width:1.5}
+</style>
+          <defs>
+            <marker id="flArrow2" markerWidth="8" markerHeight="8" refX="6" refY="3" orient="auto"><path d="M0,0 L6,3 L0,6 Z" fill="#8A6514"/></marker>
+          </defs>
+
+          <g>
+            <rect class="diag-box role-async" x="15" y="70" width="130" height="56"/>
+            <text class="diag-label" x="80" y="93" style="font-size:11px">Event stream</text>
+            <text class="diag-sublabel" x="80" y="110" style="font-size:9px">Kafka source</text>
+          </g>
+          <path class="diag-arrow-path" d="M145,98 L205,98" marker-end="url(#flArrow2)"/>
+
+          <g>
+            <rect class="diag-box role-client" x="205" y="70" width="130" height="56"/>
+            <text class="diag-label" x="270" y="93" style="font-size:11px">keyBy(userId)</text>
+            <text class="diag-sublabel" x="270" y="110" style="font-size:9px">keyed state</text>
+          </g>
+          <path class="diag-arrow-path" d="M335,98 L395,98" marker-end="url(#flArrow2)"/>
+
+          <g>
+            <rect class="diag-box role-cache" x="395" y="70" width="150" height="56"/>
+            <text class="diag-label" x="470" y="93" style="font-size:11px">Tumbling window</text>
+            <text class="diag-sublabel" x="470" y="110" style="font-size:9px">count() per 1min</text>
+          </g>
+          <path class="diag-arrow-path" d="M545,98 L605,98" marker-end="url(#flArrow2)"/>
+
+          <g>
+            <rect class="diag-box role-db" x="605" y="70" width="120" height="56"/>
+            <text class="diag-label" x="665" y="93" style="font-size:11px">Sink</text>
+            <text class="diag-sublabel" x="665" y="110" style="font-size:9px">DB / dashboard</text>
+          </g>
+
+          <path class="diag-arrow-path" d="M270,126 L270,170" marker-end="url(#flArrow2)" stroke-dasharray="3 3"/>
+          <path class="diag-arrow-path" d="M470,126 L470,170" marker-end="url(#flArrow2)" stroke-dasharray="3 3"/>
+          <g>
+            <rect class="diag-box role-async" x="180" y="170" width="380" height="40" rx="6"/>
+            <text class="diag-label" x="370" y="195" style="font-size:11px">Checkpoint barrier → durable state snapshot</text>
+          </g>
+        </svg>

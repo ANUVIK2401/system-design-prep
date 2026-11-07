@@ -7,6 +7,18 @@
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link rel="stylesheet" href="../../assets/style.css">
+        <!-- site-head -->
+  <meta name="description" content="A single front door that centralizes auth, rate limiting, routing, and request shaping so backend services don&#x27;t each reimplement them.">
+  <meta name="theme-color" content="#0B1F3F">
+  <link rel="canonical" href="https://anuvik2401.github.io/system-design-prep/topics/tech/api-gateway.html">
+  <link rel="icon" href="../../assets/favicon.svg" type="image/svg+xml">
+  <meta property="og:type" content="website">
+  <meta property="og:title" content="API Gateway — SD Prep">
+  <meta property="og:description" content="A single front door that centralizes auth, rate limiting, routing, and request shaping so backend services don&#x27;t each reimplement them.">
+  <meta property="og:url" content="https://anuvik2401.github.io/system-design-prep/topics/tech/api-gateway.html">
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,600;12..96,700&amp;family=IBM+Plex+Mono:wght@500&amp;family=IBM+Plex+Sans:wght@400;500;600&amp;display=swap">
+  <link rel="stylesheet" href="../../assets/chrome.css">
+  <!-- /site-head -->
 </head>
 <body>
   <aside id="sidebar"></aside>
@@ -75,10 +87,10 @@
             <rect class="diag-box role-cache" x="165" y="40" width="180" height="150"/>
             <text class="diag-label" x="255" y="65" style="font-size:11px;font-weight:600">API Gateway</text>
           </g>
-          <text x="180" y="90" font-size="10" fill="#bbb" font-family="Inter,sans-serif">1. Auth check (JWT)</text>
-          <text x="180" y="108" font-size="10" fill="#bbb" font-family="Inter,sans-serif">2. Rate limit check</text>
-          <text x="180" y="126" font-size="10" fill="#bbb" font-family="Inter,sans-serif">3. Route by path</text>
-          <text x="180" y="144" font-size="10" fill="#bbb" font-family="Inter,sans-serif">4. Transform request</text>
+          <text x="180" y="90" font-size="10" fill="#33415C" font-family="Inter,sans-serif">1. Auth check (JWT)</text>
+          <text x="180" y="108" font-size="10" fill="#33415C" font-family="Inter,sans-serif">2. Rate limit check</text>
+          <text x="180" y="126" font-size="10" fill="#33415C" font-family="Inter,sans-serif">3. Route by path</text>
+          <text x="180" y="144" font-size="10" fill="#33415C" font-family="Inter,sans-serif">4. Transform request</text>
 
           <path class="diag-arrow-path" d="M255,40 L255,15 L40,15 L40,85" marker-end="url(#agArrowRed)" stroke="var(--red)" stroke-dasharray="3 3"/>
           <text x="100" y="10" font-size="9" fill="var(--red)" font-family="Inter,sans-serif">401 / 429 rejected here — never reaches backends</text>
@@ -195,5 +207,6 @@
 
   </main>
   <script src="../../assets/nav.js"></script>
+  <script src="../../assets/chrome.js"></script>
 </body>
 </html>

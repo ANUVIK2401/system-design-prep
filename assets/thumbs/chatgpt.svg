@@ -1,0 +1,35 @@
+<svg viewBox="0 0 800 320" xmlns="http://www.w3.org/2000/svg"><style>
+text{font-family:'IBM Plex Sans',system-ui,sans-serif;fill:#0B1F3F;text-anchor:middle;dominant-baseline:middle}
+.diag-label{font-size:12px;font-weight:600}.diag-sublabel,.diag-arrow-label{font-size:9.5px;fill:#4A5873}
+.diag-box{fill:#fff;stroke:#0B1F3F;stroke-width:1.5;rx:7px}.role-cache{fill:#FBF5E6;stroke:#B8892B}
+.role-async,.role-queue{fill:#FBF5E6;stroke:#9A5B13}.role-db{fill:#EEF2F9;stroke:#4A5873}
+.diag-arrow-path{fill:none;stroke:#66728A;stroke-width:1.5}
+</style>
+          <defs><marker id="cgHld" markerWidth="8" markerHeight="8" refX="6" refY="3" orient="auto"><path d="M0,0 L6,3 L0,6 Z" fill="#8A6514"/></marker></defs>
+
+          <g><rect class="diag-box role-client" x="10" y="30" width="130" height="50"/><text class="diag-label" x="75" y="52" style="font-size:11px">Client</text><text class="diag-sublabel" x="75" y="68" style="font-size:8.5px">web / mobile app</text></g>
+          <path class="diag-arrow-path" d="M140,55 L175,55" marker-end="url(#cgHld)"/>
+          <g><rect class="diag-box" x="175" y="30" width="130" height="50"/><text class="diag-label" x="240" y="52" style="font-size:11px">API Gateway</text><text class="diag-sublabel" x="240" y="68" style="font-size:8.5px">auth, rate limit</text></g>
+
+          <path class="diag-arrow-path" d="M240,80 L240,110" marker-end="url(#cgHld)"/>
+          <g><rect class="diag-box" x="175" y="110" width="130" height="46"/><text class="diag-label" x="240" y="128" style="font-size:11px">Moderation</text><text class="diag-sublabel" x="240" y="143" style="font-size:8.5px">input + output filter</text></g>
+
+          <path class="diag-arrow-path" d="M175,133 L145,133" marker-end="url(#cgHld)"/>
+          <g><rect class="diag-box role-db" x="10" y="110" width="130" height="46"/><text class="diag-label" x="75" y="128" style="font-size:11px">Conversation DB</text><text class="diag-sublabel" x="75" y="143" style="font-size:8.5px">Postgres</text></g>
+
+          <path class="diag-arrow-path" d="M305,133 L340,133" marker-end="url(#cgHld)"/>
+          <g><rect class="diag-box role-async" x="340" y="110" width="150" height="46"/><text class="diag-label" x="415" y="128" style="font-size:11px">Scheduler / Batcher</text><text class="diag-sublabel" x="415" y="143" style="font-size:8.5px">continuous batching</text></g>
+
+          <path class="diag-arrow-path" d="M490,133 L525,133" marker-end="url(#cgHld)"/>
+          <g><rect class="diag-box role-async" x="525" y="90" width="150" height="46"/><text class="diag-label" x="600" y="108" style="font-size:11px">GPU Worker Fleet</text><text class="diag-sublabel" x="600" y="123" style="font-size:8.5px">model + KV cache</text></g>
+          <g><rect class="diag-box role-async" x="525" y="142" width="150" height="46"/><text class="diag-label" x="600" y="160" style="font-size:11px">GPU Worker Fleet</text><text class="diag-sublabel" x="600" y="175" style="font-size:8.5px">model + KV cache</text></g>
+
+          <path class="diag-arrow-path" d="M600,90 L600,60 L680,60" marker-end="url(#cgHld)" stroke-dasharray="3 3"/>
+          <path class="diag-arrow-path" d="M600,188 L600,220 L680,220" marker-end="url(#cgHld)" stroke-dasharray="3 3"/>
+          <g><rect class="diag-box role-cache" x="680" y="36" width="110" height="46"/><text class="diag-label" x="735" y="55" style="font-size:11px">Stream Router</text><text class="diag-sublabel" x="735" y="70" style="font-size:8.5px">SSE fan-out</text></g>
+          <g><rect class="diag-box role-cache" x="680" y="196" width="110" height="46"/><text class="diag-label" x="735" y="215" style="font-size:11px">Stream Router</text><text class="diag-sublabel" x="735" y="230" style="font-size:8.5px">SSE fan-out</text></g>
+
+          <path class="diag-arrow-path" d="M735,82 L735,150 L735,196" marker-end="url(#cgHld)"/>
+          <path class="diag-arrow-path" d="M680,59 L500,20 L140,20 L140,55" marker-end="url(#cgHld)" stroke-dasharray="3 3"/>
+          <text class="diag-sublabel" x="410" y="14" style="font-size:9px;fill:#4A5873">tokens streamed back to the same open client connection</text>
+        </svg>

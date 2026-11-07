@@ -7,18 +7,46 @@
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link rel="stylesheet" href="assets/style.css">
+        <!-- site-head -->
+  <meta name="description" content="Search 57 system design interview pages: concepts, patterns, technologies, and 30 full question walkthroughs.">
+  <meta name="theme-color" content="#0B1F3F">
+  <link rel="canonical" href="https://anuvik2401.github.io/system-design-prep/">
+  <link rel="icon" href="assets/favicon.svg" type="image/svg+xml">
+  <meta property="og:type" content="website">
+  <meta property="og:title" content="System Design Prep">
+  <meta property="og:description" content="Search 57 system design interview pages: concepts, patterns, technologies, and 30 full question walkthroughs.">
+  <meta property="og:url" content="https://anuvik2401.github.io/system-design-prep/">
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,600;12..96,700&amp;family=IBM+Plex+Mono:wght@500&amp;family=IBM+Plex+Sans:wght@400;500;600&amp;display=swap">
+  <link rel="stylesheet" href="assets/chrome.css">
+  <!-- /site-head -->
 </head>
 <body>
   <aside id="sidebar"></aside>
   <main>
 
-    <div class="index-hero">
-      <div class="pill">Interview mode</div>
-      <h1>System Design Prep</h1>
-      <p>Everything you need to pass a system design interview. No fluff — just the framework, concepts, patterns, and practice.</p>
-    </div>
+    <section class="home-hero" aria-labelledby="home-title">
+      <p class="hero-eyebrow">System design interview prep</p>
+      <h1 id="home-title">Find the concept. Draw the system.</h1>
+      <p class="hero-lede">Search every section of all 57 pages, or follow the route from first principles to full walkthroughs.</p>
+      <ol class="route" aria-label="Study route">
+        <li><a href="index.html?cat=foundations#topics"><span class="route-count">6</span><strong>Foundations</strong><span>Framework, CAP, latency</span></a></li>
+        <li><a href="index.html?cat=patterns#topics"><span class="route-count">7</span><strong>Patterns</strong><span>Contention, scaling, real-time</span></a></li>
+        <li><a href="index.html?cat=tech#topics"><span class="route-count">9</span><strong>Technologies</strong><span>Redis, Kafka, Cassandra</span></a></li>
+        <li><a href="index.html?cat=advanced#topics"><span class="route-count">4</span><strong>Advanced</strong><span>Geo, vectors, time series</span></a></li>
+        <li><a href="index.html?cat=questions#topics"><span class="route-count">30</span><strong>Questions</strong><span>Uber, WhatsApp, Google Docs</span></a></li>
+      </ol>
+      <div class="concept-chips" aria-label="Common searches">
+        <span>Try</span>
+        <button type="button" data-search="consistent hashing">consistent hashing</button>
+        <button type="button" data-search="geohash">geohash</button>
+        <button type="button" data-search="cap theorem">CAP theorem</button>
+        <button type="button" data-search="fan-out">fan-out</button>
+        <button type="button" data-search="idempotency">idempotency</button>
+        <button type="button" data-search="websocket">WebSocket</button>
+      </div>
+    </section>
 
-    <div class="filter-row">
+    <div class="filter-row" id="topics">
       <button class="filter-btn active" data-filter="all">All</button>
       <button class="filter-btn" data-filter="foundations">Foundations</button>
       <button class="filter-btn" data-filter="patterns">Patterns</button>
@@ -676,20 +704,24 @@
   </main>
 
   <script src="assets/nav.js"></script>
+  <script src="assets/chrome.js"></script>
   <script src="assets/index-mindmap.js"></script>
   <script>
     const btns = document.querySelectorAll('.filter-btn');
     const cards = document.querySelectorAll('.topic-card');
-    btns.forEach(btn => {
-      btn.addEventListener('click', () => {
-        btns.forEach(b => b.classList.remove('active'));
-        btn.classList.add('active');
-        const f = btn.dataset.filter;
-        cards.forEach(card => {
-          card.style.display = (f === 'all' || card.dataset.cat === f) ? 'block' : 'none';
-        });
-      });
-    });
+    const applyFilter = (f) => {
+      const match = Array.from(btns).find(b => b.dataset.filter === f);
+      if (!match) return;
+      btns.forEach(b => b.classList.toggle('active', b === match));
+      cards.forEach(card => { card.style.display = (f === 'all' || card.dataset.cat === f) ? 'block' : 'none'; });
+    };
+    btns.forEach(btn => btn.addEventListener('click', () => {
+      applyFilter(btn.dataset.filter);
+      const url = new URL(location.href);
+      url.searchParams.set('cat', btn.dataset.filter);
+      history.replaceState(null, '', url);
+    }));
+    applyFilter(new URLSearchParams(location.search).get('cat') || 'all');
   </script>
 </body>
 </html>

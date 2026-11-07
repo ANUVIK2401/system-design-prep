@@ -1,0 +1,60 @@
+<svg viewBox="0 0 740 320" xmlns="http://www.w3.org/2000/svg"><style>
+text{font-family:'IBM Plex Sans',system-ui,sans-serif;fill:#0B1F3F;text-anchor:middle;dominant-baseline:middle}
+.diag-label{font-size:12px;font-weight:600}.diag-sublabel,.diag-arrow-label{font-size:9.5px;fill:#4A5873}
+.diag-box{fill:#fff;stroke:#0B1F3F;stroke-width:1.5;rx:7px}.role-cache{fill:#FBF5E6;stroke:#B8892B}
+.role-async,.role-queue{fill:#FBF5E6;stroke:#9A5B13}.role-db{fill:#EEF2F9;stroke:#4A5873}
+.diag-arrow-path{fill:none;stroke:#66728A;stroke-width:1.5}
+</style>
+          <defs>
+            <marker id="rcArrow" markerWidth="8" markerHeight="8" refX="6" refY="3" orient="auto"><path d="M0,0 L6,3 L0,6 Z" fill="#8A6514"/></marker>
+            <marker id="rcArrowAmber" markerWidth="8" markerHeight="8" refX="6" refY="3" orient="auto"><path d="M0,0 L6,3 L0,6 Z" fill="#8A6514"/></marker>
+          </defs>
+
+          <text class="diag-sublabel" x="370" y="14" style="font-size:10px;fill:#8A6514">CLIENT REQUEST — CRC16(key) mod 16384 picks the slot</text>
+          <g>
+            <rect class="diag-box role-client" x="320" y="25" width="100" height="44"/>
+            <text class="diag-label" x="370" y="50" style="font-size:11px">Client</text>
+          </g>
+          <path class="diag-arrow-path" d="M370,69 L160,118" marker-end="url(#rcArrow)"/>
+          <path class="diag-arrow-path" d="M370,69 L370,118" marker-end="url(#rcArrow)"/>
+          <path class="diag-arrow-path" d="M370,69 L580,118" marker-end="url(#rcArrow)"/>
+
+          <g>
+            <rect class="diag-box role-cache" x="60" y="118" width="200" height="56"/>
+            <text class="diag-label" x="160" y="138" style="font-size:11px">Master A</text>
+            <text class="diag-sublabel" x="160" y="155">slots 0 – 5460</text>
+          </g>
+          <g>
+            <rect class="diag-box role-cache" x="270" y="118" width="200" height="56"/>
+            <text class="diag-label" x="370" y="138" style="font-size:11px">Master B</text>
+            <text class="diag-sublabel" x="370" y="155">slots 5461 – 10922</text>
+          </g>
+          <g>
+            <rect class="diag-box role-cache" x="480" y="118" width="200" height="56"/>
+            <text class="diag-label" x="580" y="138" style="font-size:11px">Master C</text>
+            <text class="diag-sublabel" x="580" y="155">slots 10923 – 16383</text>
+          </g>
+
+          <path class="diag-arrow-path" d="M160,174 L160,222" marker-end="url(#rcArrowAmber)"/>
+          <path class="diag-arrow-path" d="M370,174 L370,222" marker-end="url(#rcArrowAmber)"/>
+          <path class="diag-arrow-path" d="M580,174 L580,222" marker-end="url(#rcArrowAmber)"/>
+          <text class="diag-sublabel" x="200" y="200" style="font-size:9px;fill:#8A6514">async replication</text>
+
+          <g>
+            <rect class="diag-box role-async" x="60" y="222" width="200" height="56"/>
+            <text class="diag-label" x="160" y="242" style="font-size:11px">Replica A'</text>
+            <text class="diag-sublabel" x="160" y="259">standby</text>
+          </g>
+          <g>
+            <rect class="diag-box role-async" x="270" y="222" width="200" height="56"/>
+            <text class="diag-label" x="370" y="242" style="font-size:11px">Replica B'</text>
+            <text class="diag-sublabel" x="370" y="259">standby</text>
+          </g>
+          <g>
+            <rect class="diag-box role-async" x="480" y="222" width="200" height="56"/>
+            <text class="diag-label" x="580" y="242" style="font-size:11px">Replica C'</text>
+            <text class="diag-sublabel" x="580" y="259">standby</text>
+          </g>
+
+          <text class="diag-sublabel" x="370" y="300" style="font-size:9.5px">Nodes gossip cluster state over a separate bus port — each node knows every slot owner without a central coordinator</text>
+        </svg>

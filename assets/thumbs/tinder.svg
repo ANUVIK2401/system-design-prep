@@ -1,0 +1,35 @@
+<svg viewBox="0 0 780 300" xmlns="http://www.w3.org/2000/svg"><style>
+text{font-family:'IBM Plex Sans',system-ui,sans-serif;fill:#0B1F3F;text-anchor:middle;dominant-baseline:middle}
+.diag-label{font-size:12px;font-weight:600}.diag-sublabel,.diag-arrow-label{font-size:9.5px;fill:#4A5873}
+.diag-box{fill:#fff;stroke:#0B1F3F;stroke-width:1.5;rx:7px}.role-cache{fill:#FBF5E6;stroke:#B8892B}
+.role-async,.role-queue{fill:#FBF5E6;stroke:#9A5B13}.role-db{fill:#EEF2F9;stroke:#4A5873}
+.diag-arrow-path{fill:none;stroke:#66728A;stroke-width:1.5}
+</style>
+          <defs><marker id="tdHldArrow" markerWidth="8" markerHeight="8" refX="6" refY="3" orient="auto"><path d="M0,0 L6,3 L0,6 Z" fill="#8A6514"/></marker></defs>
+
+          <g><rect class="diag-box role-client" x="10" y="20" width="110" height="50"/><text class="diag-label" x="65" y="50" style="font-size:11px">Client App</text></g>
+          <path class="diag-arrow-path" d="M120,45 L155,45" marker-end="url(#tdHldArrow)"/>
+          <g><rect class="diag-box role-client" x="155" y="20" width="120" height="50"/><text class="diag-label" x="215" y="50" style="font-size:11px">API Gateway</text></g>
+
+          <path class="diag-arrow-path" d="M215,70 L215,100" marker-end="url(#tdHldArrow)"/>
+          <g><rect class="diag-box" x="140" y="100" width="130" height="46"/><text class="diag-label" x="205" y="123" style="font-size:11px">Deck Svc</text><text class="diag-sublabel" x="205" y="138" style="font-size:8.5px">stateless</text></g>
+          <g><rect class="diag-box" x="290" y="100" width="130" height="46"/><text class="diag-label" x="355" y="123" style="font-size:11px">Swipe Svc</text><text class="diag-sublabel" x="355" y="138" style="font-size:8.5px">stateless</text></g>
+
+          <path class="diag-arrow-path" d="M205,146 L205,180" marker-end="url(#tdHldArrow)"/>
+          <g><rect class="diag-box role-cache" x="140" y="180" width="130" height="46"/><text class="diag-label" x="205" y="203" style="font-size:11px">Candidate Cache</text></g>
+          <path class="diag-arrow-path" d="M355,146 L355,180" marker-end="url(#tdHldArrow)"/>
+          <g><rect class="diag-box role-db" x="290" y="180" width="130" height="46"/><text class="diag-label" x="355" y="203" style="font-size:11px">Cassandra</text></g>
+
+          <path class="diag-arrow-path" d="M270,203 L290,203" marker-end="url(#tdHldArrow)" stroke-dasharray="3 3"/>
+          <path class="diag-arrow-path" d="M205,226 L205,255" marker-end="url(#tdHldArrow)" stroke-dasharray="3 3"/>
+          <g><rect class="diag-box role-db" x="140" y="255" width="130" height="35"/><text class="diag-label" x="205" y="277" style="font-size:11px">Redis GEO</text></g>
+
+          <path class="diag-arrow-path" d="M420,203 L455,203" marker-end="url(#tdHldArrow)"/>
+          <g><rect class="diag-box role-db" x="455" y="180" width="120" height="46"/><text class="diag-label" x="515" y="203" style="font-size:11px">Match DB</text></g>
+          <path class="diag-arrow-path" d="M575,203 L610,203" marker-end="url(#tdHldArrow)"/>
+          <g><rect class="diag-box role-async" x="610" y="180" width="140" height="46"/><text class="diag-label" x="680" y="203" style="font-size:11px">Notification Svc</text></g>
+
+          <path class="diag-arrow-path" d="M420,123 L610,60 L610,45" marker-end="url(#tdHldArrow)" stroke-dasharray="3 3"/>
+          <g><rect class="diag-box role-async" x="555" y="20" width="150" height="46"/><text class="diag-label" x="630" y="43" style="font-size:11px">Rec Pipeline</text><text class="diag-sublabel" x="630" y="58" style="font-size:8.5px">geo filter → rank</text></g>
+          <path class="diag-arrow-path" d="M630,66 L630,90 L270,90 L270,180" marker-end="url(#tdHldArrow)" stroke-dasharray="3 3"/>
+        </svg>

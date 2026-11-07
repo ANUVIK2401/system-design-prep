@@ -8,7 +8,7 @@ https://anuvik2401.github.io/system-design-prep/
 
 A self-contained system design interview prep site — no fluff, no theory for theory's sake. 57 pages: 6 foundation pages, 7 core patterns, 9 key technologies, 4 advanced topics, and 30 full question breakdowns (Uber, WhatsApp, Google Docs, rate limiter, and more), each walked through requirements → entities → API → data flow → high-level design → deep dive, with interview moves you can say out loud.
 
-Static site, vanilla HTML/CSS/JS, zero build step, deployed via GitHub Pages from `main`.
+Static site, vanilla HTML/CSS/JS, deployed via GitHub Pages from `main`. After adding or editing a page, run `python3 tools/build_site.py && python3 tools/check_site.py` to refresh search, thumbnails, metadata, and the sitemap.
 
 ## Contents
 
@@ -57,6 +57,8 @@ topics/              all content pages, mirrors the sidebar categories above
 assets/
   style.css          shared styles, design tokens
   nav.js             sidebar, progress tracking, diagrams, step tracker
+  chrome.css/.js     navbar, keyword search, breadcrumbs, pager, thumbnails
+  sheet.js           one-page sheet on question pages
   mindmap.js         per-page concept map renderer
   index-mindmap.js   index page concept map renderer
 ```

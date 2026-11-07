@@ -1,0 +1,24 @@
+<svg viewBox="0 0 700 130" xmlns="http://www.w3.org/2000/svg"><style>
+text{font-family:'IBM Plex Sans',system-ui,sans-serif;fill:#0B1F3F;text-anchor:middle;dominant-baseline:middle}
+.diag-label{font-size:12px;font-weight:600}.diag-sublabel,.diag-arrow-label{font-size:9.5px;fill:#4A5873}
+.diag-box{fill:#fff;stroke:#0B1F3F;stroke-width:1.5;rx:7px}.role-cache{fill:#FBF5E6;stroke:#B8892B}
+.role-async,.role-queue{fill:#FBF5E6;stroke:#9A5B13}.role-db{fill:#EEF2F9;stroke:#4A5873}
+.diag-arrow-path{fill:none;stroke:#66728A;stroke-width:1.5}
+</style>
+          <defs><marker id="sr1" markerWidth="8" markerHeight="8" refX="6" refY="3" orient="auto"><path d="M0,0 L6,3 L0,6 Z" fill="#8A6514"/></marker></defs>
+          <g><rect class="diag-box role-client" x="10" y="40" width="100" height="50"/><text class="diag-label" x="60" y="65" style="font-size:11px">App</text></g>
+          <path class="diag-arrow-path" d="M110,55 L155,30" marker-end="url(#sr1)"/>
+          <path class="diag-arrow-path" d="M110,75 L155,100" marker-end="url(#sr1)"/>
+          <g><rect class="diag-box role-db" x="155" y="10" width="150" height="45"/><text class="diag-label" x="230" y="28" style="font-size:11px">Primary DB</text><text class="diag-sublabel" x="230" y="44">writes</text></g>
+          <g><rect class="diag-box role-db" x="155" y="80" width="150" height="45"/><text class="diag-label" x="230" y="98" style="font-size:11px">Read Replicas</text><text class="diag-sublabel" x="230" y="114">N nodes</text></g>
+          <path class="diag-arrow-path" d="M305,32 C340,55 340,55 305,95" marker-end="url(#sr1)" stroke-dasharray="4 3"/>
+          <text class="diag-sublabel" x="345" y="58" style="font-size:9px">async replication, ~ms-100ms lag</text>
+
+          <g><rect class="diag-box role-cache" x="420" y="40" width="120" height="50"/><text class="diag-label" x="480" y="60" style="font-size:11px">Redis</text><text class="diag-sublabel" x="480" y="76">cache-aside</text></g>
+          <path class="diag-arrow-path" d="M110,65 C300,65 350,65 420,65" marker-end="url(#sr1)"/>
+          <text class="diag-sublabel" x="260" y="20" style="font-size:9px">1. check cache first</text>
+          <path class="diag-arrow-path" d="M540,55 C570,55 590,40 590,30" marker-end="url(#sr1)"/>
+          <text class="diag-sublabel" x="620" y="40" style="font-size:9px">2. miss → query replica</text>
+          <path class="diag-arrow-path" d="M590,30 C620,15 620,15 540,50" marker-end="url(#sr1)" stroke-dasharray="3 3"/>
+          <text class="diag-sublabel" x="620" y="100" style="font-size:9px">3. populate cache, return</text>
+        </svg>

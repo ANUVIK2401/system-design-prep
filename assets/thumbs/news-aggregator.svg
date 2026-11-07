@@ -1,0 +1,40 @@
+<svg viewBox="0 0 780 300" xmlns="http://www.w3.org/2000/svg"><style>
+text{font-family:'IBM Plex Sans',system-ui,sans-serif;fill:#0B1F3F;text-anchor:middle;dominant-baseline:middle}
+.diag-label{font-size:12px;font-weight:600}.diag-sublabel,.diag-arrow-label{font-size:9.5px;fill:#4A5873}
+.diag-box{fill:#fff;stroke:#0B1F3F;stroke-width:1.5;rx:7px}.role-cache{fill:#FBF5E6;stroke:#B8892B}
+.role-async,.role-queue{fill:#FBF5E6;stroke:#9A5B13}.role-db{fill:#EEF2F9;stroke:#4A5873}
+.diag-arrow-path{fill:none;stroke:#66728A;stroke-width:1.5}
+</style>
+          <defs><marker id="naHldArrow" markerWidth="8" markerHeight="8" refX="6" refY="3" orient="auto"><path d="M0,0 L6,3 L0,6 Z" fill="#8A6514"/></marker></defs>
+
+          <g><rect class="diag-box role-async" x="10" y="20" width="120" height="46"/><text class="diag-label" x="70" y="43" style="font-size:11px">URL Frontier</text><text class="diag-sublabel" x="70" y="58" style="font-size:8.5px">priority queue</text></g>
+          <path class="diag-arrow-path" d="M130,43 L165,43" marker-end="url(#naHldArrow)"/>
+          <g><rect class="diag-box" x="165" y="20" width="120" height="46"/><text class="diag-label" x="225" y="47" style="font-size:11px">Crawler Fleet</text></g>
+          <path class="diag-arrow-path" d="M285,43 L320,43" marker-end="url(#naHldArrow)"/>
+          <g><rect class="diag-box role-cache" x="320" y="20" width="120" height="46"/><text class="diag-label" x="380" y="43" style="font-size:11px">Bloom Filter</text><text class="diag-sublabel" x="380" y="58" style="font-size:8.5px">Redis</text></g>
+          <path class="diag-arrow-path" d="M440,43 L475,43" marker-end="url(#naHldArrow)"/>
+          <g><rect class="diag-box role-db" x="475" y="20" width="100" height="46"/><text class="diag-label" x="525" y="47" style="font-size:11px">S3</text></g>
+          <path class="diag-arrow-path" d="M525,66 L525,95" marker-end="url(#naHldArrow)"/>
+          <g><rect class="diag-box role-db" x="465" y="95" width="120" height="46"/><text class="diag-label" x="525" y="123" style="font-size:11px">Postgres</text></g>
+
+          <path class="diag-arrow-path" d="M285,66 L285,95" marker-end="url(#naHldArrow)" stroke-dasharray="3 3"/>
+          <g><rect class="diag-box role-async" x="220" y="95" width="130" height="46"/><text class="diag-label" x="285" y="123" style="font-size:11px">Kafka</text></g>
+
+          <path class="diag-arrow-path" d="M285,141 L160,141 L160,165" marker-end="url(#naHldArrow)"/>
+          <g><rect class="diag-box role-db" x="95" y="165" width="130" height="46"/><text class="diag-label" x="160" y="193" style="font-size:11px">Elasticsearch</text></g>
+
+          <path class="diag-arrow-path" d="M285,141 L420,141 L420,165" marker-end="url(#naHldArrow)"/>
+          <g><rect class="diag-box role-async" x="355" y="165" width="130" height="46"/><text class="diag-label" x="420" y="188" style="font-size:11px">Clusterer</text><text class="diag-sublabel" x="420" y="203" style="font-size:8.5px">worker pool</text></g>
+
+          <path class="diag-arrow-path" d="M485,188 L600,188 L600,165" marker-end="url(#naHldArrow)"/>
+          <g><rect class="diag-box role-async" x="555" y="120" width="140" height="46"/><text class="diag-label" x="625" y="143" style="font-size:11px">Ranker</text><text class="diag-sublabel" x="625" y="158" style="font-size:8.5px">writes pre-ranked lists</text></g>
+
+          <path class="diag-arrow-path" d="M625,120 L625,95" marker-end="url(#naHldArrow)"/>
+          <g><rect class="diag-box role-cache" x="555" y="49" width="140" height="46"/><text class="diag-label" x="625" y="77" style="font-size:11px">Redis (ranked)</text></g>
+
+          <path class="diag-arrow-path" d="M555,72 L440,72" marker-end="url(#naHldArrow)"/>
+          <g><rect class="diag-box" x="300" y="49" width="140" height="46"/><text class="diag-label" x="370" y="77" style="font-size:11px">Feed / API Svc</text></g>
+
+          <path class="diag-arrow-path" d="M300,72 L165,72" marker-end="url(#naHldArrow)"/>
+          <g><rect class="diag-box role-client" x="20" y="49" width="140" height="46"/><text class="diag-label" x="90" y="77" style="font-size:11px">Clients</text></g>
+        </svg>

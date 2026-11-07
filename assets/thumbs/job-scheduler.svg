@@ -1,0 +1,37 @@
+<svg viewBox="0 0 800 320" xmlns="http://www.w3.org/2000/svg"><style>
+text{font-family:'IBM Plex Sans',system-ui,sans-serif;fill:#0B1F3F;text-anchor:middle;dominant-baseline:middle}
+.diag-label{font-size:12px;font-weight:600}.diag-sublabel,.diag-arrow-label{font-size:9.5px;fill:#4A5873}
+.diag-box{fill:#fff;stroke:#0B1F3F;stroke-width:1.5;rx:7px}.role-cache{fill:#FBF5E6;stroke:#B8892B}
+.role-async,.role-queue{fill:#FBF5E6;stroke:#9A5B13}.role-db{fill:#EEF2F9;stroke:#4A5873}
+.diag-arrow-path{fill:none;stroke:#66728A;stroke-width:1.5}
+</style>
+          <defs><marker id="jsHldArrow" markerWidth="8" markerHeight="8" refX="6" refY="3" orient="auto"><path d="M0,0 L6,3 L0,6 Z" fill="#8A6514"/></marker></defs>
+
+          <g><rect class="diag-box role-client" x="10" y="20" width="140" height="46"/><text class="diag-label" x="80" y="47" style="font-size:11px">Job Definition API</text></g>
+          <path class="diag-arrow-path" d="M150,43 L185,43" marker-end="url(#jsHldArrow)"/>
+          <g><rect class="diag-box role-db" x="185" y="20" width="120" height="46"/><text class="diag-label" x="245" y="47" style="font-size:11px">Job Store</text></g>
+
+          <path class="diag-arrow-path" d="M245,66 L245,100" marker-end="url(#jsHldArrow)"/>
+          <g><rect class="diag-box role-cache" x="90" y="100" width="130" height="46"/><text class="diag-label" x="155" y="118" style="font-size:11px">Scheduler Shard 0</text><text class="diag-sublabel" x="155" y="134" style="font-size:8.5px">leader</text></g>
+          <g><rect class="diag-box" x="235" y="100" width="130" height="46"/><text class="diag-label" x="300" y="118" style="font-size:11px">Scheduler Shard 1</text><text class="diag-sublabel" x="300" y="134" style="font-size:8.5px">leader</text></g>
+          <g><rect class="diag-box" x="380" y="100" width="130" height="46"/><text class="diag-label" x="445" y="118" style="font-size:11px">Scheduler Shard N</text><text class="diag-sublabel" x="445" y="134" style="font-size:8.5px">leader</text></g>
+
+          <path class="diag-arrow-path" d="M155,100 L155,80 L600,80 L600,100" marker-end="url(#jsHldArrow)"/>
+          <path class="diag-arrow-path" d="M300,100 L300,90 L600,90 L600,100" marker-end="url(#jsHldArrow)"/>
+          <path class="diag-arrow-path" d="M445,100 L445,95 L600,95 L600,100" marker-end="url(#jsHldArrow)"/>
+          <g><rect class="diag-box role-db" x="600" y="100" width="170" height="46"/><text class="diag-label" x="685" y="118" style="font-size:11px">Coordination Svc</text><text class="diag-sublabel" x="685" y="134" style="font-size:8.5px">ZooKeeper / etcd</text></g>
+
+          <path class="diag-arrow-path" d="M245,146 L245,180" marker-end="url(#jsHldArrow)"/>
+          <path class="diag-arrow-path" d="M155,146 L245,180" marker-end="url(#jsHldArrow)"/>
+          <path class="diag-arrow-path" d="M445,146 L300,180" marker-end="url(#jsHldArrow)"/>
+          <g><rect class="diag-box role-async" x="190" y="180" width="150" height="46"/><text class="diag-label" x="265" y="203" style="font-size:11px">Dispatch Queue</text></g>
+
+          <path class="diag-arrow-path" d="M340,203 L380,203" marker-end="url(#jsHldArrow)"/>
+          <g><rect class="diag-box role-async" x="380" y="180" width="140" height="46"/><text class="diag-label" x="450" y="203" style="font-size:11px">Worker Pool</text></g>
+
+          <path class="diag-arrow-path" d="M450,226 L450,250" marker-end="url(#jsHldArrow)"/>
+          <g><rect class="diag-box role-db" x="380" y="250" width="140" height="46"/><text class="diag-label" x="450" y="273" style="font-size:11px">Execution Log</text></g>
+
+          <path class="diag-arrow-path" d="M520,203 L560,203" marker-end="url(#jsHldArrow)" stroke-dasharray="3 3"/>
+          <g><rect class="diag-box role-async" x="560" y="180" width="140" height="46"/><text class="diag-label" x="630" y="203" style="font-size:11px">Dead-Letter Queue</text></g>
+        </svg>

@@ -7,6 +7,18 @@
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link rel="stylesheet" href="../../assets/style.css">
+        <!-- site-head -->
+  <meta name="description" content="An in-memory data structure server — not just a cache. Strings, hashes, sorted sets, streams, persistence, and cluster sharding.">
+  <meta name="theme-color" content="#0B1F3F">
+  <link rel="canonical" href="https://anuvik2401.github.io/system-design-prep/topics/tech/redis.html">
+  <link rel="icon" href="../../assets/favicon.svg" type="image/svg+xml">
+  <meta property="og:type" content="website">
+  <meta property="og:title" content="Redis — SD Prep">
+  <meta property="og:description" content="An in-memory data structure server — not just a cache. Strings, hashes, sorted sets, streams, persistence, and cluster sharding.">
+  <meta property="og:url" content="https://anuvik2401.github.io/system-design-prep/topics/tech/redis.html">
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,600;12..96,700&amp;family=IBM+Plex+Mono:wght@500&amp;family=IBM+Plex+Sans:wght@400;500;600&amp;display=swap">
+  <link rel="stylesheet" href="../../assets/chrome.css">
+  <!-- /site-head -->
 </head>
 <body>
   <aside id="sidebar"></aside>
@@ -56,7 +68,7 @@
       </table>
 
       <h3 style="font-size:13px;color:var(--text);margin:1.5rem 0 0.75rem;font-weight:600">Cache-aside: hit vs miss</h3>
-      <p style="font-size:13px;color:#999;margin-bottom:0.75rem">The dominant Redis pattern in interviews. Watch both paths run side by side — the latency gap is the whole argument for caching.</p>
+      <p style="font-size:13px;color:#4A5873;margin-bottom:0.75rem">The dominant Redis pattern in interviews. Watch both paths run side by side — the latency gap is the whole argument for caching.</p>
       <div class="flow-cmp-grid">
         <div class="flow-cmp-col hit">
           <div class="flow-cmp-title">✓ Cache hit — ~1ms</div>
@@ -130,7 +142,7 @@
       </script>
 
       <h3 style="font-size:13px;color:var(--text);margin:1.5rem 0 0.75rem;font-weight:600">Eviction policies</h3>
-      <p style="font-size:13px;color:#999;margin-bottom:0.75rem">When Redis hits <code>maxmemory</code>, the eviction policy decides what gets dropped.</p>
+      <p style="font-size:13px;color:#4A5873;margin-bottom:0.75rem">When Redis hits <code>maxmemory</code>, the eviction policy decides what gets dropped.</p>
       <table class="def-table">
         <thead><tr><th>Policy</th><th>Behavior</th></tr></thead>
         <tbody>
@@ -323,5 +335,6 @@
 
   </main>
   <script src="../../assets/nav.js"></script>
+  <script src="../../assets/chrome.js"></script>
 </body>
 </html>

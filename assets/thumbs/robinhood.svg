@@ -1,0 +1,43 @@
+<svg viewBox="0 0 800 320" xmlns="http://www.w3.org/2000/svg"><style>
+text{font-family:'IBM Plex Sans',system-ui,sans-serif;fill:#0B1F3F;text-anchor:middle;dominant-baseline:middle}
+.diag-label{font-size:12px;font-weight:600}.diag-sublabel,.diag-arrow-label{font-size:9.5px;fill:#4A5873}
+.diag-box{fill:#fff;stroke:#0B1F3F;stroke-width:1.5;rx:7px}.role-cache{fill:#FBF5E6;stroke:#B8892B}
+.role-async,.role-queue{fill:#FBF5E6;stroke:#9A5B13}.role-db{fill:#EEF2F9;stroke:#4A5873}
+.diag-arrow-path{fill:none;stroke:#66728A;stroke-width:1.5}
+</style>
+          <defs><marker id="rhHldArrow" markerWidth="8" markerHeight="8" refX="6" refY="3" orient="auto"><path d="M0,0 L6,3 L0,6 Z" fill="#8A6514"/></marker></defs>
+
+          <g><rect class="diag-box role-client" x="10" y="130" width="120" height="50"/><text class="diag-label" x="70" y="152" style="font-size:11px">Client App</text><text class="diag-sublabel" x="70" y="168" style="font-size:8.5px">idempotency key/order</text></g>
+
+          <path class="diag-arrow-path" d="M130,145 L165,145" marker-end="url(#rhHldArrow)"/>
+          <g><rect class="diag-box" x="165" y="120" width="140" height="50"/><text class="diag-label" x="235" y="142" style="font-size:11px">Order Service</text><text class="diag-sublabel" x="235" y="158" style="font-size:8.5px">idempotency key</text></g>
+
+          <path class="diag-arrow-path" d="M305,145 L340,145" marker-end="url(#rhHldArrow)"/>
+          <g><rect class="diag-box" x="340" y="120" width="140" height="50"/><text class="diag-label" x="410" y="142" style="font-size:11px">Order Validation</text><text class="diag-sublabel" x="410" y="158" style="font-size:8.5px">buying power check</text></g>
+
+          <path class="diag-arrow-path" d="M480,145 L515,145" marker-end="url(#rhHldArrow)"/>
+          <g><rect class="diag-box" x="515" y="120" width="130" height="50"/><text class="diag-label" x="580" y="142" style="font-size:11px">Order Router</text><text class="diag-sublabel" x="580" y="158" style="font-size:8.5px">routes to venue</text></g>
+
+          <path class="diag-arrow-path" d="M645,145 L680,145" marker-end="url(#rhHldArrow)"/>
+          <g><rect class="diag-box role-db" x="680" y="120" width="110" height="50"/><text class="diag-label" x="735" y="142" style="font-size:11px">Exchange</text><text class="diag-sublabel" x="735" y="158" style="font-size:8.5px">external</text></g>
+
+          <path class="diag-arrow-path" d="M735,170 L735,200 L645,200" marker-end="url(#rhHldArrow)"/>
+          <g><rect class="diag-box role-async" x="515" y="180" width="130" height="46"/><text class="diag-label" x="580" y="203" style="font-size:11px">Exec Confirmation</text><text class="diag-sublabel" x="580" y="217" style="font-size:8.5px">Kafka consumer</text></g>
+
+          <path class="diag-arrow-path" d="M515,203 L480,203" marker-end="url(#rhHldArrow)"/>
+          <g><rect class="diag-box" x="340" y="180" width="140" height="46"/><text class="diag-label" x="410" y="203" style="font-size:11px">Portfolio Service</text><text class="diag-sublabel" x="410" y="217" style="font-size:8.5px">writes ledger entry</text></g>
+
+          <path class="diag-arrow-path" d="M340,203 L305,203" marker-end="url(#rhHldArrow)"/>
+          <g><rect class="diag-box role-db" x="165" y="180" width="140" height="46"/><text class="diag-label" x="235" y="203" style="font-size:11px">Ledger DB</text><text class="diag-sublabel" x="235" y="217" style="font-size:8.5px">Postgres, append-only</text></g>
+
+          <path class="diag-arrow-path" d="M235,226 L235,250 L130,250" marker-end="url(#rhHldArrow)" stroke-dasharray="3 3"/>
+          <g><rect class="diag-box role-cache" x="10" y="226" width="120" height="46"/><text class="diag-label" x="70" y="249" style="font-size:11px">Portfolio Cache</text><text class="diag-sublabel" x="70" y="263" style="font-size:8.5px">Redis, short TTL</text></g>
+          <path class="diag-arrow-path" d="M70,226 L70,180" marker-end="url(#rhHldArrow)"/>
+
+          <path class="diag-arrow-path" d="M735,120 L735,60 L235,60 L235,120" marker-end="url(#rhHldArrow)" stroke-dasharray="3 3"/>
+          <g><rect class="diag-box role-async" x="165" y="30" width="140" height="46"/><text class="diag-label" x="235" y="53" style="font-size:11px">Market Data Feed</text><text class="diag-sublabel" x="235" y="67" style="font-size:8.5px">websocket push</text></g>
+          <path class="diag-arrow-path" d="M165,53 L130,145" marker-end="url(#rhHldArrow)" stroke-dasharray="3 3"/>
+
+          <path class="diag-arrow-path" d="M235,120 L235,90 L620,90 L620,120" marker-end="url(#rhHldArrow)" stroke-dasharray="2 4"/>
+          <g><rect class="diag-box role-db" x="680" y="30" width="110" height="46"/><text class="diag-label" x="735" y="53" style="font-size:11px">Audit Log</text><text class="diag-sublabel" x="735" y="67" style="font-size:8.5px">append-only</text></g>
+        </svg>

@@ -1,0 +1,32 @@
+<svg viewBox="0 0 800 320" xmlns="http://www.w3.org/2000/svg"><style>
+text{font-family:'IBM Plex Sans',system-ui,sans-serif;fill:#0B1F3F;text-anchor:middle;dominant-baseline:middle}
+.diag-label{font-size:12px;font-weight:600}.diag-sublabel,.diag-arrow-label{font-size:9.5px;fill:#4A5873}
+.diag-box{fill:#fff;stroke:#0B1F3F;stroke-width:1.5;rx:7px}.role-cache{fill:#FBF5E6;stroke:#B8892B}
+.role-async,.role-queue{fill:#FBF5E6;stroke:#9A5B13}.role-db{fill:#EEF2F9;stroke:#4A5873}
+.diag-arrow-path{fill:none;stroke:#66728A;stroke-width:1.5}
+</style>
+          <defs><marker id="mmHld" markerWidth="8" markerHeight="8" refX="6" refY="3" orient="auto"><path d="M0,0 L6,3 L0,6 Z" fill="#8A6514"/></marker></defs>
+
+          <g><rect class="diag-box role-client" x="10" y="20" width="130" height="50"/><text class="diag-label" x="75" y="42" style="font-size:11px">Agents / Exporters</text><text class="diag-sublabel" x="75" y="58" style="font-size:8.5px">push or scrape</text></g>
+          <path class="diag-arrow-path" d="M140,45 L175,45" marker-end="url(#mmHld)"/>
+          <g><rect class="diag-box role-async" x="175" y="20" width="130" height="50"/><text class="diag-label" x="240" y="42" style="font-size:11px">Ingestion Tier</text><text class="diag-sublabel" x="240" y="58" style="font-size:8.5px">Kafka</text></g>
+          <path class="diag-arrow-path" d="M305,45 L340,45" marker-end="url(#mmHld)"/>
+          <g><rect class="diag-box role-db" x="340" y="20" width="130" height="50"/><text class="diag-label" x="405" y="42" style="font-size:11px">TSDB (raw tier)</text><text class="diag-sublabel" x="405" y="58" style="font-size:8.5px">10s resolution</text></g>
+
+          <path class="diag-arrow-path" d="M405,70 L405,105" marker-end="url(#mmHld)"/>
+          <g><rect class="diag-box role-async" x="340" y="105" width="130" height="50"/><text class="diag-label" x="405" y="127" style="font-size:11px">Downsample Worker</text><text class="diag-sublabel" x="405" y="143" style="font-size:8.5px">1min / 1hr rollups</text></g>
+          <path class="diag-arrow-path" d="M470,130 L505,130" marker-end="url(#mmHld)"/>
+          <g><rect class="diag-box role-db" x="505" y="105" width="130" height="50"/><text class="diag-label" x="570" y="127" style="font-size:11px">TSDB (rollup tier)</text><text class="diag-sublabel" x="570" y="143" style="font-size:8.5px">S3-backed, months</text></g>
+
+          <path class="diag-arrow-path" d="M405,70 L200,105" marker-end="url(#mmHld)"/>
+          <g><rect class="diag-box" x="135" y="105" width="140" height="50"/><text class="diag-label" x="205" y="127" style="font-size:11px">Query Service</text><text class="diag-sublabel" x="205" y="143" style="font-size:8.5px">dashboards, ad-hoc</text></g>
+          <path class="diag-arrow-path" d="M205,155 L205,190" marker-end="url(#mmHld)"/>
+          <g><rect class="diag-box role-client" x="135" y="190" width="140" height="50"/><text class="diag-label" x="205" y="212" style="font-size:11px">Dashboard UI</text><text class="diag-sublabel" x="205" y="228" style="font-size:8.5px">seconds-old to months-old</text></g>
+
+          <path class="diag-arrow-path" d="M240,70 L620,105" marker-end="url(#mmHld)" stroke-dasharray="3 3"/>
+          <g><rect class="diag-box role-cache" x="600" y="20" width="150" height="50"/><text class="diag-label" x="675" y="42" style="font-size:11px">Alerting Engine</text><text class="diag-sublabel" x="675" y="58" style="font-size:8.5px">streaming evaluation</text></g>
+          <path class="diag-arrow-path" d="M675,70 L675,190" marker-end="url(#mmHld)"/>
+          <g><rect class="diag-box role-db" x="600" y="190" width="150" height="50"/><text class="diag-label" x="675" y="212" style="font-size:11px">AlertRule Store</text><text class="diag-sublabel" x="675" y="228" style="font-size:8.5px">Postgres</text></g>
+          <path class="diag-arrow-path" d="M675,70 L440,250" marker-end="url(#mmHld)"/>
+          <g><rect class="diag-box role-async" x="370" y="250" width="150" height="50"/><text class="diag-label" x="445" y="272" style="font-size:11px">Notification Svc</text><text class="diag-sublabel" x="445" y="288" style="font-size:8.5px">&lt;1min from breach</text></g>
+        </svg>

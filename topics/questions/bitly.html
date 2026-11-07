@@ -7,6 +7,18 @@
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link rel="stylesheet" href="../../assets/style.css">
+        <!-- site-head -->
+  <meta name="description" content="Tests whether you can hit &lt;10ms global read latency on a read-heavy system while treating 301 vs 302 as a product decision, not a coin flip.">
+  <meta name="theme-color" content="#0B1F3F">
+  <link rel="canonical" href="https://anuvik2401.github.io/system-design-prep/topics/questions/bitly.html">
+  <link rel="icon" href="../../assets/favicon.svg" type="image/svg+xml">
+  <meta property="og:type" content="website">
+  <meta property="og:title" content="Design Bitly — SD Prep">
+  <meta property="og:description" content="Tests whether you can hit &lt;10ms global read latency on a read-heavy system while treating 301 vs 302 as a product decision, not a coin flip.">
+  <meta property="og:url" content="https://anuvik2401.github.io/system-design-prep/topics/questions/bitly.html">
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,600;12..96,700&amp;family=IBM+Plex+Mono:wght@500&amp;family=IBM+Plex+Sans:wght@400;500;600&amp;display=swap">
+  <link rel="stylesheet" href="../../assets/chrome.css">
+  <!-- /site-head -->
 </head>
 <body>
   <aside id="sidebar"></aside>
@@ -305,7 +317,7 @@
         <div class="bitfield-seg seq"><span class="bits">12</span><span class="lbl">sequence</span></div>
       </div>
       <div class="bitfield-legend">
-        <div class="bitfield-legend-item"><span class="bitfield-legend-dot" style="background:#3a3a3a"></span>1 bit unused, keeps ID positive</div>
+        <div class="bitfield-legend-item"><span class="bitfield-legend-dot" style="background:#DDE3EE"></span>1 bit unused, keeps ID positive</div>
         <div class="bitfield-legend-item"><span class="bitfield-legend-dot" style="background:var(--accent)"></span>41 bits — ms since custom epoch, ~69 years</div>
         <div class="bitfield-legend-item"><span class="bitfield-legend-dot" style="background:var(--blue)"></span>10 bits — up to 1024 nodes</div>
         <div class="bitfield-legend-item"><span class="bitfield-legend-dot" style="background:var(--amber)"></span>12 bits — up to 4096 IDs/node/ms</div>
@@ -458,6 +470,8 @@
 
   </main>
   <script src="../../assets/nav.js"></script>
+  <script src="../../assets/chrome.js"></script>
+  <script src="../../assets/sheet.js"></script>
   <script src="../../assets/mindmap.js"></script>
 </body>
 </html>

@@ -1,0 +1,7 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 780 150"><style>
+text{font-family:'IBM Plex Sans',system-ui,sans-serif;fill:#0B1F3F;text-anchor:middle;dominant-baseline:middle}
+.diag-label{font-size:12px;font-weight:600}.diag-sublabel,.diag-arrow-label{font-size:9.5px;fill:#4A5873}
+.diag-box{fill:#fff;stroke:#0B1F3F;stroke-width:1.5;rx:7px}.role-cache{fill:#FBF5E6;stroke:#B8892B}
+.role-async,.role-queue{fill:#FBF5E6;stroke:#9A5B13}.role-db{fill:#EEF2F9;stroke:#4A5873}
+.diag-arrow-path{fill:none;stroke:#66728A;stroke-width:1.5}
+</style><rect class="diag-box" x="20" y="50" width="105" height="50"/><text class="diag-label" x="72" y="75">Requirements</text><rect class="diag-box" x="145" y="50" width="105" height="50"/><text class="diag-label" x="197" y="75">Entities</text><rect class="diag-box" x="270" y="50" width="105" height="50"/><text class="diag-label" x="322" y="75">API</text><rect class="diag-box" x="395" y="50" width="105" height="50"/><text class="diag-label" x="447" y="75">Data flow</text><rect class="diag-box" x="520" y="50" width="105" height="50"/><text class="diag-label" x="572" y="75">Design</text><rect class="diag-box" x="645" y="50" width="105" height="50"/><text class="diag-label" x="697" y="75">Deep dives</text></svg>

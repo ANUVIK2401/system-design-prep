@@ -7,6 +7,18 @@
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link rel="stylesheet" href="../../assets/style.css">
+        <!-- site-head -->
+  <meta name="description" content="Tests whether you can turn crawl scheduling and cross-source dedup into a first-class design problem instead of hand-waving &quot;we scrape the internet.&quot;">
+  <meta name="theme-color" content="#0B1F3F">
+  <link rel="canonical" href="https://anuvik2401.github.io/system-design-prep/topics/questions/news-aggregator.html">
+  <link rel="icon" href="../../assets/favicon.svg" type="image/svg+xml">
+  <meta property="og:type" content="website">
+  <meta property="og:title" content="Design a News Aggregator — SD Prep">
+  <meta property="og:description" content="Tests whether you can turn crawl scheduling and cross-source dedup into a first-class design problem instead of hand-waving &quot;we scrape the internet.&quot;">
+  <meta property="og:url" content="https://anuvik2401.github.io/system-design-prep/topics/questions/news-aggregator.html">
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,600;12..96,700&amp;family=IBM+Plex+Mono:wght@500&amp;family=IBM+Plex+Sans:wght@400;500;600&amp;display=swap">
+  <link rel="stylesheet" href="../../assets/chrome.css">
+  <!-- /site-head -->
 </head>
 <body>
   <aside id="sidebar"></aside>
@@ -99,7 +111,7 @@
     <section id="step2-entities">
       <div class="step-pill">Step 2 of 6 — Core Entities</div>
       <h2>Core entities</h2>
-      <p style="font-size:13px;color:#999;margin-bottom:0.75rem">Four entities split by access pattern: raw content is huge and immutable, metadata is queried constantly, clusters group duplicates, and the frontier drives crawl order.</p>
+      <p style="font-size:13px;color:#4A5873;margin-bottom:0.75rem">Four entities split by access pattern: raw content is huge and immutable, metadata is queried constantly, clusters group duplicates, and the frontier drives crawl order.</p>
 
       <div class="entity-grid">
         <div class="entity-box">
@@ -152,7 +164,7 @@
     <section id="step3-api">
       <div class="step-pill">Step 3 of 6 — API / Interface</div>
       <h2>API design</h2>
-      <p style="font-size:13px;color:#999;margin-bottom:0.75rem">Four endpoints — feed, article detail, search, and source registration. All request-response; crawling itself is internal, not client-facing.</p>
+      <p style="font-size:13px;color:#4A5873;margin-bottom:0.75rem">Four endpoints — feed, article detail, search, and source registration. All request-response; crawling itself is internal, not client-facing.</p>
 
       <div class="api-card">
         <div class="api-line"><span class="api-method get">GET</span><span class="api-path">/api/v1/feed</span><span class="api-auth">Auth: required</span></div>
@@ -190,7 +202,7 @@
     <section id="step4-dataflow">
       <div class="step-pill">Step 4 of 6 — Data Flow</div>
       <h2>Data flow</h2>
-      <p style="font-size:13px;color:#999;margin-bottom:0.75rem">Write path (blue) is the crawl pipeline — frontier, fetch, dedup, store. Read path (mint) is the feed request, fully decoupled from crawling.</p>
+      <p style="font-size:13px;color:#4A5873;margin-bottom:0.75rem">Write path (blue) is the crawl pipeline — frontier, fetch, dedup, store. Read path (mint) is the feed request, fully decoupled from crawling.</p>
 
       <div class="diagram-wrap" data-paths='{"read":{"boxes":["r-client","r-svc","r-cache","r-db"],"arrows":["r1","r2","r3"]},"write":{"boxes":["w-frontier","w-crawler","w-bloom","w-store"],"arrows":["w1","w2","w3"]}}'>
         <svg viewBox="0 0 740 220" xmlns="http://www.w3.org/2000/svg">
@@ -241,7 +253,7 @@
     <section id="step5-hld">
       <div class="step-pill">Step 5 of 6 — High-Level Design</div>
       <h2>High-level design</h2>
-      <p style="font-size:13px;color:#999;margin-bottom:0.75rem">Full system: crawl, dedup/index, ranking, and read paths together with every supporting component.</p>
+      <p style="font-size:13px;color:#4A5873;margin-bottom:0.75rem">Full system: crawl, dedup/index, ranking, and read paths together with every supporting component.</p>
 
       <div class="diagram-wrap">
         <svg viewBox="0 0 780 300" xmlns="http://www.w3.org/2000/svg">
@@ -331,7 +343,7 @@
     <section id="step6-deepdive-frontier">
       <div class="step-pill">Step 6 of 6 — Deep Dives</div>
       <h2>Deep dive: URL frontier priority queue</h2>
-      <p style="font-size:13px;color:#999;margin-bottom:0.75rem">150k sources can't be polled on a flat round-robin — a wire feed publishing every 30s and a monthly blog need wildly different crawl cadences.</p>
+      <p style="font-size:13px;color:#4A5873;margin-bottom:0.75rem">150k sources can't be polled on a flat round-robin — a wire feed publishing every 30s and a monthly blog need wildly different crawl cadences.</p>
 
       <ol class="flow-steps-list">
         <li><span>Track rolling publish rate per source</span> — exponential moving average of articles/hour, updated after every crawl</li>
@@ -346,7 +358,7 @@
 
     <section id="step6-deepdive-bloom">
       <h2>Deep dive: Bloom filter dedup — the false-positive math</h2>
-      <p style="font-size:13px;color:#999;margin-bottom:0.75rem">A Bloom filter trades a small, tunable false-positive rate for a massive memory win over storing every seen URL as a real set.</p>
+      <p style="font-size:13px;color:#4A5873;margin-bottom:0.75rem">A Bloom filter trades a small, tunable false-positive rate for a massive memory win over storing every seen URL as a real set.</p>
 
       <div class="stat-grid">
         <div class="stat-card"><div class="stat-val">2B</div><div class="stat-label">expected inserted URLs (n)</div></div>
@@ -355,15 +367,15 @@
         <div class="stat-card"><div class="stat-val">0.1%</div><div class="stat-label">target false-positive rate (p)</div></div>
       </div>
 
-      <p style="font-size:13px;color:#ccc;margin-bottom:0.5rem">Sized from the standard formulas <code>m = -(n · ln p) / (ln 2)²</code> and <code>k = (m/n) · ln 2</code>. At n=2B and p=0.1%, that's <code>m ≈ 2.87×10¹⁰ bits ≈ 3.4GB</code>.</p>
-      <p style="font-size:13px;color:#ccc;margin:0 0 0.75rem">Versus roughly 128GB+ to store 2B full SHA-256 hashes (32 bytes each) in a real set — a ~40x memory reduction for a 1-in-1000 chance of a false duplicate.</p>
+      <p style="font-size:13px;color:#33415C;margin-bottom:0.5rem">Sized from the standard formulas <code>m = -(n · ln p) / (ln 2)²</code> and <code>k = (m/n) · ln 2</code>. At n=2B and p=0.1%, that's <code>m ≈ 2.87×10¹⁰ bits ≈ 3.4GB</code>.</p>
+      <p style="font-size:13px;color:#33415C;margin:0 0 0.75rem">Versus roughly 128GB+ to store 2B full SHA-256 hashes (32 bytes each) in a real set — a ~40x memory reduction for a 1-in-1000 chance of a false duplicate.</p>
 
       <div class="callout warn">A false positive here is silent by design — the article just never gets crawled, with no error and no retry. Mitigate by rotating the filter on a 30-day TTL window (old URLs age out, keeping n and thus m bounded) and by treating the Bloom check as advisory-only for high-priority sources, backed by a real url_hash lookup in Postgres before a final drop.</div>
     </section>
 
     <section id="step6-deepdive-ranking">
       <h2>Deep dive: feed ranking pipeline — signals → score → rank</h2>
-      <p style="font-size:13px;color:#999;margin-bottom:0.75rem">Ranking runs as a batch job every ~60s per topic, not per-request — computing a personalized score for 80k QPS in real time doesn't fit the latency budget.</p>
+      <p style="font-size:13px;color:#4A5873;margin-bottom:0.75rem">Ranking runs as a batch job every ~60s per topic, not per-request — computing a personalized score for 80k QPS in real time doesn't fit the latency budget.</p>
 
       <div class="flow-cmp-grid">
         <div class="flow-cmp-col hit">
@@ -498,6 +510,8 @@
 
   </main>
   <script src="../../assets/nav.js"></script>
+  <script src="../../assets/chrome.js"></script>
+  <script src="../../assets/sheet.js"></script>
   <script src="../../assets/mindmap.js"></script>
 </body>
 </html>

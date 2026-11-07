@@ -1,0 +1,3 @@
+User-agent: *
+Allow: /
+Sitemap: https://anuvik2401.github.io/system-design-prep/sitemap.xml

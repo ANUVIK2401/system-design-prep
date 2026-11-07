@@ -1,0 +1,66 @@
+<svg viewBox="0 0 640 360" xmlns="http://www.w3.org/2000/svg"><style>
+text{font-family:'IBM Plex Sans',system-ui,sans-serif;fill:#0B1F3F;text-anchor:middle;dominant-baseline:middle}
+.diag-label{font-size:12px;font-weight:600}.diag-sublabel,.diag-arrow-label{font-size:9.5px;fill:#4A5873}
+.diag-box{fill:#fff;stroke:#0B1F3F;stroke-width:1.5;rx:7px}.role-cache{fill:#FBF5E6;stroke:#B8892B}
+.role-async,.role-queue{fill:#FBF5E6;stroke:#9A5B13}.role-db{fill:#EEF2F9;stroke:#4A5873}
+.diag-arrow-path{fill:none;stroke:#66728A;stroke-width:1.5}
+</style>
+          <defs>
+            <marker id="psArrow" markerWidth="8" markerHeight="8" refX="6" refY="3" orient="auto"><path d="M0,0 L6,3 L0,6 Z" fill="#8A6514"/></marker>
+          </defs>
+
+          <text class="diag-sublabel" x="170" y="16" style="font-size:10px;fill:#8A6514">LEVEL 1 — world split into a coarse 8x4 grid (1 char)</text>
+          <g>
+            <!-- 8 cols x 4 rows top-level grid -->
+            <g stroke="#8A6514" stroke-width="1" fill="none">
+              <rect x="20" y="26" width="280" height="140"/>
+              <line x1="55" y1="26" x2="55" y2="166"/><line x1="90" y1="26" x2="90" y2="166"/><line x1="125" y1="26" x2="125" y2="166"/>
+              <line x1="160" y1="26" x2="160" y2="166"/><line x1="195" y1="26" x2="195" y2="166"/><line x1="230" y1="26" x2="230" y2="166"/><line x1="265" y1="26" x2="265" y2="166"/>
+              <line x1="20" y1="61" x2="300" y2="61"/><line x1="20" y1="96" x2="300" y2="96"/><line x1="20" y1="131" x2="300" y2="131"/>
+            </g>
+            <g>
+              <rect x="125" y="61" width="35" height="35" fill="#FBF5E6" stroke="#8A6514" stroke-width="1.5"/>
+              <text class="diag-label" x="142" y="83" style="font-size:11px;fill:#8A6514">9</text>
+            </g>
+          </g>
+
+          <path d="M300,78 L340,78" stroke="#8A6514" stroke-width="1.5" marker-end="url(#psArrow)" fill="none"/>
+          <text x="320" y="68" text-anchor="middle" font-size="9" fill="#4A5873" font-family="Inter,sans-serif">zoom in</text>
+
+          <text class="diag-sublabel" x="500" y="16" style="font-size:10px;fill:#8A6514">LEVEL 2 — cell '9' subdivided again (2 chars)</text>
+          <g>
+            <g stroke="#8A6514" stroke-width="1" fill="none">
+              <rect x="360" y="26" width="240" height="140"/>
+              <line x1="420" y1="26" x2="420" y2="166"/><line x1="480" y1="26" x2="480" y2="166"/><line x1="540" y1="26" x2="540" y2="166"/>
+              <line x1="360" y1="61" x2="600" y2="61"/><line x1="360" y1="96" x2="600" y2="96"/><line x1="360" y1="131" x2="600" y2="131"/>
+            </g>
+            <g>
+              <rect x="420" y="61" width="60" height="35" fill="#EEF2F9" stroke="#8A6514" stroke-width="1.5"/>
+              <text class="diag-label" x="450" y="83" style="font-size:11px;fill:#8A6514">9q</text>
+            </g>
+          </g>
+
+          <path d="M460,166 C460,200 230,200 230,260" stroke="#8A6514" stroke-width="1.5" marker-end="url(#psArrow)" fill="none"/>
+          <text x="345" y="195" text-anchor="middle" font-size="9" fill="#4A5873" font-family="Inter,sans-serif">zoom in again — 4 more levels to "9q8yyk" (~3.7m precision)</text>
+
+          <text class="diag-sublabel" x="230" y="252" style="font-size:10px;fill:#8A6514">LEVEL 3 — fine cell, ~150m x 150m at 6 chars</text>
+          <g>
+            <g stroke="#8A6514" stroke-width="1" fill="none">
+              <rect x="80" y="262" width="300" height="90"/>
+              <line x1="155" y1="262" x2="155" y2="352"/><line x1="230" y1="262" x2="230" y2="352"/><line x1="305" y1="262" x2="305" y2="352"/>
+              <line x1="80" y1="307" x2="380" y2="307"/>
+            </g>
+            <g>
+              <rect x="155" y="262" width="75" height="45" fill="#FBF5E6" stroke="#8A6514" stroke-width="1.5"/>
+              <text class="diag-label" x="192" y="288" style="font-size:11px;fill:#8A6514">9q8yyk</text>
+              <circle cx="222" cy="298" r="3" fill="#8A6514"/>
+            </g>
+            <g>
+              <rect x="230" y="262" width="75" height="45" fill="#EEF2F9" stroke="#8A6514" stroke-width="1.5"/>
+              <text class="diag-label" x="267" y="288" style="font-size:11px">9q8yym</text>
+              <circle cx="238" cy="298" r="3" fill="#0B1F3F"/>
+            </g>
+            <path d="M222,298 L238,298" stroke="#8A6514" stroke-width="1.5" stroke-dasharray="2 2"/>
+            <text x="230" y="318" text-anchor="middle" font-size="9" fill="#8A6514" font-family="Inter,sans-serif">~30m apart, but split across a cell boundary</text>
+          </g>
+        </svg>

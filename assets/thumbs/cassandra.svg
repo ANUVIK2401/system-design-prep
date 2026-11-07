@@ -1,0 +1,48 @@
+<svg viewBox="0 0 740 200" xmlns="http://www.w3.org/2000/svg"><style>
+text{font-family:'IBM Plex Sans',system-ui,sans-serif;fill:#0B1F3F;text-anchor:middle;dominant-baseline:middle}
+.diag-label{font-size:12px;font-weight:600}.diag-sublabel,.diag-arrow-label{font-size:9.5px;fill:#4A5873}
+.diag-box{fill:#fff;stroke:#0B1F3F;stroke-width:1.5;rx:7px}.role-cache{fill:#FBF5E6;stroke:#B8892B}
+.role-async,.role-queue{fill:#FBF5E6;stroke:#9A5B13}.role-db{fill:#EEF2F9;stroke:#4A5873}
+.diag-arrow-path{fill:none;stroke:#66728A;stroke-width:1.5}
+</style>
+          <defs>
+            <marker id="cassArrow" markerWidth="8" markerHeight="8" refX="6" refY="3" orient="auto"><path d="M0,0 L6,3 L0,6 Z" fill="#8A6514"/></marker>
+          </defs>
+
+          <g>
+            <rect class="diag-box role-client" x="15" y="75" width="110" height="50"/>
+            <text class="diag-label" x="70" y="95" style="font-size:11px">Write request</text>
+            <text class="diag-sublabel" x="70" y="111" style="font-size:9px">INSERT</text>
+          </g>
+          <path class="diag-arrow-path" d="M125,90 L185,40" marker-end="url(#cassArrow)"/>
+          <path class="diag-arrow-path" d="M125,100 L185,100" marker-end="url(#cassArrow)"/>
+
+          <g>
+            <rect class="diag-box role-async" x="185" y="15" width="140" height="50"/>
+            <text class="diag-label" x="255" y="35" style="font-size:11px">Commit log</text>
+            <text class="diag-sublabel" x="255" y="51" style="font-size:9px">sequential disk write</text>
+          </g>
+          <g>
+            <rect class="diag-box role-cache" x="185" y="75" width="140" height="50"/>
+            <text class="diag-label" x="255" y="95" style="font-size:11px">Memtable</text>
+            <text class="diag-sublabel" x="255" y="111" style="font-size:9px">in-memory, sorted</text>
+          </g>
+
+          <path class="diag-arrow-path" d="M325,100 L395,100" marker-end="url(#cassArrow)" stroke-dasharray="3 3"/>
+          <text x="360" y="92" font-size="9" fill="#8A6514" font-family="Inter,sans-serif">flush</text>
+          <g>
+            <rect class="diag-box role-db" x="395" y="75" width="140" height="50"/>
+            <text class="diag-label" x="465" y="95" style="font-size:11px">SSTable</text>
+            <text class="diag-sublabel" x="465" y="111" style="font-size:9px">immutable on-disk file</text>
+          </g>
+
+          <path class="diag-arrow-path" d="M535,100 L605,100" marker-end="url(#cassArrow)" stroke-dasharray="3 3"/>
+          <text x="565" y="92" font-size="9" fill="#8A6514" font-family="Inter,sans-serif">merge</text>
+          <g>
+            <rect class="diag-box role-db" x="605" y="75" width="120" height="50"/>
+            <text class="diag-label" x="665" y="95" style="font-size:11px">Compaction</text>
+            <text class="diag-sublabel" x="665" y="111" style="font-size:9px">reclaims space</text>
+          </g>
+
+          <text x="255" y="155" text-anchor="middle" font-size="10" fill="#8A6514" font-family="Inter,sans-serif">Write acked after commit log + memtable — no read-before-write</text>
+        </svg>

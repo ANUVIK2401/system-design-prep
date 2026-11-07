@@ -1,0 +1,49 @@
+<svg viewBox="0 0 720 280" xmlns="http://www.w3.org/2000/svg"><style>
+text{font-family:'IBM Plex Sans',system-ui,sans-serif;fill:#0B1F3F;text-anchor:middle;dominant-baseline:middle}
+.diag-label{font-size:12px;font-weight:600}.diag-sublabel,.diag-arrow-label{font-size:9.5px;fill:#4A5873}
+.diag-box{fill:#fff;stroke:#0B1F3F;stroke-width:1.5;rx:7px}.role-cache{fill:#FBF5E6;stroke:#B8892B}
+.role-async,.role-queue{fill:#FBF5E6;stroke:#9A5B13}.role-db{fill:#EEF2F9;stroke:#4A5873}
+.diag-arrow-path{fill:none;stroke:#66728A;stroke-width:1.5}
+</style>
+          <defs>
+            <marker id="zkArrow" markerWidth="8" markerHeight="8" refX="6" refY="3" orient="auto"><path d="M0,0 L6,3 L0,6 Z" fill="#8A6514"/></marker>
+          </defs>
+
+          <g>
+            <rect class="diag-box" x="290" y="15" width="140" height="46"/>
+            <text class="diag-label" x="360" y="35" style="font-size:11px">/election</text>
+            <text class="diag-sublabel" x="360" y="50" style="font-size:9px">persistent znode</text>
+          </g>
+
+          <path class="diag-arrow-path" d="M320,61 L160,110" marker-end="url(#zkArrow)"/>
+          <path class="diag-arrow-path" d="M360,61 L360,110" marker-end="url(#zkArrow)"/>
+          <path class="diag-arrow-path" d="M400,61 L560,110" marker-end="url(#zkArrow)"/>
+
+          <g>
+            <rect class="diag-box role-cache" x="80" y="110" width="160" height="50"/>
+            <text class="diag-label" x="160" y="130" style="font-size:11px">/election/n_000001</text>
+            <text class="diag-sublabel" x="160" y="146" style="font-size:9px;fill:#8A6514">LEADER — lowest seq</text>
+          </g>
+          <g>
+            <rect class="diag-box role-client" x="280" y="110" width="160" height="50"/>
+            <text class="diag-label" x="360" y="130" style="font-size:11px">/election/n_000002</text>
+            <text class="diag-sublabel" x="360" y="146" style="font-size:9px">watches n_000001</text>
+          </g>
+          <g>
+            <rect class="diag-box role-client" x="480" y="110" width="160" height="50"/>
+            <text class="diag-label" x="560" y="130" style="font-size:11px">/election/n_000003</text>
+            <text class="diag-sublabel" x="560" y="146" style="font-size:9px">watches n_000002</text>
+          </g>
+
+          <path class="diag-arrow-path" d="M280,135 L240,135" marker-end="url(#zkArrow)" stroke="#8A6514"/>
+          <path class="diag-arrow-path" d="M480,135 L440,135" marker-end="url(#zkArrow)" stroke="#8A6514"/>
+          <text x="360" y="180" text-anchor="middle" font-size="9.5" fill="#8A6514" font-family="Inter,sans-serif">each candidate watches only its immediate predecessor</text>
+
+          <text x="360" y="215" text-anchor="middle" font-size="10" fill="#8A6514" font-family="Inter,sans-serif">If the leader's client disconnects → n_000001 is ephemeral → auto-deleted</text>
+          <text x="360" y="232" text-anchor="middle" font-size="10" fill="#8A6514" font-family="Inter,sans-serif">n_000002's watch fires → it checks: am I now lowest? → becomes leader</text>
+
+          <g>
+            <rect class="diag-box role-async" x="240" y="245" width="240" height="32" rx="6"/>
+            <text class="diag-label" x="360" y="262" style="font-size:11px">No central coordinator decides — each node self-checks its rank</text>
+          </g>
+        </svg>

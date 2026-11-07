@@ -1,0 +1,42 @@
+<svg viewBox="0 0 800 340" xmlns="http://www.w3.org/2000/svg"><style>
+text{font-family:'IBM Plex Sans',system-ui,sans-serif;fill:#0B1F3F;text-anchor:middle;dominant-baseline:middle}
+.diag-label{font-size:12px;font-weight:600}.diag-sublabel,.diag-arrow-label{font-size:9.5px;fill:#4A5873}
+.diag-box{fill:#fff;stroke:#0B1F3F;stroke-width:1.5;rx:7px}.role-cache{fill:#FBF5E6;stroke:#B8892B}
+.role-async,.role-queue{fill:#FBF5E6;stroke:#9A5B13}.role-db{fill:#EEF2F9;stroke:#4A5873}
+.diag-arrow-path{fill:none;stroke:#66728A;stroke-width:1.5}
+</style>
+          <defs><marker id="igHld" markerWidth="8" markerHeight="8" refX="6" refY="3" orient="auto"><path d="M0,0 L6,3 L0,6 Z" fill="#8A6514"/></marker></defs>
+
+          <g><rect class="diag-box role-client" x="10" y="16" width="120" height="46"/><text class="diag-label" x="70" y="43" style="font-size:11px">Client App</text></g>
+
+          <path class="diag-arrow-path" d="M130,39 L165,39" marker-end="url(#igHld)"/>
+          <g><rect class="diag-box" x="165" y="16" width="130" height="46"/><text class="diag-label" x="230" y="39" style="font-size:11px">Upload Service</text><text class="diag-sublabel" x="230" y="53" style="font-size:8.5px">returns 202 fast</text></g>
+          <path class="diag-arrow-path" d="M295,39 L330,39" marker-end="url(#igHld)"/>
+          <g><rect class="diag-box role-db" x="330" y="16" width="90" height="46"/><text class="diag-label" x="375" y="43" style="font-size:11px">S3</text></g>
+          <path class="diag-arrow-path" d="M420,39 L455,39" marker-end="url(#igHld)"/>
+          <g><rect class="diag-box role-cdn" x="455" y="16" width="90" height="46"/><text class="diag-label" x="500" y="43" style="font-size:11px">CDN</text></g>
+
+          <path class="diag-arrow-path" d="M230,62 L230,90" marker-end="url(#igHld)"/>
+          <g><rect class="diag-box role-async" x="165" y="90" width="130" height="46"/><text class="diag-label" x="230" y="113" style="font-size:11px">Queue + Workers</text></g>
+
+          <path class="diag-arrow-path" d="M230,136 L230,164" marker-end="url(#igHld)"/>
+          <g><rect class="diag-box" x="140" y="164" width="180" height="46"/><text class="diag-label" x="230" y="187" style="font-size:11px">Feed Generation Worker</text></g>
+
+          <path class="diag-arrow-path" d="M140,187 L60,187 L60,236" marker-end="url(#igHld)"/>
+          <g><rect class="diag-box role-db" x="10" y="236" width="130" height="46"/><text class="diag-label" x="75" y="259" style="font-size:11px">Follow Graph</text><text class="diag-sublabel" x="75" y="273" style="font-size:8.5px">Cassandra</text></g>
+
+          <path class="diag-arrow-path" d="M320,187 L400,187 L400,164" marker-end="url(#igHld)" stroke-dasharray="3 3"/>
+          <g><rect class="diag-box role-cache" x="400" y="164" width="150" height="46"/><text class="diag-label" x="475" y="183" style="font-size:11px">Per-User Feed Cache</text><text class="diag-sublabel" x="475" y="198" style="font-size:8.5px">Redis, fan-out-on-write</text></g>
+
+          <path class="diag-arrow-path" d="M475,210 L475,236" marker-end="url(#igHld)"/>
+          <g><rect class="diag-box role-async" x="400" y="236" width="150" height="46"/><text class="diag-label" x="475" y="255" style="font-size:11px">Celebrity Pull Svc</text><text class="diag-sublabel" x="475" y="270" style="font-size:8.5px">fan-out-on-read</text></g>
+
+          <path class="diag-arrow-path" d="M550,187 L640,187" marker-end="url(#igHld)"/>
+          <path class="diag-arrow-path" d="M550,259 L640,259 L640,210" marker-end="url(#igHld)"/>
+          <g><rect class="diag-box" x="640" y="164" width="140" height="46"/><text class="diag-label" x="710" y="183" style="font-size:11px">Feed Read Service</text><text class="diag-sublabel" x="710" y="198" style="font-size:8.5px">merge + rank</text></g>
+
+          <path class="diag-arrow-path" d="M710,164 L710,62 L130,62 L130,39" marker-end="url(#igHld)" stroke-dasharray="3 3"/>
+
+          <g><rect class="diag-box role-async" x="600" y="90" width="150" height="46"/><text class="diag-label" x="675" y="113" style="font-size:11px">Notification Svc</text></g>
+          <path class="diag-arrow-path" d="M295,113 L600,113" marker-end="url(#igHld)" stroke-dasharray="3 3"/>
+        </svg>

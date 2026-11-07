@@ -19,7 +19,8 @@ GitHub Pages: deploys from repo root, branch main.
 3. Generate `topics/[slug].html` using the template and rules below.
 4. Add a card to `index.html` in the `<!-- TOPICS -->` comment block.
 5. Add the topic to the `TOPICS` array in `assets/nav.js`.
-6. Print: `git add . && git commit -m "add [topic]" && git push`
+6. Run `python3 tools/build_site.py && python3 tools/check_site.py` to refresh metadata, search, thumbnails, and the sitemap.
+7. Print: `git add . && git commit -m "add [topic]" && git push`
 
 Never skip a section. Never use placeholder text. Never touch other topic files.
 
@@ -122,18 +123,10 @@ Q in accent color. A in muted. Answers max 2 lines.
 
 ## Visual rules (enforce strictly)
 
-- Background: `#0a0a0a` (near-black)
-- Surface: `#111` cards, `#161616` hover
-- Accent: `#6ee7b7` (mint green) — used for headings, active states, flash card border
-- Secondary accent: `#93c5fd` (sky blue) — badges, links
-- Warning: `#fbbf24` (amber) — tradeoff costs, watch-outs
-- Text: `#f0f0f0` primary, `#888` muted, `#555` very muted
-- Font: `Inter, system-ui` — loaded via Google Fonts
-- Heading scale: h1 32px/600, h2 18px/600, h3 15px/500
-- Body: 14px/400, line-height 1.65
-- No border-radius above 10px anywhere
-- No shadows — use border `1px solid #1e1e1e` for depth
-- Flash card: left border 3px solid accent, bg `#0d1f17`
+- Palette: white `#FFFFFF` content, navy `#0B1F3F` navbar and sidebar, gold `#8A6514` for text on white, `#E3BC5F` for text on navy
+- Use the tokens in `style.css` and `chrome.css`; do not add new hues. Muted red `#A63D40` is reserved for failures
+- Fonts: Bricolage Grotesque (headings), IBM Plex Sans (body), IBM Plex Mono (labels)
+- Flash card: left border 3px solid gold
 - Analogy block: italic, muted text, left border 3px solid `#333`
 - Tables: no outer border, row separator `1px solid #1a1a1a`
 - No decorative elements, no third-party icon libraries (Font Awesome etc.), no CSS gradients
@@ -160,14 +153,14 @@ Q in accent color. A in muted. Answers max 2 lines.
   <!-- one row per data point -->
 </div>
 ```
-`tier-fast` = accent (ns range), `tier-mid` = blue (µs–low ms), `tier-slow` = amber (ms+). Bar widths
+`tier-fast` = gold (ns range), `tier-mid` = navy (µs–low ms), `tier-slow` = bronze (ms+). Bar widths
 should reflect relative log-scale magnitude, not be evenly spaced.
 
 ### `.diag-box` role colors (use consistently across all diagrams)
-- `role-client` → blue — clients, gateways, entry points
-- `role-cache` → accent/mint — caches, hot-path services, the thing being explained
+- `role-client` → navy — clients, gateways, entry points
+- `role-cache` → gold — caches, hot-path services, the thing being explained
 - `role-db` → neutral gray — databases, durable storage
-- `role-async` → amber — queues, workers, async/background paths
+- `role-async` → bronze — queues, workers, async/background paths
 
 ---
 
@@ -189,15 +182,21 @@ Each page must be self-contained and interview-complete. A reader should be able
 
 ## Index page rules
 
-- Dark hero with site title and tagline
+- Navy blueprint hero with the study route and common searches
 - Topic cards in a CSS grid (auto-fill, minmax 260px)
 - Each card: `<div class="card-num">[01-08, zero-padded]</div>` + category pill + title + one-line desc + difficulty badge + time badge
 - Cards carry `style="--card-i:[0-based index]"` for the staggered fade/slide-in entrance animation (CSS only, see `style.css`)
-- No raster images, no third-party icon libraries — typography, color, and hand-authored inline SVG only
+- No raster images or third-party icon libraries. Card images are SVG thumbnails generated from each page's diagram
 - Filter row at top: All / Foundations / Question Breakdowns (JS filter, no page reload)
 - New topic cards always get the next sequential `card-num` and `--card-i`; never reuse or skip a number
 
 ---
+
+## Site chrome
+
+`assets/chrome.js` adds the top navbar, keyword search, breadcrumbs, previous/next links, and card thumbnails.
+
+`assets/sheet.js` builds the one-page sheet on question pages from that page's own sections, so keep the section ids and classes intact.
 
 ## nav.js behavior
 

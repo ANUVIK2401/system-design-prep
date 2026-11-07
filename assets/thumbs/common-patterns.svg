@@ -1,0 +1,18 @@
+<svg viewBox="0 0 700 130" xmlns="http://www.w3.org/2000/svg"><style>
+text{font-family:'IBM Plex Sans',system-ui,sans-serif;fill:#0B1F3F;text-anchor:middle;dominant-baseline:middle}
+.diag-label{font-size:12px;font-weight:600}.diag-sublabel,.diag-arrow-label{font-size:9.5px;fill:#4A5873}
+.diag-box{fill:#fff;stroke:#0B1F3F;stroke-width:1.5;rx:7px}.role-cache{fill:#FBF5E6;stroke:#B8892B}
+.role-async,.role-queue{fill:#FBF5E6;stroke:#9A5B13}.role-db{fill:#EEF2F9;stroke:#4A5873}
+.diag-arrow-path{fill:none;stroke:#66728A;stroke-width:1.5}
+</style>
+          <defs><marker id="rh1" markerWidth="8" markerHeight="8" refX="6" refY="3" orient="auto"><path d="M0,0 L6,3 L0,6 Z" fill="#8A6514"/></marker></defs>
+          <g><rect class="diag-box role-client" x="10" y="35" width="110" height="55"/><text class="diag-label" x="65" y="65">Client</text></g>
+          <path class="diag-arrow-path" d="M120,62 L155,62" marker-end="url(#rh1)"/>
+          <g><rect class="diag-box role-cache" x="155" y="35" width="130" height="55"/><text class="diag-label" x="220" y="58">CDN / Redis</text><text class="diag-sublabel" x="220" y="74">hot path</text></g>
+          <path class="diag-arrow-path" d="M285,55 L350,55" marker-end="url(#rh1)"/>
+          <text class="diag-sublabel" x="317" y="45" style="font-size:9px">miss</text>
+          <g><rect class="diag-box role-db" x="350" y="35" width="150" height="55"/><text class="diag-label" x="425" y="58">Read replica</text><text class="diag-sublabel" x="425" y="74">DB</text></g>
+          <path class="diag-arrow-path" d="M500,85 C540,105 580,105 600,85" marker-end="url(#rh1)"/>
+          <text class="diag-sublabel" x="550" y="115" style="font-size:9px">sync (~100ms lag)</text>
+          <g><rect class="diag-box role-db" x="540" y="35" width="150" height="55"/><text class="diag-label" x="615" y="58">Primary DB</text><text class="diag-sublabel" x="615" y="74">source of truth</text></g>
+        </svg>

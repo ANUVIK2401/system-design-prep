@@ -1,0 +1,30 @@
+<svg viewBox="0 0 800 300" xmlns="http://www.w3.org/2000/svg"><style>
+text{font-family:'IBM Plex Sans',system-ui,sans-serif;fill:#0B1F3F;text-anchor:middle;dominant-baseline:middle}
+.diag-label{font-size:12px;font-weight:600}.diag-sublabel,.diag-arrow-label{font-size:9.5px;fill:#4A5873}
+.diag-box{fill:#fff;stroke:#0B1F3F;stroke-width:1.5;rx:7px}.role-cache{fill:#FBF5E6;stroke:#B8892B}
+.role-async,.role-queue{fill:#FBF5E6;stroke:#9A5B13}.role-db{fill:#EEF2F9;stroke:#4A5873}
+.diag-arrow-path{fill:none;stroke:#66728A;stroke-width:1.5}
+</style>
+          <defs><marker id="ykHldArrow" markerWidth="8" markerHeight="8" refX="6" refY="3" orient="auto"><path d="M0,0 L6,3 L0,6 Z" fill="#8A6514"/></marker></defs>
+
+          <g><rect class="diag-box role-client" x="10" y="30" width="130" height="46"/><text class="diag-label" x="75" y="57" style="font-size:11px">Client Apps</text></g>
+          <path class="diag-arrow-path" d="M140,53 L175,53" marker-end="url(#ykHldArrow)"/>
+          <g><rect class="diag-box role-async" x="175" y="30" width="110" height="46"/><text class="diag-label" x="230" y="57" style="font-size:11px">Kafka</text></g>
+          <path class="diag-arrow-path" d="M285,53 L320,53" marker-end="url(#ykHldArrow)"/>
+          <g><rect class="diag-box role-async" x="320" y="30" width="150" height="50"/><text class="diag-label" x="395" y="52" style="font-size:11px">View Counter Svc</text><text class="diag-sublabel" x="395" y="68" style="font-size:8.5px">local pre-aggregation</text></g>
+          <path class="diag-arrow-path" d="M470,55 L505,55" marker-end="url(#ykHldArrow)"/>
+          <g><rect class="diag-box role-cache" x="505" y="30" width="150" height="50"/><text class="diag-label" x="580" y="52" style="font-size:11px">Count-Min Sketch</text><text class="diag-sublabel" x="580" y="68" style="font-size:8.5px">Redis, per window</text></g>
+
+          <path class="diag-arrow-path" d="M580,80 L580,120" marker-end="url(#ykHldArrow)"/>
+          <g><rect class="diag-box" x="505" y="120" width="150" height="46"/><text class="diag-label" x="580" y="147" style="font-size:11px">Top-K Min-Heap</text></g>
+
+          <path class="diag-arrow-path" d="M505,143 L395,190" marker-end="url(#ykHldArrow)"/>
+          <g><rect class="diag-box role-async" x="320" y="190" width="150" height="46"/><text class="diag-label" x="395" y="217" style="font-size:11px">Snapshot Job</text></g>
+          <path class="diag-arrow-path" d="M320,213 L285,213" marker-end="url(#ykHldArrow)"/>
+          <g><rect class="diag-box role-db" x="150" y="190" width="135" height="46"/><text class="diag-label" x="217" y="217" style="font-size:11px">TopKSnapshot DB</text></g>
+
+          <path class="diag-arrow-path" d="M150,213 L115,213" marker-end="url(#ykHldArrow)"/>
+          <g><rect class="diag-box" x="10" y="190" width="105" height="46"/><text class="diag-label" x="62" y="217" style="font-size:11px">Query Svc</text></g>
+          <path class="diag-arrow-path" d="M62,190 L62,110 L140,80" marker-end="url(#ykHldArrow)" stroke-dasharray="3 3"/>
+          <text class="diag-sublabel" x="90" y="130" style="font-size:8px;fill:#4A5873">served to millions of readers</text>
+        </svg>

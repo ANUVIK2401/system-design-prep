@@ -7,6 +7,18 @@
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link rel="stylesheet" href="../../assets/style.css">
+        <!-- site-head -->
+  <meta name="description" content="Tests whether you treat two-player game state as a distributed consensus problem — both clients must see an identical board with zero divergence, even across packet loss and reconnects.">
+  <meta name="theme-color" content="#0B1F3F">
+  <link rel="canonical" href="https://anuvik2401.github.io/system-design-prep/topics/questions/online-chess.html">
+  <link rel="icon" href="../../assets/favicon.svg" type="image/svg+xml">
+  <meta property="og:type" content="website">
+  <meta property="og:title" content="Design Online Chess — SD Prep">
+  <meta property="og:description" content="Tests whether you treat two-player game state as a distributed consensus problem — both clients must see an identical board with zero divergence, even across packet loss and reconnects.">
+  <meta property="og:url" content="https://anuvik2401.github.io/system-design-prep/topics/questions/online-chess.html">
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,600;12..96,700&amp;family=IBM+Plex+Mono:wght@500&amp;family=IBM+Plex+Sans:wght@400;500;600&amp;display=swap">
+  <link rel="stylesheet" href="../../assets/chrome.css">
+  <!-- /site-head -->
 </head>
 <body>
   <aside id="sidebar"></aside>
@@ -100,7 +112,7 @@
     <section id="step2-entities">
       <div class="step-pill">Step 2 of 6 — Core Entities</div>
       <h2>Core entities</h2>
-      <ul style="font-size:13px;color:#999;margin:0 0 0.75rem;padding-left:1.1rem">
+      <ul style="font-size:13px;color:#4A5873;margin:0 0 0.75rem;padding-left:1.1rem">
         <li>Live board state → <strong>Redis</strong>, sub-millisecond hot path.</li>
         <li>Player identity + rating → <strong>Postgres</strong>, durability.</li>
         <li>Every move appended to an <strong>immutable log</strong> — replay, disputes, analysis.</li>
@@ -149,7 +161,7 @@
     <section id="step3-api">
       <div class="step-pill">Step 3 of 6 — API / Interface</div>
       <h2>API design</h2>
-      <ul style="font-size:13px;color:#999;margin:0 0 0.75rem;padding-left:1.1rem">
+      <ul style="font-size:13px;color:#4A5873;margin:0 0 0.75rem;padding-left:1.1rem">
         <li>Matchmaking = <strong>REST</strong> — one-shot request.</li>
         <li>Gameplay + spectating = <strong>WebSockets</strong> — long-lived, low-latency streams.</li>
         <li>Two <strong>separate connection pools</strong>, never shared.</li>
@@ -193,7 +205,7 @@
     <section id="step4-dataflow">
       <div class="step-pill">Step 4 of 6 — Data Flow</div>
       <h2>Data flow</h2>
-      <ul style="font-size:13px;color:#999;margin:0 0 0.75rem;padding-left:1.1rem">
+      <ul style="font-size:13px;color:#4A5873;margin:0 0 0.75rem;padding-left:1.1rem">
         <li>Move write (blue): game server + Redis, directly.</li>
         <li>Applied move fans out to spectators (amber) via broadcast layer.</li>
         <li>Broadcast layer never talks to the authoritative game server.</li>
@@ -244,7 +256,7 @@
     <section id="step5-hld">
       <div class="step-pill">Step 5 of 6 — High-Level Design</div>
       <h2>High-level design</h2>
-      <ul style="font-size:13px;color:#999;margin:0 0 0.75rem;padding-left:1.1rem">
+      <ul style="font-size:13px;color:#4A5873;margin:0 0 0.75rem;padding-left:1.1rem">
         <li>Players hold a <strong>sticky session</strong> to one game server.</li>
         <li>That server is the <strong>sole writer</strong> to the game's Redis state.</li>
         <li>Matchmaking + spectator fan-out never sit on the hot path.</li>
@@ -331,7 +343,7 @@
     <section id="step6-deepdive-movevalidation">
       <div class="step-pill">Step 6 of 6 — Deep Dives</div>
       <h2>Deep dive: move validation and delivery</h2>
-      <ul style="font-size:13px;color:#999;margin:0 0 0.75rem;padding-left:1.1rem">
+      <ul style="font-size:13px;color:#4A5873;margin:0 0 0.75rem;padding-left:1.1rem">
         <li>Validated once, applied once, delivered twice (ack + broadcast).</li>
         <li>Lost ack → client retries with the same <strong>idempotency key</strong>.</li>
         <li>Never resubmit as a fresh move.</li>
@@ -383,7 +395,7 @@
 
     <section id="step6-deepdive-matchmaking">
       <h2>Deep dive: ELO-bucketed matchmaking</h2>
-      <p style="font-size:13px;color:#999;margin-bottom:0.75rem">Players are placed into a rating bucket on queue entry. The matcher first looks for an opponent inside a narrow rating/latency window, then widens that window on a timer if no match is found.</p>
+      <p style="font-size:13px;color:#4A5873;margin-bottom:0.75rem">Players are placed into a rating bucket on queue entry. The matcher first looks for an opponent inside a narrow rating/latency window, then widens that window on a timer if no match is found.</p>
 
       <div class="diagram-wrap">
         <svg viewBox="0 0 700 260" xmlns="http://www.w3.org/2000/svg">
@@ -423,7 +435,7 @@
 
     <section id="step6-deepdive-spectators">
       <h2>Deep dive: spectator fan-out at 1M viewers</h2>
-      <ul style="font-size:13px;color:#999;margin:0 0 0.75rem;padding-left:1.1rem">
+      <ul style="font-size:13px;color:#4A5873;margin:0 0 0.75rem;padding-left:1.1rem">
         <li>Player write path and spectator read path <strong>never share infrastructure</strong>.</li>
         <li>A viral 1M-viewer match must add zero latency for the players.</li>
       </ul>
@@ -527,6 +539,8 @@
 
   </main>
   <script src="../../assets/nav.js"></script>
+  <script src="../../assets/chrome.js"></script>
+  <script src="../../assets/sheet.js"></script>
   <script src="../../assets/mindmap.js"></script>
 </body>
 </html>

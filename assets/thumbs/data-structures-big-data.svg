@@ -1,0 +1,57 @@
+<svg viewBox="0 0 680 260" xmlns="http://www.w3.org/2000/svg"><style>
+text{font-family:'IBM Plex Sans',system-ui,sans-serif;fill:#0B1F3F;text-anchor:middle;dominant-baseline:middle}
+.diag-label{font-size:12px;font-weight:600}.diag-sublabel,.diag-arrow-label{font-size:9.5px;fill:#4A5873}
+.diag-box{fill:#fff;stroke:#0B1F3F;stroke-width:1.5;rx:7px}.role-cache{fill:#FBF5E6;stroke:#B8892B}
+.role-async,.role-queue{fill:#FBF5E6;stroke:#9A5B13}.role-db{fill:#EEF2F9;stroke:#4A5873}
+.diag-arrow-path{fill:none;stroke:#66728A;stroke-width:1.5}
+</style>
+          <defs>
+            <marker id="bfArrow1" markerWidth="8" markerHeight="8" refX="6" refY="3" orient="auto"><path d="M0,0 L6,3 L0,6 Z" fill="#8A6514"/></marker>
+            <marker id="bfArrow2" markerWidth="8" markerHeight="8" refX="6" refY="3" orient="auto"><path d="M0,0 L6,3 L0,6 Z" fill="#8A6514"/></marker>
+            <marker id="bfArrow3" markerWidth="8" markerHeight="8" refX="6" refY="3" orient="auto"><path d="M0,0 L6,3 L0,6 Z" fill="#8A6514"/></marker>
+          </defs>
+
+          <g>
+            <rect class="diag-box role-client" x="10" y="20" width="150" height="40" rx="6"/>
+            <text class="diag-label" x="85" y="44" style="font-size:11px">key: "alice@..."</text>
+          </g>
+          <path d="M160,32 C220,32 220,80 280,86" stroke="#8A6514" stroke-width="1.5" marker-end="url(#bfArrow1)" fill="none"/>
+          <path d="M160,40 C220,40 220,134 280,138" stroke="#8A6514" stroke-width="1.5" marker-end="url(#bfArrow1)" fill="none"/>
+          <path d="M160,48 C220,48 220,182 320,186" stroke="#8A6514" stroke-width="1.5" marker-end="url(#bfArrow1)" fill="none"/>
+          <text x="200" y="22" font-size="9" fill="#8A6514" font-family="Inter,sans-serif">h1(k), h2(k), h3(k) → bit positions</text>
+
+          <g>
+            <rect class="diag-box role-client" x="10" y="90" width="150" height="40" rx="6"/>
+            <text class="diag-label" x="85" y="114" style="font-size:11px">key: "bob@..."</text>
+          </g>
+          <path d="M160,102 C220,102 220,86 320,90" stroke="#8A6514" stroke-width="1.5" marker-end="url(#bfArrow2)" fill="none"/>
+          <path d="M160,110 C230,110 230,230 360,234" stroke="#8A6514" stroke-width="1.5" marker-end="url(#bfArrow2)" fill="none"/>
+          <path d="M160,118 C240,118 240,138 400,142" stroke="#8A6514" stroke-width="1.5" marker-end="url(#bfArrow2)" fill="none"/>
+
+          <text class="diag-sublabel" x="455" y="64" style="font-size:10px">bit array, m=18 — 0 indexed left to right</text>
+          <g stroke="#8A6514" stroke-width="1" fill="none">
+            <rect x="280" y="74" width="360" height="36"/>
+            <line x1="300" y1="74" x2="300" y2="110"/><line x1="320" y1="74" x2="320" y2="110"/><line x1="340" y1="74" x2="340" y2="110"/>
+            <line x1="360" y1="74" x2="360" y2="110"/><line x1="380" y1="74" x2="380" y2="110"/><line x1="400" y1="74" x2="400" y2="110"/>
+            <line x1="420" y1="74" x2="420" y2="110"/><line x1="440" y1="74" x2="440" y2="110"/><line x1="460" y1="74" x2="460" y2="110"/>
+            <line x1="480" y1="74" x2="480" y2="110"/><line x1="500" y1="74" x2="500" y2="110"/><line x1="520" y1="74" x2="520" y2="110"/>
+            <line x1="540" y1="74" x2="540" y2="110"/><line x1="560" y1="74" x2="560" y2="110"/><line x1="580" y1="74" x2="580" y2="110"/>
+            <line x1="600" y1="74" x2="600" y2="110"/><line x1="620" y1="74" x2="620" y2="110"/>
+          </g>
+          <g><rect x="280" y="74" width="20" height="36" fill="#FBF5E6"/><text x="290" y="97" text-anchor="middle" font-size="11" fill="#8A6514" font-family="Inter,sans-serif">1</text></g>
+          <g><rect x="300" y="74" width="20" height="36" fill="#EEF2F9"/><text x="310" y="97" text-anchor="middle" font-size="11" fill="#8A6514" font-family="Inter,sans-serif">1</text></g>
+          <g><rect x="320" y="74" width="20" height="36" fill="#FBF5E6"/><text x="330" y="97" text-anchor="middle" font-size="11" fill="#8A6514" font-family="Inter,sans-serif">1</text></g>
+          <g><rect x="400" y="74" width="20" height="36" fill="#EEF2F9"/><text x="410" y="97" text-anchor="middle" font-size="11" fill="#8A6514" font-family="Inter,sans-serif">1</text></g>
+          <g><rect x="360" y="74" width="20" height="36" fill="#FBF5E6"/><text x="370" y="97" text-anchor="middle" font-size="11" fill="#8A6514" font-family="Inter,sans-serif">1</text></g>
+
+          <g>
+            <rect x="10" y="180" width="170" height="46" rx="6" fill="#FBF5E6" stroke="#8A6514"/>
+            <text x="95" y="200" text-anchor="middle" font-size="11" fill="#8A6514" font-family="Inter,sans-serif">query: "carol@..."</text>
+            <text x="95" y="216" text-anchor="middle" font-size="9" fill="#8A6514" font-family="Inter,sans-serif">all 3 bits already 1 → false positive</text>
+          </g>
+          <path d="M180,196 C230,196 230,90 280,84" stroke="#8A6514" stroke-width="1.5" stroke-dasharray="4 3" marker-end="url(#bfArrow3)" fill="none"/>
+          <path d="M180,206 C260,206 260,92 360,86" stroke="#8A6514" stroke-width="1.5" stroke-dasharray="4 3" marker-end="url(#bfArrow3)" fill="none"/>
+          <path d="M180,216 C300,216 300,150 400,144" stroke="#8A6514" stroke-width="1.5" stroke-dasharray="4 3" marker-end="url(#bfArrow3)" fill="none"/>
+
+          <text x="460" y="160" font-size="10" fill="#4A5873" font-family="Inter,sans-serif">Query "dave@..." → hashes to a 0 bit → "definitely not present" (always correct)</text>
+        </svg>

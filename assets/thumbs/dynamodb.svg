@@ -1,0 +1,44 @@
+<svg viewBox="0 0 720 200" xmlns="http://www.w3.org/2000/svg"><style>
+text{font-family:'IBM Plex Sans',system-ui,sans-serif;fill:#0B1F3F;text-anchor:middle;dominant-baseline:middle}
+.diag-label{font-size:12px;font-weight:600}.diag-sublabel,.diag-arrow-label{font-size:9.5px;fill:#4A5873}
+.diag-box{fill:#fff;stroke:#0B1F3F;stroke-width:1.5;rx:7px}.role-cache{fill:#FBF5E6;stroke:#B8892B}
+.role-async,.role-queue{fill:#FBF5E6;stroke:#9A5B13}.role-db{fill:#EEF2F9;stroke:#4A5873}
+.diag-arrow-path{fill:none;stroke:#66728A;stroke-width:1.5}
+</style>
+          <defs>
+            <marker id="ddbArrow" markerWidth="8" markerHeight="8" refX="6" refY="3" orient="auto"><path d="M0,0 L6,3 L0,6 Z" fill="#8A6514"/></marker>
+          </defs>
+
+          <g>
+            <rect class="diag-box role-client" x="15" y="75" width="120" height="50"/>
+            <text class="diag-label" x="75" y="95" style="font-size:11px">PutItem</text>
+            <text class="diag-sublabel" x="75" y="111" style="font-size:9px">userId: "u882"</text>
+          </g>
+          <path class="diag-arrow-path" d="M135,100 L195,100" marker-end="url(#ddbArrow)"/>
+
+          <g>
+            <rect class="diag-box role-cache" x="195" y="75" width="150" height="50"/>
+            <text class="diag-label" x="270" y="95" style="font-size:11px">Hash(partition key)</text>
+            <text class="diag-sublabel" x="270" y="111" style="font-size:9px">internal routing</text>
+          </g>
+
+          <path class="diag-arrow-path" d="M345,90 L420,30" marker-end="url(#ddbArrow)"/>
+          <path class="diag-arrow-path" d="M345,100 L420,100" marker-end="url(#ddbArrow)"/>
+          <path class="diag-arrow-path" d="M345,110 L420,170" marker-end="url(#ddbArrow)"/>
+
+          <g>
+            <rect class="diag-box role-db" x="420" y="5" width="160" height="50"/>
+            <text class="diag-label" x="500" y="25" style="font-size:11px">Partition A</text>
+            <text class="diag-sublabel" x="500" y="41" style="font-size:9px;fill:#8A6514">even load</text>
+          </g>
+          <g>
+            <rect class="diag-box role-db" x="420" y="75" width="160" height="50"/>
+            <text class="diag-label" x="500" y="95" style="font-size:11px">Partition B</text>
+            <text class="diag-sublabel" x="500" y="111" style="font-size:9px;fill:#8A6514">even load</text>
+          </g>
+          <g>
+            <rect class="diag-box role-async" x="420" y="145" width="160" height="50"/>
+            <text class="diag-label" x="500" y="165" style="font-size:11px">Partition C</text>
+            <text class="diag-sublabel" x="500" y="181" style="font-size:9px;fill:#8A6514">hot — throttled</text>
+          </g>
+        </svg>

@@ -1,0 +1,22 @@
+<svg viewBox="0 0 320 130" xmlns="http://www.w3.org/2000/svg"><style>
+text{font-family:'IBM Plex Sans',system-ui,sans-serif;fill:#0B1F3F;text-anchor:middle;dominant-baseline:middle}
+.diag-label{font-size:12px;font-weight:600}.diag-sublabel,.diag-arrow-label{font-size:9.5px;fill:#4A5873}
+.diag-box{fill:#fff;stroke:#0B1F3F;stroke-width:1.5;rx:7px}.role-cache{fill:#FBF5E6;stroke:#B8892B}
+.role-async,.role-queue{fill:#FBF5E6;stroke:#9A5B13}.role-db{fill:#EEF2F9;stroke:#4A5873}
+.diag-arrow-path{fill:none;stroke:#66728A;stroke-width:1.5}
+</style>
+            <defs><marker id="hitArrow" markerWidth="8" markerHeight="8" refX="6" refY="3" orient="auto"><path d="M0,0 L6,3 L0,6 Z" fill="#8A6514"/></marker></defs>
+            <path class="hit-arrow-1" d="M95,40 L195,40" stroke="#8A6514" stroke-width="2" marker-end="url(#hitArrow)" fill="none"/>
+            <path class="hit-arrow-2" d="M195,60 L95,60" stroke="#8A6514" stroke-width="2" marker-end="url(#hitArrow)" fill="none"/>
+            
+            <rect class="diag-box role-client" x="10" y="20" width="85" height="50"></rect>
+            <text class="diag-label" x="52" y="40">Client</text>
+            <text class="diag-sublabel" x="52" y="55">request</text>
+            <g>
+              <rect class="diag-box role-cache" x="195" y="15" width="115" height="60" rx="6"></rect>
+              <text class="diag-label" x="252" y="38" style="font-weight:600">Redis</text>
+              <text class="diag-sublabel" x="252" y="53">GET found</text>
+              <text class="diag-sublabel" x="252" y="65" style="fill:#8A6514">~1ms</text>
+            </g>
+            <text x="145" y="100" text-anchor="middle" font-size="10" fill="#8A6514" font-family="Inter,sans-serif">key exists → return immediately</text>
+          </svg>

@@ -7,6 +7,18 @@
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link rel="stylesheet" href="../../assets/style.css">
+        <!-- site-head -->
+  <meta name="description" content="Tests whether you treat concurrent bidding as a compare-and-swap problem and auction close as a distributed coordination problem, not just another CRUD write.">
+  <meta name="theme-color" content="#0B1F3F">
+  <link rel="canonical" href="https://anuvik2401.github.io/system-design-prep/topics/questions/online-auction.html">
+  <link rel="icon" href="../../assets/favicon.svg" type="image/svg+xml">
+  <meta property="og:type" content="website">
+  <meta property="og:title" content="Design an Online Auction — SD Prep">
+  <meta property="og:description" content="Tests whether you treat concurrent bidding as a compare-and-swap problem and auction close as a distributed coordination problem, not just another CRUD write.">
+  <meta property="og:url" content="https://anuvik2401.github.io/system-design-prep/topics/questions/online-auction.html">
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,600;12..96,700&amp;family=IBM+Plex+Mono:wght@500&amp;family=IBM+Plex+Sans:wght@400;500;600&amp;display=swap">
+  <link rel="stylesheet" href="../../assets/chrome.css">
+  <!-- /site-head -->
 </head>
 <body>
   <aside id="sidebar"></aside>
@@ -100,7 +112,7 @@
     <section id="step2-entities">
       <div class="step-pill">Step 2 of 6 — Core Entities</div>
       <h2>Core entities</h2>
-      <p style="font-size:13px;color:#999;margin-bottom:0.75rem">Auction and Bid live in Postgres for transactional correctness; item media sits in object storage — split by access pattern and consistency need.</p>
+      <p style="font-size:13px;color:#4A5873;margin-bottom:0.75rem">Auction and Bid live in Postgres for transactional correctness; item media sits in object storage — split by access pattern and consistency need.</p>
 
       <div class="entity-grid">
         <div class="entity-box">
@@ -145,7 +157,7 @@
     <section id="step3-api">
       <div class="step-pill">Step 3 of 6 — API / Interface</div>
       <h2>API design</h2>
-      <p style="font-size:13px;color:#999;margin-bottom:0.75rem">Listing and bidding are REST; live bid updates use a persistent connection since 10k watchers per auction makes polling infeasible.</p>
+      <p style="font-size:13px;color:#4A5873;margin-bottom:0.75rem">Listing and bidding are REST; live bid updates use a persistent connection since 10k watchers per auction makes polling infeasible.</p>
 
       <div class="api-card">
         <div class="api-line"><span class="api-method post">POST</span><span class="api-path">/api/v1/auctions</span><span class="api-auth">Auth: required (seller)</span></div>
@@ -185,7 +197,7 @@
     <section id="step4-dataflow">
       <div class="step-pill">Step 4 of 6 — Data Flow</div>
       <h2>Data flow</h2>
-      <p style="font-size:13px;color:#999;margin-bottom:0.75rem">Read path (mint) — viewing an auction — and write path (blue) — submitting a bid — share the same Auction row but diverge everywhere else.</p>
+      <p style="font-size:13px;color:#4A5873;margin-bottom:0.75rem">Read path (mint) — viewing an auction — and write path (blue) — submitting a bid — share the same Auction row but diverge everywhere else.</p>
 
       <div class="diagram-wrap" data-paths='{"read":{"boxes":["r-client","r-cdn","r-svc","r-cache","r-db"],"arrows":["r1","r2","r3","r4"]},"write":{"boxes":["w-client","w-svc","w-db","w-pubsub"],"arrows":["w1","w2","w3"]}}'>
         <svg viewBox="0 0 740 220" xmlns="http://www.w3.org/2000/svg">
@@ -235,7 +247,7 @@
     <section id="step5-hld">
       <div class="step-pill">Step 5 of 6 — High-Level Design</div>
       <h2>High-level design</h2>
-      <p style="font-size:13px;color:#999;margin-bottom:0.75rem">Full system: bid service, auction state machine, bid store, real-time broadcast, and the auction close worker together.</p>
+      <p style="font-size:13px;color:#4A5873;margin-bottom:0.75rem">Full system: bid service, auction state machine, bid store, real-time broadcast, and the auction close worker together.</p>
 
       <div class="diagram-wrap">
         <svg viewBox="0 0 780 300" xmlns="http://www.w3.org/2000/svg">
@@ -315,7 +327,7 @@
     <section id="step6-deepdive-bidrace">
       <div class="step-pill">Step 6 of 6 — Deep Dives</div>
       <h2>Deep dive: bid race condition</h2>
-      <p style="font-size:13px;color:#999;margin-bottom:0.75rem">Two bids arrive within milliseconds of each other for the same auction. Only one can win — a compare-and-swap on the version column decides, not arrival order at the network layer.</p>
+      <p style="font-size:13px;color:#4A5873;margin-bottom:0.75rem">Two bids arrive within milliseconds of each other for the same auction. Only one can win — a compare-and-swap on the version column decides, not arrival order at the network layer.</p>
       <div class="flow-cmp-grid">
         <div class="flow-cmp-col hit">
           <div class="flow-cmp-title">✓ Winning bid — CAS succeeds</div>
@@ -392,7 +404,7 @@
 
     <section id="step6-deepdive-statemachine">
       <h2>Deep dive: auction state machine</h2>
-      <p style="font-size:13px;color:#999;margin-bottom:0.75rem">Every transition is guarded and enforced in the same transaction as the triggering write. Dashed transitions are irreversible.</p>
+      <p style="font-size:13px;color:#4A5873;margin-bottom:0.75rem">Every transition is guarded and enforced in the same transaction as the triggering write. Dashed transitions are irreversible.</p>
       <div class="diagram-wrap">
         <svg viewBox="0 0 760 220" xmlns="http://www.w3.org/2000/svg">
           <defs>
@@ -491,6 +503,8 @@
 
   </main>
   <script src="../../assets/nav.js"></script>
+  <script src="../../assets/chrome.js"></script>
+  <script src="../../assets/sheet.js"></script>
   <script src="../../assets/mindmap.js"></script>
 </body>
 </html>

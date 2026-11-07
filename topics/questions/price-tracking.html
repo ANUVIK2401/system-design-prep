@@ -7,6 +7,18 @@
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link rel="stylesheet" href="../../assets/style.css">
+        <!-- site-head -->
+  <meta name="description" content="Tests whether you can keep a scraper fleet alive against sites actively trying to block it, not whether you can store a time series.">
+  <meta name="theme-color" content="#0B1F3F">
+  <link rel="canonical" href="https://anuvik2401.github.io/system-design-prep/topics/questions/price-tracking.html">
+  <link rel="icon" href="../../assets/favicon.svg" type="image/svg+xml">
+  <meta property="og:type" content="website">
+  <meta property="og:title" content="Design a Price Tracking Service — SD Prep">
+  <meta property="og:description" content="Tests whether you can keep a scraper fleet alive against sites actively trying to block it, not whether you can store a time series.">
+  <meta property="og:url" content="https://anuvik2401.github.io/system-design-prep/topics/questions/price-tracking.html">
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,600;12..96,700&amp;family=IBM+Plex+Mono:wght@500&amp;family=IBM+Plex+Sans:wght@400;500;600&amp;display=swap">
+  <link rel="stylesheet" href="../../assets/chrome.css">
+  <!-- /site-head -->
 </head>
 <body>
   <aside id="sidebar"></aside>
@@ -99,7 +111,7 @@
     <section id="step2-entities">
       <div class="step-pill">Step 2 of 6 — Core Entities</div>
       <h2>Core entities</h2>
-      <p style="font-size:13px;color:#999;margin-bottom:0.75rem">Four entities split by access pattern: config lookups, append-only history, and a separate table for the anti-bot layer's per-domain state.</p>
+      <p style="font-size:13px;color:#4A5873;margin-bottom:0.75rem">Four entities split by access pattern: config lookups, append-only history, and a separate table for the anti-bot layer's per-domain state.</p>
 
       <div class="entity-grid">
         <div class="entity-box">
@@ -154,7 +166,7 @@
     <section id="step3-api">
       <div class="step-pill">Step 3 of 6 — API / Interface</div>
       <h2>API design</h2>
-      <p style="font-size:13px;color:#999;margin-bottom:0.75rem">Four endpoints — track a product, fetch price history, create an alert rule, and list a user's tracked products. No endpoint exposes scraping internals.</p>
+      <p style="font-size:13px;color:#4A5873;margin-bottom:0.75rem">Four endpoints — track a product, fetch price history, create an alert rule, and list a user's tracked products. No endpoint exposes scraping internals.</p>
 
       <div class="api-card">
         <div class="api-line"><span class="api-method post">POST</span><span class="api-path">/api/v1/products/track</span><span class="api-auth">Auth: required</span></div>
@@ -192,7 +204,7 @@
     <section id="step4-dataflow">
       <div class="step-pill">Step 4 of 6 — Data Flow</div>
       <h2>Data flow</h2>
-      <p style="font-size:13px;color:#999;margin-bottom:0.75rem">Scrape path (amber, async/scheduled) and user read path (mint) never touch the same hot component — a slow scrape never blocks a chart load.</p>
+      <p style="font-size:13px;color:#4A5873;margin-bottom:0.75rem">Scrape path (amber, async/scheduled) and user read path (mint) never touch the same hot component — a slow scrape never blocks a chart load.</p>
 
       <div class="diagram-wrap" data-paths='{"scrape":{"boxes":["s-sched","s-queue","s-worker","s-target","s-store"],"arrows":["s1","s2","s3","s4"]},"read":{"boxes":["r-client","r-api","r-ts"],"arrows":["r1","r2"]}}'>
         <svg viewBox="0 0 740 220" xmlns="http://www.w3.org/2000/svg">
@@ -238,7 +250,7 @@
     <section id="step5-hld">
       <div class="step-pill">Step 5 of 6 — High-Level Design</div>
       <h2>High-level design</h2>
-      <p style="font-size:13px;color:#999;margin-bottom:0.75rem">Full system: scrape pipeline, anti-bot layer, alert evaluation, and the read path together.</p>
+      <p style="font-size:13px;color:#4A5873;margin-bottom:0.75rem">Full system: scrape pipeline, anti-bot layer, alert evaluation, and the read path together.</p>
 
       <div class="diagram-wrap">
         <svg viewBox="0 0 780 300" xmlns="http://www.w3.org/2000/svg">
@@ -318,7 +330,7 @@
     <section id="step6-deepdive-antibot">
       <div class="step-pill">Step 6 of 6 — Deep Dives</div>
       <h2>Deep dive: scraper anti-detection techniques</h2>
-      <p style="font-size:13px;color:#999;margin-bottom:0.75rem">Every layer exists to make the scraper fleet look like normal, distributed human traffic rather than a single bot hammering a site.</p>
+      <p style="font-size:13px;color:#4A5873;margin-bottom:0.75rem">Every layer exists to make the scraper fleet look like normal, distributed human traffic rather than a single bot hammering a site.</p>
       <div class="flow-cmp-grid">
         <div class="flow-cmp-col hit">
           <div class="flow-cmp-title">✓ Well-behaved fleet — sustained access</div>
@@ -402,7 +414,7 @@
 
     <section id="step6-deepdive-alerts">
       <h2>Deep dive: price alert evaluation</h2>
-      <p style="font-size:13px;color:#999;margin-bottom:0.75rem">Two threshold types cover nearly every real use case, evaluated synchronously on every new price point.</p>
+      <p style="font-size:13px;color:#4A5873;margin-bottom:0.75rem">Two threshold types cover nearly every real use case, evaluated synchronously on every new price point.</p>
       <div class="compare-grid">
         <div class="compare-card good">
           <div class="compare-label">Absolute threshold</div>
@@ -481,6 +493,8 @@
 
   </main>
   <script src="../../assets/nav.js"></script>
+  <script src="../../assets/chrome.js"></script>
+  <script src="../../assets/sheet.js"></script>
   <script src="../../assets/mindmap.js"></script>
 </body>
 </html>

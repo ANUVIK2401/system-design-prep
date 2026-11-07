@@ -1,0 +1,27 @@
+<svg viewBox="0 0 780 300" xmlns="http://www.w3.org/2000/svg"><style>
+text{font-family:'IBM Plex Sans',system-ui,sans-serif;fill:#0B1F3F;text-anchor:middle;dominant-baseline:middle}
+.diag-label{font-size:12px;font-weight:600}.diag-sublabel,.diag-arrow-label{font-size:9.5px;fill:#4A5873}
+.diag-box{fill:#fff;stroke:#0B1F3F;stroke-width:1.5;rx:7px}.role-cache{fill:#FBF5E6;stroke:#B8892B}
+.role-async,.role-queue{fill:#FBF5E6;stroke:#9A5B13}.role-db{fill:#EEF2F9;stroke:#4A5873}
+.diag-arrow-path{fill:none;stroke:#66728A;stroke-width:1.5}
+</style>
+          <defs><marker id="rlHldArrow" markerWidth="8" markerHeight="8" refX="6" refY="3" orient="auto"><path d="M0,0 L6,3 L0,6 Z" fill="#8A6514"/></marker></defs>
+          <g><rect class="diag-box role-client" x="10" y="20" width="110" height="50"/><text class="diag-label" x="65" y="50" style="font-size:11px">Clients</text></g>
+          <path class="diag-arrow-path" d="M120,45 L155,45" marker-end="url(#rlHldArrow)"/>
+          <g><rect class="diag-box role-cdn" x="155" y="20" width="120" height="50"/><text class="diag-label" x="215" y="50" style="font-size:11px">API Gateway</text></g>
+          <path class="diag-arrow-path" d="M275,45 L310,45" marker-end="url(#rlHldArrow)"/>
+          <g><rect class="diag-box role-client" x="310" y="20" width="140" height="50"/><text class="diag-label" x="380" y="45" style="font-size:11px">Rate Limit MW</text><text class="diag-sublabel" x="380" y="60" style="font-size:8.5px">stateless, x50</text></g>
+
+          <path class="diag-arrow-path" d="M380,70 L380,105" marker-end="url(#rlHldArrow)"/>
+          <g><rect class="diag-box role-cache" x="315" y="105" width="130" height="46"/><text class="diag-label" x="380" y="128" style="font-size:11px">Redis Cluster</text><text class="diag-sublabel" x="380" y="143" style="font-size:8.5px">counters + buckets</text></g>
+
+          <path class="diag-arrow-path" d="M410,151 L410,185" marker-end="url(#rlHldArrow)" stroke-dasharray="3 3"/>
+          <g><rect class="diag-box role-db" x="345" y="185" width="130" height="46"/><text class="diag-label" x="410" y="208" style="font-size:11px">Backend Svc</text><text class="diag-sublabel" x="410" y="223" style="font-size:8.5px">horizontally scaled</text></g>
+
+          <path class="diag-arrow-path" d="M450,45 L620,45 L620,105" marker-end="url(#rlHldArrow)" stroke-dasharray="3 3"/>
+          <g><rect class="diag-box role-db" x="555" y="105" width="130" height="46"/><text class="diag-label" x="620" y="128" style="font-size:11px">Postgres</text><text class="diag-sublabel" x="620" y="143" style="font-size:8.5px">rule config</text></g>
+          <path class="diag-arrow-path" d="M620,151 L620,185" marker-end="url(#rlHldArrow)"/>
+          <g><rect class="diag-box role-async" x="555" y="185" width="130" height="46"/><text class="diag-label" x="620" y="208" style="font-size:11px">Metrics/Alerting</text><text class="diag-sublabel" x="620" y="223" style="font-size:8.5px">deny-rate, hot keys</text></g>
+
+          <g><rect class="diag-box role-async" x="10" y="240" width="230" height="40" rx="4"/><text class="diag-label" x="125" y="264" style="font-size:11px">Middleware emits async deny/allow counters → Metrics</text></g>
+        </svg>

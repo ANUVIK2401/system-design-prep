@@ -63,6 +63,8 @@
     { slug: 'chatgpt',            name: 'Design ChatGPT',      cat: 'Questions', dir: 'questions/' },
   ];
 
+  window.SD_SITE = { TOPICS };
+
   const sidebar  = document.getElementById('sidebar');
   if (!sidebar) return;
 
@@ -95,7 +97,7 @@
     try { localStorage.setItem(VISITED_KEY, JSON.stringify(visited)); } catch (e) {}
   }
 
-  let html = `<a class="sb-logo" href="${homePath}">SD Prep ↗</a>`;
+  let html = '';
 
   const doneCount = TOPICS.filter(t => visited.includes(t.slug)).length;
   html += `<div class="sb-progress-wrap">
@@ -308,7 +310,7 @@
   }, { threshold: 0.08, rootMargin: '0px 0px -40px 0px' });
   revealTargets.forEach(el => revealObs.observe(el));
 
-  // ── Diagram box click → mint pulse (300ms) then scroll to + highlight matching detail section ──
+  // ── Diagram box click → gold pulse (300ms) then scroll to + highlight matching detail section ──
   document.querySelectorAll('[data-target]').forEach(box => {
     const diagBox = box.querySelector('.diag-box');
     if (!diagBox) return;
@@ -406,7 +408,7 @@
     });
   });
 
-  // ── Data flow dots: color by path type (write=blue, read=amber async, read=mint default) ──
+  // ── Data flow dots: color by path type (write=navy, async=bronze, read=gold) ──
   document.querySelectorAll('.diag-flow-dot[data-flow]').forEach(dot => {
     const kind = dot.dataset.flow; // 'write' | 'read' | 'async'
     if (kind === 'write') dot.classList.add('dot-write');

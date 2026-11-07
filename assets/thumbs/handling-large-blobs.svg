@@ -1,0 +1,26 @@
+<svg viewBox="0 0 740 200" xmlns="http://www.w3.org/2000/svg"><style>
+text{font-family:'IBM Plex Sans',system-ui,sans-serif;fill:#0B1F3F;text-anchor:middle;dominant-baseline:middle}
+.diag-label{font-size:12px;font-weight:600}.diag-sublabel,.diag-arrow-label{font-size:9.5px;fill:#4A5873}
+.diag-box{fill:#fff;stroke:#0B1F3F;stroke-width:1.5;rx:7px}.role-cache{fill:#FBF5E6;stroke:#B8892B}
+.role-async,.role-queue{fill:#FBF5E6;stroke:#9A5B13}.role-db{fill:#EEF2F9;stroke:#4A5873}
+.diag-arrow-path{fill:none;stroke:#66728A;stroke-width:1.5}
+</style>
+          <defs><marker id="bl1" markerWidth="8" markerHeight="8" refX="6" refY="3" orient="auto"><path d="M0,0 L6,3 L0,6 Z" fill="#8A6514"/></marker></defs>
+
+          <g><rect class="diag-box role-client" x="10" y="20" width="110" height="50"/><text class="diag-label" x="65" y="45" style="font-size:11px">Client</text></g>
+          <path class="diag-arrow-path" d="M120,40 L195,40" marker-end="url(#bl1)"/>
+          <text class="diag-sublabel" x="157" y="30" style="font-size:9px">1. request upload URL</text>
+          <g><rect class="diag-box" x="195" y="15" width="160" height="50"/><text class="diag-label" x="275" y="36" style="font-size:11px">App Server</text><text class="diag-sublabel" x="275" y="52">issues pre-signed URL</text></g>
+          <path class="diag-arrow-path" d="M195,55 L120,80" marker-end="url(#bl1)"/>
+          <text class="diag-sublabel" x="150" y="75" style="font-size:9px">2. returns URL</text>
+
+          <path class="diag-arrow-path" d="M120,90 C300,140 450,140 540,55" marker-end="url(#bl1)" stroke-dasharray="4 3"/>
+          <text class="diag-sublabel" x="330" y="148" style="font-size:9px;fill:#8A6514">3. client PUTs file bytes directly to S3 — bypasses app server</text>
+          <g><rect class="diag-box role-db" x="540" y="20" width="170" height="55"/><text class="diag-label" x="625" y="42" style="font-size:11px">Object Storage</text><text class="diag-sublabel" x="625" y="58">multipart chunks</text></g>
+
+          <g><rect class="diag-box role-cache" x="540" y="120" width="170" height="55"/><text class="diag-label" x="625" y="142" style="font-size:11px">CDN</text><text class="diag-sublabel" x="625" y="158">edge cache for reads</text></g>
+          <path class="diag-arrow-path" d="M625,75 L625,120" marker-end="url(#bl1)"/>
+          <text class="diag-sublabel" x="660" y="100" style="font-size:9px">origin</text>
+          <path class="diag-arrow-path" d="M540,148 C300,170 150,150 120,105" marker-end="url(#bl1)"/>
+          <text class="diag-sublabel" x="330" y="180" style="font-size:9px">4. reads served from CDN, never re-hit app server</text>
+        </svg>

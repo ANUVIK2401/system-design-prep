@@ -7,6 +7,18 @@
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link rel="stylesheet" href="../../assets/style.css">
+        <!-- site-head -->
+  <meta name="description" content="Tests whether you separate a write-heavy geospatial problem (driver location) from a read-heavy one (order matching) instead of forcing both into one store.">
+  <meta name="theme-color" content="#0B1F3F">
+  <link rel="canonical" href="https://anuvik2401.github.io/system-design-prep/topics/questions/local-delivery.html">
+  <link rel="icon" href="../../assets/favicon.svg" type="image/svg+xml">
+  <meta property="og:type" content="website">
+  <meta property="og:title" content="Design a Local Delivery Service — SD Prep">
+  <meta property="og:description" content="Tests whether you separate a write-heavy geospatial problem (driver location) from a read-heavy one (order matching) instead of forcing both into one store.">
+  <meta property="og:url" content="https://anuvik2401.github.io/system-design-prep/topics/questions/local-delivery.html">
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,600;12..96,700&amp;family=IBM+Plex+Mono:wght@500&amp;family=IBM+Plex+Sans:wght@400;500;600&amp;display=swap">
+  <link rel="stylesheet" href="../../assets/chrome.css">
+  <!-- /site-head -->
 </head>
 <body>
   <aside id="sidebar"></aside>
@@ -348,7 +360,7 @@
             pingLabel.style.transition = 'opacity 0.3s ease';
             ping.setAttribute('opacity', '1');
             pingLabel.setAttribute('opacity', '1');
-            if (target) target.el.setAttribute('fill', '#0d1a2d');
+            if (target) target.el.setAttribute('fill', '#EEF2F9');
             if (target) target.el.setAttribute('stroke', 'var(--blue)');
           });
         });
@@ -362,7 +374,7 @@
                 var dist = Math.max(Math.abs(ce.r - centerR), Math.abs(ce.c - centerC));
                 if (dist === ring) {
                   ce.el.style.transition = 'fill 0.3s ease, stroke 0.3s ease';
-                  ce.el.setAttribute('fill', ring === 0 ? '#08200f' : '#0d1f17');
+                  ce.el.setAttribute('fill', ring === 0 ? '#FBF5E6' : '#FBF5E6');
                   ce.el.setAttribute('stroke', 'var(--accent)');
                 }
               });
@@ -487,6 +499,8 @@
 
   </main>
   <script src="../../assets/nav.js"></script>
+  <script src="../../assets/chrome.js"></script>
+  <script src="../../assets/sheet.js"></script>
   <script src="../../assets/mindmap.js"></script>
 </body>
 </html>

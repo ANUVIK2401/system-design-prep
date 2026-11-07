@@ -1,0 +1,27 @@
+<svg viewBox="0 0 400 270" xmlns="http://www.w3.org/2000/svg"><style>
+text{font-family:'IBM Plex Sans',system-ui,sans-serif;fill:#0B1F3F;text-anchor:middle;dominant-baseline:middle}
+.diag-label{font-size:12px;font-weight:600}.diag-sublabel,.diag-arrow-label{font-size:9.5px;fill:#4A5873}
+.diag-box{fill:#fff;stroke:#0B1F3F;stroke-width:1.5;rx:7px}.role-cache{fill:#FBF5E6;stroke:#B8892B}
+.role-async,.role-queue{fill:#FBF5E6;stroke:#9A5B13}.role-db{fill:#EEF2F9;stroke:#4A5873}
+.diag-arrow-path{fill:none;stroke:#66728A;stroke-width:1.5}
+</style>
+          <polygon points="200,40 38,234 362,234" fill="none" stroke="#8A6514" stroke-width="1.5"/>
+          <line x1="200" y1="40" x2="200" y2="234" stroke="#8A6514" stroke-width="1" stroke-dasharray="3,3"/>
+          <g class="cap-node" tabindex="0">
+            <circle class="diag-box role-client" cx="200" cy="40" r="34"/>
+            <text class="diag-label" x="200" y="36">C</text>
+            <text class="diag-sublabel" x="200" y="52">Consistency</text>
+          </g>
+          <g class="cap-node" tabindex="0">
+            <circle class="diag-box role-cache" cx="38" cy="234" r="34"/>
+            <text class="diag-label" x="38" y="230">A</text>
+            <text class="diag-sublabel" x="38" y="246">Availability</text>
+          </g>
+          <g class="cap-node" tabindex="0">
+            <circle class="diag-box role-async" cx="362" cy="234" r="34"/>
+            <text class="diag-label" x="362" y="230">P</text>
+            <text class="diag-sublabel" x="362" y="246">Partition tol.</text>
+          </g>
+          <text class="diag-sublabel" x="200" y="145" style="font-size:10px">click a corner —</text>
+          <text class="diag-sublabel" x="200" y="159" style="font-size:10px">P is non-negotiable</text>
+        </svg>

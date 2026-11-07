@@ -1,0 +1,60 @@
+<svg viewBox="0 0 740 280" xmlns="http://www.w3.org/2000/svg"><style>
+text{font-family:'IBM Plex Sans',system-ui,sans-serif;fill:#0B1F3F;text-anchor:middle;dominant-baseline:middle}
+.diag-label{font-size:12px;font-weight:600}.diag-sublabel,.diag-arrow-label{font-size:9.5px;fill:#4A5873}
+.diag-box{fill:#fff;stroke:#0B1F3F;stroke-width:1.5;rx:7px}.role-cache{fill:#FBF5E6;stroke:#B8892B}
+.role-async,.role-queue{fill:#FBF5E6;stroke:#9A5B13}.role-db{fill:#EEF2F9;stroke:#4A5873}
+.diag-arrow-path{fill:none;stroke:#66728A;stroke-width:1.5}
+</style>
+          <defs>
+            <marker id="kArrow" markerWidth="8" markerHeight="8" refX="6" refY="3" orient="auto"><path d="M0,0 L6,3 L0,6 Z" fill="#8A6514"/></marker>
+          </defs>
+
+          <g>
+            <rect class="diag-box role-client" x="15" y="105" width="110" height="56"/>
+            <text class="diag-label" x="70" y="128" style="font-size:11px">Producer</text>
+            <text class="diag-sublabel" x="70" y="145" style="font-size:9px">hash(key) → partition</text>
+          </g>
+
+          <path class="diag-arrow-path" d="M125,120 L195,40" marker-end="url(#kArrow)"/>
+          <path class="diag-arrow-path" d="M125,133 L195,133" marker-end="url(#kArrow)"/>
+          <path class="diag-arrow-path" d="M125,146 L195,225" marker-end="url(#kArrow)"/>
+
+          <g>
+            <rect class="diag-box role-async" x="195" y="15" width="150" height="50"/>
+            <text class="diag-label" x="270" y="35" style="font-size:11px">Partition 0</text>
+            <text class="diag-sublabel" x="270" y="51" style="font-size:9px">offsets 0..n</text>
+          </g>
+          <g>
+            <rect class="diag-box role-async" x="195" y="108" width="150" height="50"/>
+            <text class="diag-label" x="270" y="128" style="font-size:11px">Partition 1</text>
+          </g>
+          <g>
+            <rect class="diag-box role-async" x="195" y="200" width="150" height="50"/>
+            <text class="diag-label" x="270" y="220" style="font-size:11px">Partition 2</text>
+          </g>
+
+          <path class="diag-arrow-path" d="M345,40 L420,40" marker-end="url(#kArrow)"/>
+          <path class="diag-arrow-path" d="M345,133 L420,133" marker-end="url(#kArrow)"/>
+          <path class="diag-arrow-path" d="M345,225 L420,225" marker-end="url(#kArrow)"/>
+
+          <g>
+            <rect class="diag-box role-db" x="420" y="15" width="150" height="50"/>
+            <text class="diag-label" x="495" y="35" style="font-size:11px">Consumer 1</text>
+            <text class="diag-sublabel" x="495" y="51" style="font-size:9px">reads partition 0</text>
+          </g>
+          <g>
+            <rect class="diag-box role-db" x="420" y="108" width="150" height="50"/>
+            <text class="diag-label" x="495" y="128" style="font-size:11px">Consumer 2</text>
+            <text class="diag-sublabel" x="495" y="144" style="font-size:9px">reads partition 1</text>
+          </g>
+          <g>
+            <rect class="diag-box role-db" x="420" y="200" width="150" height="50"/>
+            <text class="diag-label" x="495" y="220" style="font-size:11px">Consumer 3</text>
+            <text class="diag-sublabel" x="495" y="236" style="font-size:9px">reads partition 2</text>
+          </g>
+
+          <g>
+            <rect x="405" y="0" width="180" height="265" fill="none" stroke="#8A6514" stroke-width="1" stroke-dasharray="4 3" rx="8"/>
+          </g>
+          <text x="495" y="280" text-anchor="middle" font-size="10" fill="#8A6514" font-family="Inter,sans-serif">consumer group: order-processing</text>
+        </svg>

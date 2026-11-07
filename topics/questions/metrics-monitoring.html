@@ -7,6 +7,18 @@
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link rel="stylesheet" href="../../assets/style.css">
+        <!-- site-head -->
+  <meta name="description" content="Tests whether you separate a write-scale time-series storage problem (millions of points/sec) from a latency-critical alerting problem instead of serving both off the same slow query path.">
+  <meta name="theme-color" content="#0B1F3F">
+  <link rel="canonical" href="https://anuvik2401.github.io/system-design-prep/topics/questions/metrics-monitoring.html">
+  <link rel="icon" href="../../assets/favicon.svg" type="image/svg+xml">
+  <meta property="og:type" content="website">
+  <meta property="og:title" content="Design a Metrics Monitoring & Alerting System — SD Prep">
+  <meta property="og:description" content="Tests whether you separate a write-scale time-series storage problem (millions of points/sec) from a latency-critical alerting problem instead of serving both off the same slow query path.">
+  <meta property="og:url" content="https://anuvik2401.github.io/system-design-prep/topics/questions/metrics-monitoring.html">
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,600;12..96,700&amp;family=IBM+Plex+Mono:wght@500&amp;family=IBM+Plex+Sans:wght@400;500;600&amp;display=swap">
+  <link rel="stylesheet" href="../../assets/chrome.css">
+  <!-- /site-head -->
 </head>
 <body>
   <aside id="sidebar"></aside>
@@ -100,7 +112,7 @@
     <section id="step2-entities">
       <div class="step-pill">Step 2 of 6 — Core Entities</div>
       <h2>Core entities</h2>
-      <p style="font-size:13px;color:#999;margin-bottom:0.75rem">Raw and rolled-up points live in a specialized TSDB sharded by series identity; alert rule config lives in Postgres because it's low-volume and needs relational integrity.</p>
+      <p style="font-size:13px;color:#4A5873;margin-bottom:0.75rem">Raw and rolled-up points live in a specialized TSDB sharded by series identity; alert rule config lives in Postgres because it's low-volume and needs relational integrity.</p>
 
       <div class="entity-grid">
         <div class="entity-box">
@@ -143,7 +155,7 @@
     <section id="step3-api">
       <div class="step-pill">Step 3 of 6 — API / Interface</div>
       <h2>API design</h2>
-      <p style="font-size:13px;color:#999;margin-bottom:0.75rem">Ingestion is a high-frequency push/scrape endpoint; queries and alert rule management are ordinary REST since they're comparatively low-volume.</p>
+      <p style="font-size:13px;color:#4A5873;margin-bottom:0.75rem">Ingestion is a high-frequency push/scrape endpoint; queries and alert rule management are ordinary REST since they're comparatively low-volume.</p>
 
       <div class="api-card">
         <div class="api-line"><span class="api-method post">POST</span><span class="api-path">/api/v1/metrics</span><span class="api-auth">Auth: required (agent API key)</span></div>
@@ -183,7 +195,7 @@
     <section id="step4-dataflow">
       <div class="step-pill">Step 4 of 6 — Data Flow</div>
       <h2>Data flow</h2>
-      <p style="font-size:13px;color:#999;margin-bottom:0.75rem">Ingestion (blue, fanning into an async downsampling path in amber) and dashboard queries (mint) are fully separate flows that only meet at the TSDB.</p>
+      <p style="font-size:13px;color:#4A5873;margin-bottom:0.75rem">Ingestion (blue, fanning into an async downsampling path in amber) and dashboard queries (mint) are fully separate flows that only meet at the TSDB.</p>
 
       <div class="diagram-wrap" data-paths='{"ingest":{"boxes":["d-agent","d-kafka","d-tsdb","d-rollup"],"arrows":["d1","d2","d3"]},"query":{"boxes":["q-dash","q-svc","q-tsdb"],"arrows":["q1","q2"]}}'>
         <svg viewBox="0 0 760 220" xmlns="http://www.w3.org/2000/svg">
@@ -233,7 +245,7 @@
     <section id="step5-hld">
       <div class="step-pill">Step 5 of 6 — High-Level Design</div>
       <h2>High-level design</h2>
-      <p style="font-size:13px;color:#999;margin-bottom:0.75rem">Two consumers of the same ingestion stream: the TSDB/query path for dashboards, and a separate low-latency alerting engine that never waits on the analytical query path.</p>
+      <p style="font-size:13px;color:#4A5873;margin-bottom:0.75rem">Two consumers of the same ingestion stream: the TSDB/query path for dashboards, and a separate low-latency alerting engine that never waits on the analytical query path.</p>
 
       <div class="diagram-wrap">
         <svg viewBox="0 0 800 320" xmlns="http://www.w3.org/2000/svg">
@@ -313,7 +325,7 @@
     <section id="step6-deepdive-downsampling">
       <div class="step-pill">Step 6 of 6 — Deep Dives</div>
       <h2>Deep dive: time-series storage + downsampling</h2>
-      <p style="font-size:13px;color:#999;margin-bottom:0.75rem">Raw 10s-resolution data is compacted over time into progressively coarser tiers — this is what makes both storage cost and long-range query performance tractable.</p>
+      <p style="font-size:13px;color:#4A5873;margin-bottom:0.75rem">Raw 10s-resolution data is compacted over time into progressively coarser tiers — this is what makes both storage cost and long-range query performance tractable.</p>
 
       <div class="diagram-wrap">
         <svg viewBox="0 0 720 230" xmlns="http://www.w3.org/2000/svg">
@@ -347,7 +359,7 @@
 
     <section id="step6-deepdive-cardinality">
       <h2>Deep dive: cardinality explosion</h2>
-      <p style="font-size:13px;color:#999;margin-bottom:0.75rem">A single high-cardinality label turns one metric into millions of unique time series, overwhelming the TSDB's index — the classic way a monitoring system takes itself down.</p>
+      <p style="font-size:13px;color:#4A5873;margin-bottom:0.75rem">A single high-cardinality label turns one metric into millions of unique time series, overwhelming the TSDB's index — the classic way a monitoring system takes itself down.</p>
 
       <div class="diagram-wrap">
         <svg viewBox="0 0 720 210" xmlns="http://www.w3.org/2000/svg">
@@ -376,7 +388,7 @@
 
     <section id="step6-deepdive-alerting">
       <h2>Deep dive: alerting pipeline separate from dashboards</h2>
-      <ul style="font-size:13px;color:#999;margin:0 0 0.75rem;padding-left:1.1rem">
+      <ul style="font-size:13px;color:#4A5873;margin:0 0 0.75rem;padding-left:1.1rem">
         <li>Alert evaluation reads the <strong>ingestion stream</strong> directly.</li>
         <li>Never the dashboard TSDB path — too slow, query-contended.</li>
       </ul>
@@ -464,6 +476,8 @@
 
   </main>
   <script src="../../assets/nav.js"></script>
+  <script src="../../assets/chrome.js"></script>
+  <script src="../../assets/sheet.js"></script>
   <script src="../../assets/mindmap.js"></script>
 </body>
 </html>

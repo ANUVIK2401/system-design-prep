@@ -7,6 +7,18 @@
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link rel="stylesheet" href="../../assets/style.css">
+        <!-- site-head -->
+  <meta name="description" content="Tests whether you can turn noisy GPS streams into clean segment times and live leaderboards without falling into the trap of treating this as just another CRUD app.">
+  <meta name="theme-color" content="#0B1F3F">
+  <link rel="canonical" href="https://anuvik2401.github.io/system-design-prep/topics/questions/strava.html">
+  <link rel="icon" href="../../assets/favicon.svg" type="image/svg+xml">
+  <meta property="og:type" content="website">
+  <meta property="og:title" content="Design Strava — SD Prep">
+  <meta property="og:description" content="Tests whether you can turn noisy GPS streams into clean segment times and live leaderboards without falling into the trap of treating this as just another CRUD app.">
+  <meta property="og:url" content="https://anuvik2401.github.io/system-design-prep/topics/questions/strava.html">
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,600;12..96,700&amp;family=IBM+Plex+Mono:wght@500&amp;family=IBM+Plex+Sans:wght@400;500;600&amp;display=swap">
+  <link rel="stylesheet" href="../../assets/chrome.css">
+  <!-- /site-head -->
 </head>
 <body>
   <aside id="sidebar"></aside>
@@ -100,7 +112,7 @@
     <section id="step2-entities">
       <div class="step-pill">Step 2 of 6 — Core Entities</div>
       <h2>Core entities</h2>
-      <p style="font-size:13px;color:#999;margin-bottom:0.75rem">Four entities across three stores, split by write pattern — activity metadata, raw GPS blobs, matched segment efforts, and leaderboard state each behave differently.</p>
+      <p style="font-size:13px;color:#4A5873;margin-bottom:0.75rem">Four entities across three stores, split by write pattern — activity metadata, raw GPS blobs, matched segment efforts, and leaderboard state each behave differently.</p>
 
       <div class="entity-grid">
         <div class="entity-box">
@@ -152,7 +164,7 @@
     <section id="step3-api">
       <div class="step-pill">Step 3 of 6 — API / Interface</div>
       <h2>API design</h2>
-      <p style="font-size:13px;color:#999;margin-bottom:0.75rem">Four endpoints — upload, fetch activity, segment leaderboard, and the social feed.</p>
+      <p style="font-size:13px;color:#4A5873;margin-bottom:0.75rem">Four endpoints — upload, fetch activity, segment leaderboard, and the social feed.</p>
 
       <div class="api-card">
         <div class="api-line"><span class="api-method post">POST</span><span class="api-path">/api/v1/activities</span><span class="api-auth">Auth: required</span></div>
@@ -190,7 +202,7 @@
     <section id="step4-dataflow">
       <div class="step-pill">Step 4 of 6 — Data Flow</div>
       <h2>Data flow</h2>
-      <p style="font-size:13px;color:#999;margin-bottom:0.75rem">Write path (blue) accepts the raw track and returns immediately; the read path (mint) serves leaderboards from Redis; matching happens fully async and never blocks the upload response.</p>
+      <p style="font-size:13px;color:#4A5873;margin-bottom:0.75rem">Write path (blue) accepts the raw track and returns immediately; the read path (mint) serves leaderboards from Redis; matching happens fully async and never blocks the upload response.</p>
 
       <div class="diagram-wrap" data-paths='{"read":{"boxes":["r-client","r-svc","r-cache","r-cass"],"arrows":["r1","r2","r3"]},"write":{"boxes":["w-client","w-svc","w-s3","w-pg"],"arrows":["w1","w2","w3"]}}'>
         <svg viewBox="0 0 740 220" xmlns="http://www.w3.org/2000/svg">
@@ -241,7 +253,7 @@
     <section id="step5-hld">
       <div class="step-pill">Step 5 of 6 — High-Level Design</div>
       <h2>High-level design</h2>
-      <p style="font-size:13px;color:#999;margin-bottom:0.75rem">Full system: upload, matching, leaderboard, and social feed paths together with every supporting component.</p>
+      <p style="font-size:13px;color:#4A5873;margin-bottom:0.75rem">Full system: upload, matching, leaderboard, and social feed paths together with every supporting component.</p>
 
       <div class="diagram-wrap">
         <svg viewBox="0 0 780 300" xmlns="http://www.w3.org/2000/svg">
@@ -324,7 +336,7 @@
     <section id="step6-deepdive-matching">
       <div class="step-pill">Step 6 of 6 — Deep Dives</div>
       <h2>Deep dive: segment matching algorithm</h2>
-      <p style="font-size:13px;color:#999;margin-bottom:0.75rem">Raw GPS points are noisy — matching snaps them onto a canonical segment path using a spatial index instead of comparing against every known segment.</p>
+      <p style="font-size:13px;color:#4A5873;margin-bottom:0.75rem">Raw GPS points are noisy — matching snaps them onto a canonical segment path using a spatial index instead of comparing against every known segment.</p>
 
       <div class="diagram-wrap">
         <svg viewBox="0 0 620 200" xmlns="http://www.w3.org/2000/svg">
@@ -359,7 +371,7 @@
 
     <section id="step6-deepdive-leaderboard">
       <h2>Deep dive: leaderboard update flow</h2>
-      <p style="font-size:13px;color:#999;margin-bottom:0.75rem">Once a segment effort is computed, the leaderboard must re-rank without ever making the athlete wait on it.</p>
+      <p style="font-size:13px;color:#4A5873;margin-bottom:0.75rem">Once a segment effort is computed, the leaderboard must re-rank without ever making the athlete wait on it.</p>
 
       <div class="diagram-wrap">
         <svg viewBox="0 0 700 150" xmlns="http://www.w3.org/2000/svg">
@@ -439,6 +451,8 @@
 
   </main>
   <script src="../../assets/nav.js"></script>
+  <script src="../../assets/chrome.js"></script>
+  <script src="../../assets/sheet.js"></script>
   <script src="../../assets/mindmap.js"></script>
 </body>
 </html>

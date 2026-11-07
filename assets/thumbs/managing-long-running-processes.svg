@@ -1,0 +1,21 @@
+<svg viewBox="0 0 700 130" xmlns="http://www.w3.org/2000/svg"><style>
+text{font-family:'IBM Plex Sans',system-ui,sans-serif;fill:#0B1F3F;text-anchor:middle;dominant-baseline:middle}
+.diag-label{font-size:12px;font-weight:600}.diag-sublabel,.diag-arrow-label{font-size:9.5px;fill:#4A5873}
+.diag-box{fill:#fff;stroke:#0B1F3F;stroke-width:1.5;rx:7px}.role-cache{fill:#FBF5E6;stroke:#B8892B}
+.role-async,.role-queue{fill:#FBF5E6;stroke:#9A5B13}.role-db{fill:#EEF2F9;stroke:#4A5873}
+.diag-arrow-path{fill:none;stroke:#66728A;stroke-width:1.5}
+</style>
+          <defs><marker id="lr1" markerWidth="8" markerHeight="8" refX="6" refY="3" orient="auto"><path d="M0,0 L6,3 L0,6 Z" fill="#8A6514"/></marker></defs>
+          <g><rect class="diag-box role-client" x="10" y="35" width="110" height="55"/><text class="diag-label" x="65" y="58">Client</text><text class="diag-sublabel" x="65" y="74">submits job</text></g>
+          <path class="diag-arrow-path" d="M120,62 L160,62" marker-end="url(#lr1)"/>
+          <g><rect class="diag-box" x="160" y="35" width="120" height="55"/><text class="diag-label" x="220" y="58" style="font-size:11px">API</text><text class="diag-sublabel" x="220" y="74">202 + job_id</text></g>
+          <path class="diag-arrow-path" d="M280,55 L320,40" marker-end="url(#lr1)"/>
+          <g><rect class="diag-box role-async" x="320" y="10" width="120" height="50"/><text class="diag-label" x="380" y="30">Queue</text><text class="diag-sublabel" x="380" y="46">SQS / Kafka</text></g>
+          <path class="diag-arrow-path" d="M440,35 L480,35" marker-end="url(#lr1)"/>
+          <g><rect class="diag-box role-async" x="480" y="10" width="130" height="50"/><text class="diag-label" x="545" y="30">Worker Pool</text><text class="diag-sublabel" x="545" y="46">idempotent exec</text></g>
+          <path class="diag-arrow-path" d="M545,60 L545,90 L280,90 L280,72" marker-end="url(#lr1)"/>
+          <text class="diag-sublabel" x="410" y="105" style="font-size:9px">writes status: running → done</text>
+          <g><rect class="diag-box role-db" x="160" y="95" width="120" height="0" style="display:none"/></g>
+          <path class="diag-arrow-path" d="M280,55 L320,75" marker-end="url(#lr1)" stroke-dasharray="4 3"/>
+          <g><rect class="diag-box role-db" x="320" y="70" width="130" height="50"/><text class="diag-label" x="385" y="92">Status Store</text><text class="diag-sublabel" x="385" y="108">queued/running/done</text></g>
+        </svg>

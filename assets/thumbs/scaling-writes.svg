@@ -1,0 +1,27 @@
+<svg id="shard-svg" viewBox="0 0 700 220" xmlns="http://www.w3.org/2000/svg"><style>
+text{font-family:'IBM Plex Sans',system-ui,sans-serif;fill:#0B1F3F;text-anchor:middle;dominant-baseline:middle}
+.diag-label{font-size:12px;font-weight:600}.diag-sublabel,.diag-arrow-label{font-size:9.5px;fill:#4A5873}
+.diag-box{fill:#fff;stroke:#0B1F3F;stroke-width:1.5;rx:7px}.role-cache{fill:#FBF5E6;stroke:#B8892B}
+.role-async,.role-queue{fill:#FBF5E6;stroke:#9A5B13}.role-db{fill:#EEF2F9;stroke:#4A5873}
+.diag-arrow-path{fill:none;stroke:#66728A;stroke-width:1.5}
+</style>
+          <defs><marker id="shArrow" markerWidth="8" markerHeight="8" refX="6" refY="3" orient="auto"><path d="M0,0 L6,3 L0,6 Z" fill="#8A6514"/></marker></defs>
+          <g><rect class="diag-box role-client" x="10" y="85" width="110" height="50"/><text class="diag-label" x="65" y="110" style="font-size:11px">Write(key)</text></g>
+          <path class="diag-arrow-path" d="M120,110 L165,110" marker-end="url(#shArrow)"/>
+          <g><rect class="diag-box role-cache" x="165" y="85" width="130" height="50"/><text class="diag-label" x="230" y="105" style="font-size:11px">hash(key) % 4</text><text class="diag-sublabel" x="230" y="121">router</text></g>
+
+          <g class="shard-box"><rect x="370" y="10" width="120" height="50" fill="#8A6514" stroke="#8A6514" stroke-width="1.5" rx="7"/><text class="diag-label" x="430" y="35" style="font-size:11px">Shard N1</text></g>
+          <g class="shard-box"><rect x="370" y="68" width="120" height="50" fill="#8A6514" stroke="#8A6514" stroke-width="1.5" rx="7"/><text class="diag-label" x="430" y="93" style="font-size:11px">Shard N2</text></g>
+          <g class="shard-box"><rect x="370" y="126" width="120" height="50" fill="#8A6514" stroke="#8A6514" stroke-width="1.5" rx="7"/><text class="diag-label" x="430" y="151" style="font-size:11px">Shard N3</text></g>
+          <g class="shard-box"><rect x="370" y="184" width="120" height="50" fill="#8A6514" stroke="#8A6514" stroke-width="1.5" rx="7"/><text class="diag-label" x="430" y="209" style="font-size:11px">Shard N4</text></g>
+
+          <path id="shard-path-N1" d="M295,105 C330,105 330,35 370,35" fill="none" stroke="none"/>
+          <path id="shard-path-N2" d="M295,108 C330,108 330,93 370,93" fill="none" stroke="none"/>
+          <path id="shard-path-N3" d="M295,112 C330,112 330,151 370,151" fill="none" stroke="none"/>
+          <path id="shard-path-N4" d="M295,115 C330,115 330,209 370,209" fill="none" stroke="none"/>
+
+          <path class="diag-arrow-path" d="M295,105 C330,105 330,35 365,35" marker-end="url(#shArrow)" stroke-dasharray="3 3" opacity="0.4"/>
+          <path class="diag-arrow-path" d="M295,108 C330,108 330,93 365,93" marker-end="url(#shArrow)" stroke-dasharray="3 3" opacity="0.4"/>
+          <path class="diag-arrow-path" d="M295,112 C330,112 330,151 365,151" marker-end="url(#shArrow)" stroke-dasharray="3 3" opacity="0.4"/>
+          <path class="diag-arrow-path" d="M295,115 C330,115 330,209 365,209" marker-end="url(#shArrow)" stroke-dasharray="3 3" opacity="0.4"/>
+        </svg>

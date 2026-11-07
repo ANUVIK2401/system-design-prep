@@ -1,0 +1,32 @@
+<svg viewBox="0 0 800 320" xmlns="http://www.w3.org/2000/svg"><style>
+text{font-family:'IBM Plex Sans',system-ui,sans-serif;fill:#0B1F3F;text-anchor:middle;dominant-baseline:middle}
+.diag-label{font-size:12px;font-weight:600}.diag-sublabel,.diag-arrow-label{font-size:9.5px;fill:#4A5873}
+.diag-box{fill:#fff;stroke:#0B1F3F;stroke-width:1.5;rx:7px}.role-cache{fill:#FBF5E6;stroke:#B8892B}
+.role-async,.role-queue{fill:#FBF5E6;stroke:#9A5B13}.role-db{fill:#EEF2F9;stroke:#4A5873}
+.diag-arrow-path{fill:none;stroke:#66728A;stroke-width:1.5}
+</style>
+          <defs><marker id="acHldArrow" markerWidth="8" markerHeight="8" refX="6" refY="3" orient="auto"><path d="M0,0 L6,3 L0,6 Z" fill="#8A6514"/></marker></defs>
+
+          <g><rect class="diag-box role-client" x="10" y="30" width="130" height="50"/><text class="diag-label" x="75" y="52" style="font-size:11px">Ad Server</text><text class="diag-sublabel" x="75" y="68" style="font-size:8.5px">fleet, stateless</text></g>
+          <path class="diag-arrow-path" d="M140,55 L175,55" marker-end="url(#acHldArrow)"/>
+          <g><rect class="diag-box role-async" x="175" y="30" width="130" height="50"/><text class="diag-label" x="240" y="52" style="font-size:11px">Kafka</text><text class="diag-sublabel" x="240" y="68" style="font-size:8.5px">event ingestion</text></g>
+          <path class="diag-arrow-path" d="M305,55 L340,55" marker-end="url(#acHldArrow)"/>
+          <g><rect class="diag-box role-async" x="340" y="30" width="150" height="50"/><text class="diag-label" x="415" y="52" style="font-size:11px">Stream Processor</text><text class="diag-sublabel" x="415" y="68" style="font-size:8.5px">windowed agg + dedup</text></g>
+          <path class="diag-arrow-path" d="M490,55 L525,55" marker-end="url(#acHldArrow)"/>
+          <g><rect class="diag-box role-db" x="525" y="30" width="150" height="50"/><text class="diag-label" x="600" y="52" style="font-size:11px">Aggregate Store</text><text class="diag-sublabel" x="600" y="68" style="font-size:8.5px">wide-column / time-series</text></g>
+          <path class="diag-arrow-path" d="M675,55 L710,55" marker-end="url(#acHldArrow)"/>
+          <g><rect class="diag-box role-client" x="710" y="30" width="80" height="50"/><text class="diag-label" x="750" y="52" style="font-size:11px">Dashboard</text><text class="diag-sublabel" x="750" y="68" style="font-size:8.5px">via query svc</text></g>
+
+          <path class="diag-arrow-path" d="M240,80 L240,130" marker-end="url(#acHldArrow)" stroke-dasharray="3 3"/>
+          <g><rect class="diag-box role-db" x="165" y="130" width="150" height="50"/><text class="diag-label" x="240" y="152" style="font-size:11px">Raw Event Log</text><text class="diag-sublabel" x="240" y="168" style="font-size:8.5px">S3 / cold storage</text></g>
+
+          <path class="diag-arrow-path" d="M315,155 L350,155" marker-end="url(#acHldArrow)"/>
+          <g><rect class="diag-box role-async" x="350" y="130" width="160" height="50"/><text class="diag-label" x="430" y="152" style="font-size:11px">Batch Reconciler</text><text class="diag-sublabel" x="430" y="168" style="font-size:8.5px">exact recompute</text></g>
+
+          <path class="diag-arrow-path" d="M430,130 L430,90 L600,90 L600,80" marker-end="url(#acHldArrow)" stroke-dasharray="3 3"/>
+          <text class="diag-sublabel" x="515" y="102" style="font-size:8.5px;fill:#8A6514">overwrites/corrects streaming numbers</text>
+
+          <g><rect class="diag-box" x="600" y="200" width="150" height="50"/><text class="diag-label" x="675" y="222" style="font-size:11px">Query Service</text><text class="diag-sublabel" x="675" y="238" style="font-size:8.5px">stats API + WS</text></g>
+          <path class="diag-arrow-path" d="M600,225 L525,80" marker-end="url(#acHldArrow)"/>
+          <path class="diag-arrow-path" d="M675,200 L750,80" marker-end="url(#acHldArrow)"/>
+        </svg>

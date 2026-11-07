@@ -1,0 +1,37 @@
+<svg viewBox="0 0 800 340" xmlns="http://www.w3.org/2000/svg"><style>
+text{font-family:'IBM Plex Sans',system-ui,sans-serif;fill:#0B1F3F;text-anchor:middle;dominant-baseline:middle}
+.diag-label{font-size:12px;font-weight:600}.diag-sublabel,.diag-arrow-label{font-size:9.5px;fill:#4A5873}
+.diag-box{fill:#fff;stroke:#0B1F3F;stroke-width:1.5;rx:7px}.role-cache{fill:#FBF5E6;stroke:#B8892B}
+.role-async,.role-queue{fill:#FBF5E6;stroke:#9A5B13}.role-db{fill:#EEF2F9;stroke:#4A5873}
+.diag-arrow-path{fill:none;stroke:#66728A;stroke-width:1.5}
+</style>
+          <defs><marker id="psHldArrow" markerWidth="8" markerHeight="8" refX="6" refY="3" orient="auto"><path d="M0,0 L6,3 L0,6 Z" fill="#8A6514"/></marker></defs>
+
+          <g><rect class="diag-box role-client" x="10" y="130" width="120" height="50"/><text class="diag-label" x="70" y="152" style="font-size:11px">Client/Merchant</text><text class="diag-sublabel" x="70" y="168" style="font-size:8.5px">idempotency key</text></g>
+
+          <path class="diag-arrow-path" d="M130,145 L165,145" marker-end="url(#psHldArrow)"/>
+          <g><rect class="diag-box" x="165" y="120" width="140" height="50"/><text class="diag-label" x="235" y="142" style="font-size:11px">Payment API</text><text class="diag-sublabel" x="235" y="158" style="font-size:8.5px">Idempotency-Key required</text></g>
+
+          <path class="diag-arrow-path" d="M305,145 L340,145" marker-end="url(#psHldArrow)"/>
+          <g><rect class="diag-box" x="340" y="120" width="150" height="50"/><text class="diag-label" x="415" y="142" style="font-size:11px">Payment Orchestration</text><text class="diag-sublabel" x="415" y="158" style="font-size:8.5px">pending → completed</text></g>
+
+          <path class="diag-arrow-path" d="M490,145 L525,145" marker-end="url(#psHldArrow)"/>
+          <g><rect class="diag-box role-db" x="525" y="120" width="130" height="50"/><text class="diag-label" x="590" y="142" style="font-size:11px">External Processor</text><text class="diag-sublabel" x="590" y="158" style="font-size:8.5px">card / bank rail</text></g>
+
+          <path class="diag-arrow-path" d="M590,170 L590,200 L490,200" marker-end="url(#psHldArrow)"/>
+          <g><rect class="diag-box role-async" x="340" y="180" width="150" height="46"/><text class="diag-label" x="415" y="203" style="font-size:11px">Webhook Ingestion</text><text class="diag-sublabel" x="415" y="217" style="font-size:8.5px">verify + dedup + enqueue</text></g>
+
+          <path class="diag-arrow-path" d="M340,203 L305,203" marker-end="url(#psHldArrow)"/>
+          <g><rect class="diag-box" x="165" y="180" width="140" height="46"/><text class="diag-label" x="235" y="203" style="font-size:11px">Payment Orchestration</text><text class="diag-sublabel" x="235" y="217" style="font-size:8.5px">applies confirmed state</text></g>
+
+          <path class="diag-arrow-path" d="M165,203 L130,203" marker-end="url(#psHldArrow)"/>
+          <g><rect class="diag-box role-db" x="10" y="180" width="120" height="46"/><text class="diag-label" x="70" y="203" style="font-size:11px">Ledger Service</text><text class="diag-sublabel" x="70" y="217" style="font-size:8.5px">Postgres, append-only</text></g>
+
+          <path class="diag-arrow-path" d="M70,226 L70,250 L130,250" marker-end="url(#psHldArrow)" stroke-dasharray="3 3"/>
+          <g><rect class="diag-box role-cache" x="130" y="250" width="130" height="46"/><text class="diag-label" x="195" y="273" style="font-size:11px">Balance View</text><text class="diag-sublabel" x="195" y="287" style="font-size:8.5px">derived, refreshed on write</text></g>
+
+          <path class="diag-arrow-path" d="M70,226 L70,300 L590,300 L590,170" marker-end="url(#psHldArrow)" stroke-dasharray="2 4"/>
+          <g><rect class="diag-box role-async" x="525" y="250" width="150" height="46"/><text class="diag-label" x="600" y="273" style="font-size:11px">Reconciliation Job</text><text class="diag-sublabel" x="600" y="287" style="font-size:8.5px">nightly, pulls statement API</text></g>
+
+          <path class="diag-arrow-path" d="M655,250 L655,145" marker-end="url(#psHldArrow)" stroke-dasharray="2 4"/>
+        </svg>

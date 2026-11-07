@@ -1,0 +1,36 @@
+<svg viewBox="0 0 760 280" xmlns="http://www.w3.org/2000/svg"><style>
+text{font-family:'IBM Plex Sans',system-ui,sans-serif;fill:#0B1F3F;text-anchor:middle;dominant-baseline:middle}
+.diag-label{font-size:12px;font-weight:600}.diag-sublabel,.diag-arrow-label{font-size:9.5px;fill:#4A5873}
+.diag-box{fill:#fff;stroke:#0B1F3F;stroke-width:1.5;rx:7px}.role-cache{fill:#FBF5E6;stroke:#B8892B}
+.role-async,.role-queue{fill:#FBF5E6;stroke:#9A5B13}.role-db{fill:#EEF2F9;stroke:#4A5873}
+.diag-arrow-path{fill:none;stroke:#66728A;stroke-width:1.5}
+</style>
+          <defs>
+            <marker id="sg1" markerWidth="8" markerHeight="8" refX="6" refY="3" orient="auto"><path d="M0,0 L6,3 L0,6 Z" fill="#8A6514"/></marker>
+            <marker id="sg2" markerWidth="8" markerHeight="8" refX="6" refY="3" orient="auto"><path d="M0,0 L6,3 L0,6 Z" fill="#8A6514"/></marker>
+          </defs>
+
+          <g><rect class="diag-box role-cache" x="300" y="15" width="160" height="50"/><text class="diag-label" x="380" y="38" style="font-size:11px">Saga Orchestrator</text><text class="diag-sublabel" x="380" y="54">coordinator</text></g>
+
+          <path class="diag-arrow-path" d="M340,65 C300,90 220,90 165,100" marker-end="url(#sg1)"/>
+          <g><rect class="diag-box" x="20" y="100" width="145" height="50"/><text class="diag-label" x="92" y="123" style="font-size:11px">Order Service</text><text class="diag-sublabel" x="92" y="139">local txn 1</text></g>
+
+          <path class="diag-arrow-path" d="M365,65 C365,90 320,90 300,100" marker-end="url(#sg1)"/>
+          <g><rect class="diag-box" x="215" y="100" width="150" height="50"/><text class="diag-label" x="290" y="123" style="font-size:11px">Payment Service</text><text class="diag-sublabel" x="290" y="139">local txn 2</text></g>
+
+          <path class="diag-arrow-path" d="M400,65 C440,90 470,90 480,100" marker-end="url(#sg2)"/>
+          <g><rect class="diag-box" x="415" y="100" width="150" height="50" stroke="#8A6514"/><text class="diag-label" x="490" y="123" style="font-size:11px">Inventory Service</text><text class="diag-sublabel" x="490" y="139" style="fill:#8A6514">FAILS — out of stock</text></g>
+
+          <path class="diag-arrow-path" d="M460,40 L640,40" marker-end="url(#sg1)" stroke-dasharray="3 3"/>
+          <g><rect class="diag-box role-cache" x="640" y="15" width="105" height="50"/><text class="diag-label" x="692" y="38" style="font-size:11px">Confirm</text><text class="diag-sublabel" x="692" y="54">happy path</text></g>
+
+          <text class="diag-sublabel" x="490" y="170" style="font-size:10px;fill:#8A6514">FAILURE → orchestrator runs compensations in reverse order</text>
+
+          <path class="diag-arrow-path" d="M490,150 C490,190 350,190 290,190" marker-end="url(#sg2)"/>
+          <g><rect class="diag-box role-async" x="215" y="190" width="150" height="45"/><text class="diag-label" x="290" y="208" style="font-size:11px">Refund payment</text><text class="diag-sublabel" x="290" y="224">compensate txn 2</text></g>
+
+          <path class="diag-arrow-path" d="M215,212 C150,212 100,212 92,190" marker-end="url(#sg2)"/>
+          <g><rect class="diag-box role-async" x="20" y="190" width="145" height="45"/><text class="diag-label" x="92" y="208" style="font-size:11px">Cancel order</text><text class="diag-sublabel" x="92" y="224">compensate txn 1</text></g>
+
+          <path class="diag-arrow-path" d="M92,190 C92,150 200,150 340,68" marker-end="url(#sg2)" stroke-dasharray="3 3"/>
+        </svg>

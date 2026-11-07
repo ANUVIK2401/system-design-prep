@@ -7,6 +7,18 @@
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link rel="stylesheet" href="../../assets/style.css">
+        <!-- site-head -->
+  <meta name="description" content="Tests whether you know that exact top-K at global scale is a myth — the real design is a probabilistic counting structure feeding a bounded heap, not a giant counter-per-video table.">
+  <meta name="theme-color" content="#0B1F3F">
+  <link rel="canonical" href="https://anuvik2401.github.io/system-design-prep/topics/questions/youtube-top-k.html">
+  <link rel="icon" href="../../assets/favicon.svg" type="image/svg+xml">
+  <meta property="og:type" content="website">
+  <meta property="og:title" content="Design Top-K Trending Videos (YouTube) — SD Prep">
+  <meta property="og:description" content="Tests whether you know that exact top-K at global scale is a myth — the real design is a probabilistic counting structure feeding a bounded heap, not a giant counter-per-video table.">
+  <meta property="og:url" content="https://anuvik2401.github.io/system-design-prep/topics/questions/youtube-top-k.html">
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,600;12..96,700&amp;family=IBM+Plex+Mono:wght@500&amp;family=IBM+Plex+Sans:wght@400;500;600&amp;display=swap">
+  <link rel="stylesheet" href="../../assets/chrome.css">
+  <!-- /site-head -->
 </head>
 <body>
   <aside id="sidebar"></aside>
@@ -100,7 +112,7 @@
     <section id="step2-entities">
       <div class="step-pill">Step 2 of 6 — Core Entities</div>
       <h2>Core entities</h2>
-      <p style="font-size:13px;color:#999;margin-bottom:0.75rem">The raw event lives briefly in Kafka, the running counts live in an ephemeral probabilistic structure in Redis, and only the periodic winner snapshot is durably persisted.</p>
+      <p style="font-size:13px;color:#4A5873;margin-bottom:0.75rem">The raw event lives briefly in Kafka, the running counts live in an ephemeral probabilistic structure in Redis, and only the periodic winner snapshot is durably persisted.</p>
 
       <div class="entity-grid">
         <div class="entity-box">
@@ -142,7 +154,7 @@
     <section id="step3-api">
       <div class="step-pill">Step 3 of 6 — API / Interface</div>
       <h2>API design</h2>
-      <p style="font-size:13px;color:#999;margin-bottom:0.75rem">Ingestion is fire-and-forget (Kafka producer, not a synchronous REST call); reads are cheap GETs against the snapshot, with an optional WebSocket for a live-updating trending rail.</p>
+      <p style="font-size:13px;color:#4A5873;margin-bottom:0.75rem">Ingestion is fire-and-forget (Kafka producer, not a synchronous REST call); reads are cheap GETs against the snapshot, with an optional WebSocket for a live-updating trending rail.</p>
 
       <div class="api-card">
         <div class="api-line"><span class="api-method post">POST</span><span class="api-path">/api/v1/views/track</span><span class="api-auth">Auth: service-to-service</span></div>
@@ -182,7 +194,7 @@
     <section id="step4-dataflow">
       <div class="step-pill">Step 4 of 6 — Data Flow</div>
       <h2>Data flow</h2>
-      <p style="font-size:13px;color:#999;margin-bottom:0.75rem">The write path (amber) streams every view event through Kafka into the sketch asynchronously; the read path (mint) only ever touches the periodic snapshot, never the live sketch.</p>
+      <p style="font-size:13px;color:#4A5873;margin-bottom:0.75rem">The write path (amber) streams every view event through Kafka into the sketch asynchronously; the read path (mint) only ever touches the periodic snapshot, never the live sketch.</p>
 
       <div class="diagram-wrap" data-paths='{"write":{"boxes":["w-client","w-kafka","w-counter","w-sketch"],"arrows":["w1","w2","w3"]},"read":{"boxes":["r-client","r-query","r-snapshot"],"arrows":["r1","r2"]}}'>
         <svg viewBox="0 0 740 220" xmlns="http://www.w3.org/2000/svg">
@@ -231,7 +243,7 @@
     <section id="step5-hld">
       <div class="step-pill">Step 5 of 6 — High-Level Design</div>
       <h2>High-level design</h2>
-      <p style="font-size:13px;color:#999;margin-bottom:0.75rem">View events stream in, get pre-aggregated, increment a Count-Min Sketch, and feed a bounded min-heap; a periodic job snapshots the heap to durable storage for the query service to serve.</p>
+      <p style="font-size:13px;color:#4A5873;margin-bottom:0.75rem">View events stream in, get pre-aggregated, increment a Count-Min Sketch, and feed a bounded min-heap; a periodic job snapshots the heap to durable storage for the query service to serve.</p>
 
       <div class="diagram-wrap">
         <svg viewBox="0 0 800 300" xmlns="http://www.w3.org/2000/svg">
@@ -309,8 +321,8 @@
     <section id="step6-deepdive-cms">
       <div class="step-pill">Step 6 of 6 — Deep Dives</div>
       <h2>Deep dive: Count-Min Sketch mechanics</h2>
-      <p style="font-size:13px;color:#999;margin-bottom:0.5rem">A view event is hashed by <strong>d</strong> independent hash functions, each mapping to one column in its own row of a <strong>d × w</strong> counter matrix. One event increments <strong>d</strong> cells at once — one per row.</p>
-      <p style="font-size:13px;color:#999;margin-bottom:0.75rem">To estimate a count, hash it the same way and take the <strong>minimum</strong> across those <strong>d</strong> cells — collisions can only inflate a cell, never deflate it, so the min is the tightest available upper bound.</p>
+      <p style="font-size:13px;color:#4A5873;margin-bottom:0.5rem">A view event is hashed by <strong>d</strong> independent hash functions, each mapping to one column in its own row of a <strong>d × w</strong> counter matrix. One event increments <strong>d</strong> cells at once — one per row.</p>
+      <p style="font-size:13px;color:#4A5873;margin-bottom:0.75rem">To estimate a count, hash it the same way and take the <strong>minimum</strong> across those <strong>d</strong> cells — collisions can only inflate a cell, never deflate it, so the min is the tightest available upper bound.</p>
       <div class="diagram-wrap">
         <svg viewBox="0 0 520 300" xmlns="http://www.w3.org/2000/svg" id="cmsMatrix">
           <defs><marker id="cmsArrow" markerWidth="8" markerHeight="8" refX="6" refY="3" orient="auto"><path d="M0,0 L6,3 L0,6 Z" fill="var(--accent)"/></marker></defs>
@@ -379,7 +391,7 @@
             var ce = cellAt(r, col);
             ce.text.textContent = counts[r][col];
             ce.rect.style.transition = 'fill 0.3s ease, stroke 0.3s ease';
-            ce.rect.setAttribute('fill', '#08200f');
+            ce.rect.setAttribute('fill', '#FBF5E6');
             ce.rect.setAttribute('stroke', 'var(--accent)');
             setTimeout(function(){
               ce.rect.setAttribute('fill', 'var(--surface)');
@@ -414,7 +426,7 @@
 
     <section id="step6-deepdive-heavyhitters">
       <h2>Deep dive: heavy hitters — exact vs approximate top-K</h2>
-      <ul style="font-size:13px;color:#999;margin:0 0 0.75rem;padding-left:1.1rem">
+      <ul style="font-size:13px;color:#4A5873;margin:0 0 0.75rem;padding-left:1.1rem">
         <li><strong>Exact top-K</strong>: full count per video + full sort.</li>
         <li>Falls apart at hundreds of millions of videos.</li>
         <li><strong>Approximate</strong>: fixed sketch size + fixed-size heap — bounded memory.</li>
@@ -471,7 +483,7 @@
 
     <section id="step6-deepdive-windowed">
       <h2>Deep dive: windowed vs all-time top-K</h2>
-      <p style="font-size:13px;color:#999;margin-bottom:0.75rem">"Trending in the last hour" and "most-viewed of all time" are different questions that need different data structures — a single persistent sketch can't cheaply answer both.</p>
+      <p style="font-size:13px;color:#4A5873;margin-bottom:0.75rem">"Trending in the last hour" and "most-viewed of all time" are different questions that need different data structures — a single persistent sketch can't cheaply answer both.</p>
 
       <div class="diagram-wrap">
         <svg viewBox="0 0 740 230" xmlns="http://www.w3.org/2000/svg">
@@ -556,6 +568,8 @@
 
   </main>
   <script src="../../assets/nav.js"></script>
+  <script src="../../assets/chrome.js"></script>
+  <script src="../../assets/sheet.js"></script>
   <script src="../../assets/mindmap.js"></script>
 </body>
 </html>

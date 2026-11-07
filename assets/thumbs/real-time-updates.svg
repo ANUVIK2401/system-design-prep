@@ -1,0 +1,35 @@
+<svg viewBox="0 0 740 240" xmlns="http://www.w3.org/2000/svg"><style>
+text{font-family:'IBM Plex Sans',system-ui,sans-serif;fill:#0B1F3F;text-anchor:middle;dominant-baseline:middle}
+.diag-label{font-size:12px;font-weight:600}.diag-sublabel,.diag-arrow-label{font-size:9.5px;fill:#4A5873}
+.diag-box{fill:#fff;stroke:#0B1F3F;stroke-width:1.5;rx:7px}.role-cache{fill:#FBF5E6;stroke:#B8892B}
+.role-async,.role-queue{fill:#FBF5E6;stroke:#9A5B13}.role-db{fill:#EEF2F9;stroke:#4A5873}
+.diag-arrow-path{fill:none;stroke:#66728A;stroke-width:1.5}
+</style>
+          <defs>
+            <marker id="rtu1" markerWidth="8" markerHeight="8" refX="6" refY="3" orient="auto"><path d="M0,0 L6,3 L0,6 Z" fill="#8A6514"/></marker>
+            <marker id="rtu2" markerWidth="8" markerHeight="8" refX="6" refY="3" orient="auto"><path d="M0,0 L6,3 L0,6 Z" fill="#8A6514"/></marker>
+          </defs>
+
+          <text class="diag-sublabel" x="170" y="14" style="font-size:10px;fill:#8A6514">POLLING — N short-lived connections</text>
+          <g><rect class="diag-box role-client" x="10" y="25" width="90" height="40"/><text class="diag-label" x="55" y="45" style="font-size:11px">Client</text></g>
+          <path class="diag-arrow-path" d="M100,38 L185,38" marker-end="url(#rtu1)"/>
+          <text class="diag-sublabel" x="142" y="30" style="font-size:9px">GET (empty)</text>
+          <g><rect class="diag-box" x="185" y="20" width="120" height="50"/><text class="diag-label" x="245" y="48" style="font-size:11px">Server</text></g>
+          <path class="diag-arrow-path" d="M100,55 L185,55" marker-end="url(#rtu1)"/>
+          <text class="diag-sublabel" x="142" y="68" style="font-size:9px">GET (empty)</text>
+          <path class="diag-arrow-path" d="M100,72 L185,72" marker-end="url(#rtu1)"/>
+          <text class="diag-sublabel" x="142" y="84" style="font-size:9px">GET (data!)</text>
+          <text class="diag-sublabel" x="245" y="90" style="font-size:9px;fill:#8A6514">connection closes after every reply</text>
+
+          <text class="diag-sublabel" x="170" y="130" style="font-size:10px;fill:#8A6514">WEBSOCKET — one long-lived connection</text>
+          <g><rect class="diag-box role-client" x="10" y="145" width="90" height="40"/><text class="diag-label" x="55" y="165" style="font-size:11px">Client</text></g>
+          <path class="diag-arrow-path" d="M100,158 L185,158" marker-end="url(#rtu2)"/>
+          <text class="diag-sublabel" x="142" y="150" style="font-size:9px">Upgrade: websocket</text>
+          <g><rect class="diag-box role-cache" x="185" y="140" width="160" height="50"/><text class="diag-label" x="265" y="162" style="font-size:11px">Server</text><text class="diag-sublabel" x="265" y="178">socket held open</text></g>
+          <path class="diag-arrow-path" d="M345,158 C380,158 380,158 405,158" marker-end="url(#rtu2)" stroke-dasharray="3 3"/>
+          <text class="diag-sublabel" x="420" y="150" style="font-size:9px;text-anchor:start">push 1</text>
+          <path class="diag-arrow-path" d="M345,175 C380,185 380,185 405,185" marker-end="url(#rtu2)" stroke-dasharray="3 3"/>
+          <text class="diag-sublabel" x="420" y="190" style="font-size:9px;text-anchor:start">push 2 (no new request needed)</text>
+
+          <text x="520" y="35" style="font-size:42px;fill:#8A6514;font-family:Inter">≫</text>
+        </svg>

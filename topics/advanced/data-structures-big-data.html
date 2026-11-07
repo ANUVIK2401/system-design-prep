@@ -7,6 +7,18 @@
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link rel="stylesheet" href="../../assets/style.css">
+        <!-- site-head -->
+  <meta name="description" content="Trading a small, known error rate for huge memory savings — Bloom filters, HyperLogLog, Count-Min Sketch.">
+  <meta name="theme-color" content="#0B1F3F">
+  <link rel="canonical" href="https://anuvik2401.github.io/system-design-prep/topics/advanced/data-structures-big-data.html">
+  <link rel="icon" href="../../assets/favicon.svg" type="image/svg+xml">
+  <meta property="og:type" content="website">
+  <meta property="og:title" content="Probabilistic Data Structures — SD Prep">
+  <meta property="og:description" content="Trading a small, known error rate for huge memory savings — Bloom filters, HyperLogLog, Count-Min Sketch.">
+  <meta property="og:url" content="https://anuvik2401.github.io/system-design-prep/topics/advanced/data-structures-big-data.html">
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,600;12..96,700&amp;family=IBM+Plex+Mono:wght@500&amp;family=IBM+Plex+Sans:wght@400;500;600&amp;display=swap">
+  <link rel="stylesheet" href="../../assets/chrome.css">
+  <!-- /site-head -->
 </head>
 <body>
   <aside id="sidebar"></aside>
@@ -90,14 +102,14 @@
             <line x1="540" y1="74" x2="540" y2="110"/><line x1="560" y1="74" x2="560" y2="110"/><line x1="580" y1="74" x2="580" y2="110"/>
             <line x1="600" y1="74" x2="600" y2="110"/><line x1="620" y1="74" x2="620" y2="110"/>
           </g>
-          <g data-tip="Bit flipped to 1 by hash function h1 of 'alice@...'"><rect x="280" y="74" width="20" height="36" fill="#08200f"/><text x="290" y="97" text-anchor="middle" font-size="11" fill="var(--accent)" font-family="Inter,sans-serif">1</text></g>
-          <g data-tip="Bit flipped to 1 by hash function h2 of 'bob@...'"><rect x="300" y="74" width="20" height="36" fill="#0a1830"/><text x="310" y="97" text-anchor="middle" font-size="11" fill="var(--blue)" font-family="Inter,sans-serif">1</text></g>
-          <g data-tip="Bit flipped to 1 by hash function h2 of 'alice@...'"><rect x="320" y="74" width="20" height="36" fill="#08200f"/><text x="330" y="97" text-anchor="middle" font-size="11" fill="var(--accent)" font-family="Inter,sans-serif">1</text></g>
-          <g data-tip="Bit flipped to 1 by hash function h3 of 'bob@...'"><rect x="400" y="74" width="20" height="36" fill="#0a1830"/><text x="410" y="97" text-anchor="middle" font-size="11" fill="var(--blue)" font-family="Inter,sans-serif">1</text></g>
-          <g data-tip="Bit flipped to 1 by hash function h3 of 'alice@...'"><rect x="360" y="74" width="20" height="36" fill="#08200f"/><text x="370" y="97" text-anchor="middle" font-size="11" fill="var(--accent)" font-family="Inter,sans-serif">1</text></g>
+          <g data-tip="Bit flipped to 1 by hash function h1 of 'alice@...'"><rect x="280" y="74" width="20" height="36" fill="#FBF5E6"/><text x="290" y="97" text-anchor="middle" font-size="11" fill="var(--accent)" font-family="Inter,sans-serif">1</text></g>
+          <g data-tip="Bit flipped to 1 by hash function h2 of 'bob@...'"><rect x="300" y="74" width="20" height="36" fill="#EEF2F9"/><text x="310" y="97" text-anchor="middle" font-size="11" fill="var(--blue)" font-family="Inter,sans-serif">1</text></g>
+          <g data-tip="Bit flipped to 1 by hash function h2 of 'alice@...'"><rect x="320" y="74" width="20" height="36" fill="#FBF5E6"/><text x="330" y="97" text-anchor="middle" font-size="11" fill="var(--accent)" font-family="Inter,sans-serif">1</text></g>
+          <g data-tip="Bit flipped to 1 by hash function h3 of 'bob@...'"><rect x="400" y="74" width="20" height="36" fill="#EEF2F9"/><text x="410" y="97" text-anchor="middle" font-size="11" fill="var(--blue)" font-family="Inter,sans-serif">1</text></g>
+          <g data-tip="Bit flipped to 1 by hash function h3 of 'alice@...'"><rect x="360" y="74" width="20" height="36" fill="#FBF5E6"/><text x="370" y="97" text-anchor="middle" font-size="11" fill="var(--accent)" font-family="Inter,sans-serif">1</text></g>
 
           <g data-tip="Querying key 'carol@example.com' — all 3 of its hash positions happen to already be set to 1 by alice and bob, so the filter reports a false positive even though carol was never inserted">
-            <rect x="10" y="180" width="170" height="46" rx="6" fill="#221a00" stroke="var(--amber)"/>
+            <rect x="10" y="180" width="170" height="46" rx="6" fill="#FBF5E6" stroke="var(--amber)"/>
             <text x="95" y="200" text-anchor="middle" font-size="11" fill="var(--amber)" font-family="Inter,sans-serif">query: "carol@..."</text>
             <text x="95" y="216" text-anchor="middle" font-size="9" fill="var(--amber)" font-family="Inter,sans-serif">all 3 bits already 1 → false positive</text>
           </g>
@@ -227,5 +239,6 @@
 
   </main>
   <script src="../../assets/nav.js"></script>
+  <script src="../../assets/chrome.js"></script>
 </body>
 </html>

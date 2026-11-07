@@ -1,0 +1,48 @@
+<svg viewBox="0 0 740 240" xmlns="http://www.w3.org/2000/svg"><style>
+text{font-family:'IBM Plex Sans',system-ui,sans-serif;fill:#0B1F3F;text-anchor:middle;dominant-baseline:middle}
+.diag-label{font-size:12px;font-weight:600}.diag-sublabel,.diag-arrow-label{font-size:9.5px;fill:#4A5873}
+.diag-box{fill:#fff;stroke:#0B1F3F;stroke-width:1.5;rx:7px}.role-cache{fill:#FBF5E6;stroke:#B8892B}
+.role-async,.role-queue{fill:#FBF5E6;stroke:#9A5B13}.role-db{fill:#EEF2F9;stroke:#4A5873}
+.diag-arrow-path{fill:none;stroke:#66728A;stroke-width:1.5}
+</style>
+          <defs>
+            <marker id="agArrow" markerWidth="8" markerHeight="8" refX="6" refY="3" orient="auto"><path d="M0,0 L6,3 L0,6 Z" fill="#8A6514"/></marker>
+            <marker id="agArrowRed" markerWidth="8" markerHeight="8" refX="6" refY="3" orient="auto"><path d="M0,0 L6,3 L0,6 Z" fill="#8A6514"/></marker>
+          </defs>
+
+          <g>
+            <rect class="diag-box role-client" x="15" y="85" width="100" height="56"/>
+            <text class="diag-label" x="65" y="108" style="font-size:11px">Client</text>
+            <text class="diag-sublabel" x="65" y="125" style="font-size:9px">+ JWT</text>
+          </g>
+          <path class="diag-arrow-path" d="M115,113 L165,113" marker-end="url(#agArrow)"/>
+
+          <g>
+            <rect class="diag-box role-cache" x="165" y="40" width="180" height="150"/>
+            <text class="diag-label" x="255" y="65" style="font-size:11px;font-weight:600">API Gateway</text>
+          </g>
+          <text x="180" y="90" font-size="10" fill="#33415C" font-family="Inter,sans-serif">1. Auth check (JWT)</text>
+          <text x="180" y="108" font-size="10" fill="#33415C" font-family="Inter,sans-serif">2. Rate limit check</text>
+          <text x="180" y="126" font-size="10" fill="#33415C" font-family="Inter,sans-serif">3. Route by path</text>
+          <text x="180" y="144" font-size="10" fill="#33415C" font-family="Inter,sans-serif">4. Transform request</text>
+
+          <path class="diag-arrow-path" d="M255,40 L255,15 L40,15 L40,85" marker-end="url(#agArrowRed)" stroke="#8A6514" stroke-dasharray="3 3"/>
+          <text x="100" y="10" font-size="9" fill="#8A6514" font-family="Inter,sans-serif">401 / 429 rejected here — never reaches backends</text>
+
+          <path class="diag-arrow-path" d="M345,80 L420,40" marker-end="url(#agArrow)"/>
+          <path class="diag-arrow-path" d="M345,115 L420,115" marker-end="url(#agArrow)"/>
+          <path class="diag-arrow-path" d="M345,150 L420,190" marker-end="url(#agArrow)"/>
+
+          <g>
+            <rect class="diag-box role-db" x="420" y="15" width="150" height="50"/>
+            <text class="diag-label" x="495" y="35" style="font-size:11px">User Service</text>
+          </g>
+          <g>
+            <rect class="diag-box role-db" x="420" y="90" width="150" height="50"/>
+            <text class="diag-label" x="495" y="110" style="font-size:11px">Order Service</text>
+          </g>
+          <g>
+            <rect class="diag-box role-db" x="420" y="165" width="150" height="50"/>
+            <text class="diag-label" x="495" y="185" style="font-size:11px">Payment Service</text>
+          </g>
+        </svg>

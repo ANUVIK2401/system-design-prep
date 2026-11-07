@@ -1,0 +1,34 @@
+<svg viewBox="0 0 780 320" xmlns="http://www.w3.org/2000/svg"><style>
+text{font-family:'IBM Plex Sans',system-ui,sans-serif;fill:#0B1F3F;text-anchor:middle;dominant-baseline:middle}
+.diag-label{font-size:12px;font-weight:600}.diag-sublabel,.diag-arrow-label{font-size:9.5px;fill:#4A5873}
+.diag-box{fill:#fff;stroke:#0B1F3F;stroke-width:1.5;rx:7px}.role-cache{fill:#FBF5E6;stroke:#B8892B}
+.role-async,.role-queue{fill:#FBF5E6;stroke:#9A5B13}.role-db{fill:#EEF2F9;stroke:#4A5873}
+.diag-arrow-path{fill:none;stroke:#66728A;stroke-width:1.5}
+</style>
+          <defs><marker id="chHldArrow" markerWidth="8" markerHeight="8" refX="6" refY="3" orient="auto"><path d="M0,0 L6,3 L0,6 Z" fill="#8A6514"/></marker></defs>
+
+          <g><rect class="diag-box role-client" x="10" y="20" width="120" height="46"/><text class="diag-label" x="70" y="47" style="font-size:11px">Client (White)</text></g>
+          <g><rect class="diag-box role-client" x="10" y="80" width="120" height="46"/><text class="diag-label" x="70" y="107" style="font-size:11px">Client (Black)</text></g>
+
+          <path class="diag-arrow-path" d="M130,43 L165,60" marker-end="url(#chHldArrow)"/>
+          <path class="diag-arrow-path" d="M130,103 L165,80" marker-end="url(#chHldArrow)"/>
+          <g><rect class="diag-box" x="165" y="55" width="150" height="50"/><text class="diag-label" x="240" y="77" style="font-size:11px">Game Server</text><text class="diag-sublabel" x="240" y="93" style="font-size:8.5px">sticky session</text></g>
+
+          <path class="diag-arrow-path" d="M315,80 L350,80" marker-end="url(#chHldArrow)"/>
+          <g><rect class="diag-box" x="350" y="55" width="150" height="50"/><text class="diag-label" x="425" y="82" style="font-size:11px">Move Validation Svc</text></g>
+
+          <path class="diag-arrow-path" d="M425,105 L425,145" marker-end="url(#chHldArrow)"/>
+          <g><rect class="diag-box role-cache" x="350" y="145" width="150" height="50"/><text class="diag-label" x="425" y="167" style="font-size:11px">Game State Store</text><text class="diag-sublabel" x="425" y="183" style="font-size:8.5px">Redis, per-game key</text></g>
+
+          <path class="diag-arrow-path" d="M500,170 L535,170" marker-end="url(#chHldArrow)" stroke-dasharray="3 3"/>
+          <g><rect class="diag-box role-db" x="535" y="145" width="130" height="50"/><text class="diag-label" x="600" y="167" style="font-size:11px">Move Log DB</text><text class="diag-sublabel" x="600" y="183" style="font-size:8.5px">Postgres, append-only</text></g>
+
+          <path class="diag-arrow-path" d="M425,195 L425,225" marker-end="url(#chHldArrow)" stroke-dasharray="3 3"/>
+          <g><rect class="diag-box role-async" x="350" y="225" width="150" height="46"/><text class="diag-label" x="425" y="248" style="font-size:11px">Spectator Fan-out</text></g>
+          <path class="diag-arrow-path" d="M350,248 L200,248" marker-end="url(#chHldArrow)"/>
+          <g><rect class="diag-box role-client" x="60" y="225" width="130" height="46"/><text class="diag-label" x="125" y="248" style="font-size:11px">Spectators</text></g>
+
+          <g><rect class="diag-box role-async" x="600" y="20" width="150" height="46"/><text class="diag-label" x="675" y="47" style="font-size:11px">Matchmaking Svc</text></g>
+          <path class="diag-arrow-path" d="M600,43 L500,68" marker-end="url(#chHldArrow)" stroke-dasharray="3 3"/>
+          <text class="diag-sublabel" x="675" y="70" style="font-size:8.5px">assigns game_id, hands off to a Game Server</text>
+        </svg>
